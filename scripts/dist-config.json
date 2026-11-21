@@ -1,0 +1,222 @@
+{
+  "inbound_ssh": {
+    "enable": false,
+    "port": 2222
+  },
+  "agent": {
+    "enable": true,
+    "port": 18086,
+    "token": ""
+  },
+  "ui": {
+    "close_to_tray": true,
+    "start_minimized": false,
+    "scrollback_lines": 5000,
+    "font_size": 15,
+    "split": 1,
+    "active_pane": 0,
+    "pane_channels": []
+  },
+  "default": {
+    "username": "root",
+    "password": "",
+    "buffer_size": 1048576,
+    "log_enabled": false,
+    "work_dir": "",
+    "log_dir": "",
+    "auto_discover_serial": true
+  },
+  "boards": [
+    {
+      "name": "loop1",
+      "serial_device": "loop:ai",
+      "baudrate": 115200,
+      "databits": 8,
+      "parity": "N",
+      "stopbits_x10": 10,
+      "flowcontrol": "none",
+      "dtr": true,
+      "rts": true,
+      "line_ending": "crlf",
+      "encoding": "utf-8",
+      "auto_open": true,
+      "timestamp": false,
+      "buffer_size": 262144,
+      "log_enabled": true,
+      "log_dir": "",
+      "password": "",
+      "username": "root",
+      "buttons": []
+    },
+    {
+      "name": "ztl",
+      "serial_device": "COM3",
+      "baudrate": 1500000,
+      "databits": 8,
+      "parity": "N",
+      "stopbits_x10": 10,
+      "flowcontrol": "none",
+      "dtr": true,
+      "rts": true,
+      "line_ending": "lf",
+      "encoding": "utf-8",
+      "auto_open": false,
+      "timestamp": false,
+      "buffer_size": 0,
+      "log_enabled": true,
+      "log_dir": "",
+      "password": "",
+      "username": "root",
+      "buttons": []
+    },
+    {
+      "name": "ok3568",
+      "serial_device": "COM5",
+      "baudrate": 1500000,
+      "databits": 8,
+      "parity": "N",
+      "stopbits_x10": 10,
+      "flowcontrol": "none",
+      "dtr": false,
+      "rts": false,
+      "line_ending": "lf",
+      "encoding": "utf-8",
+      "auto_open": false,
+      "timestamp": false,
+      "buffer_size": 0,
+      "log_enabled": true,
+      "log_dir": "",
+      "password": "",
+      "username": "root",
+      "buttons": [
+        {
+          "id": "reboot",
+          "label": "重启",
+          "enable": true,
+          "backend": "script",
+          "script": "--lua\nlocal RELAY = 'relay1'\nlocal CH = 1\nlocal OFF_SEC = 1.2\nprint('REBOOT: power off ' .. OFF_SEC .. 's')\nrelay_mode(RELAY, CH, 'hold_off', 0)\nsleep(OFF_SEC)\nrelay_mode(RELAY, CH, 'hold_on', 0)\nprint('REBOOT: power on')"
+        },
+        {
+          "id": "power_on",
+          "label": "上电",
+          "enable": true,
+          "backend": "relay",
+          "relay": "relay1",
+          "channel": 1,
+          "mode": "hold_on",
+          "hold_seconds": 1,
+          "polarity_inverted": false
+        },
+        {
+          "id": "power_off",
+          "label": "下电",
+          "enable": true,
+          "backend": "relay",
+          "relay": "relay1",
+          "channel": 1,
+          "mode": "hold_off",
+          "hold_seconds": 1,
+          "polarity_inverted": false
+        },
+        {
+          "id": "enter_uboot",
+          "label": "进U-Boot",
+          "enable": true,
+          "backend": "script",
+          "script": "--lua\nlocal RELAY = 'relay1'\nlocal CH = 1\nlocal OFF_SEC = 1.2\nprint('UBOOT: power off ' .. OFF_SEC .. 's')\nrelay_mode(RELAY, CH, 'hold_off', 0)\nsleep(OFF_SEC)\nlocal mark = channel.mark()\nprint('UBOOT: power on, hammering Ctrl+C + Space')\nrelay_mode(RELAY, CH, 'hold_on', 0)\nlocal out = ''\nlocal hit = false\nfor i = 1, 360 do\n  channel.send('<ctrl+c>')\n  channel.send('<space>')\n  local d = channel.read_since(mark)\n  if d and #d > 0 then out = d end\n  local lo = string.lower(out)\n  if string.find(lo, 'u-boot', 1, true) or string.find(out, '=>', 1, true) then\n    hit = true\n    break\n  end\n  msleep(40)\nend\nlocal tail = channel.wait_idle(mark, 250, 2) or ''\nif #tail > 0 then out = tail end\nif #out > 0 then print(out) end\nif hit then\n  print('UBOOT: entered')\nelse\n  print('UBOOT: no U-Boot prompt seen')\nend"
+        },
+        {
+          "id": "auto_login",
+          "label": "自动登录",
+          "enable": true,
+          "backend": "script",
+          "script": "--lua\nlocal RELAY = 'relay1'\nlocal CH = 1\nlocal USER = 'root'\nlocal PASS = 'YOUR_PASSWORD'\n\nlocal function boot()\n  relay_mode(RELAY, CH, 'hold_off', 0)\n  sleep(1.2)\n  relay_mode(RELAY, CH, 'hold_on', 0)\nend\n\nboot()\nlocal m = channel.mark()\nlocal text, why = channel.wait_mark(m, 'login:', 30)\nif not text then\n  channel.send('<enter>')\n  local m0 = channel.mark()\n  msleep(400)\n  local probe = channel.wait_idle(m0, 300, 4) or ''\n  if probe:find('root@') or probe:find('#') then\n    print('AUTO_LOGIN: already at shell')\n    return\n  end\n  error('AUTO_LOGIN: 30 秒内没有出现 login:')\nend\nprint('AUTO_LOGIN: 检测到 login 提示')\nchannel.write(USER .. '\\r\\n')\nlocal mp = channel.mark()\nlocal ptxt = channel.wait_mark(mp, 'assword:', 12)\nif not ptxt then error('AUTO_LOGIN: 输入 root 后没有出现 password:') end\nchannel.write(PASS .. '\\r\\n')\nlocal m1 = channel.mark()\nlocal out = channel.wait_idle(m1, 350, 8) or ''\nprint(out)\nlocal low = out:lower()\nlocal bad = low:find('incorrect') or low:find('denied') or low:find('failure') or low:find('invalid')\nif bad then\n  print('AUTO_LOGIN: 第一次密码被拒绝，等待密码提示后重试')\n  local m2 = channel.mark()\n  local again = channel.wait_mark(m2, 'assword:', 6)\n  if not again then\n    channel.send('<enter>')\n    again = channel.wait_mark(channel.mark(), 'assword:', 5)\n  end\n  if not again then error('AUTO_LOGIN: 重试前没有再次出现 password:') end\n  channel.write(PASS .. '\\r\\n')\n  local m3 = channel.mark()\n  local out2 = channel.wait_idle(m3, 350, 8) or ''\n  print(out2)\n  local low2 = out2:lower()\n  if low2:find('incorrect') or low2:find('denied') or low2:find('failure') then\n    error('AUTO_LOGIN: 重试后仍登录失败')\n  end\nend\nif low:find('root@') or low:find('#') then\n  print('AUTO_LOGIN: 已登录')\nelse\n  print('AUTO_LOGIN: 命令已发送，未明确识别到 shell 提示符')\nend"
+        }
+      ]
+    },
+    {
+      "name": "s6loop2",
+      "serial_device": "loop:ai",
+      "baudrate": 115200,
+      "databits": 8,
+      "parity": "N",
+      "stopbits_x10": 10,
+      "flowcontrol": "none",
+      "dtr": true,
+      "rts": true,
+      "line_ending": "crlf",
+      "encoding": "utf-8",
+      "auto_open": true,
+      "timestamp": true,
+      "buffer_size": 0,
+      "log_enabled": true,
+      "log_dir": "",
+      "password": "",
+      "username": "root",
+      "buttons": []
+    }
+  ],
+  "ssh": [
+    {
+      "name": "ssh-link-demo1",
+      "host": "39.97.234.200",
+      "port": 52222,
+      "username": "demo",
+      "password": "123456",
+      "term": "xterm-256color",
+      "connect_timeout_ms": 5000,
+      "keepalive": 3,
+      "width": 120,
+      "height": 32,
+      "buffer_size": 0,
+      "log_enabled": true,
+      "log_dir": ""
+    },
+    {
+      "name": "ssh-link-demo2",
+      "host": "sshbridge.online",
+      "port": 52223,
+      "username": "demo",
+      "password": "123456",
+      "term": "xterm-256color",
+      "connect_timeout_ms": 5000,
+      "keepalive": 3,
+      "width": 120,
+      "height": 32,
+      "buffer_size": 0,
+      "log_enabled": true,
+      "log_dir": ""
+    }
+  ],
+  "tftp": {
+    "enable": false,
+    "port": 69,
+    "bind_ip": "",
+    "root": "work/share",
+    "allow_write": true
+  },
+  "share": {
+    "enable": false,
+    "port": 18082,
+    "root": ""
+  },
+  "nfs": {
+    "enable": false,
+    "alias": "/share",
+    "uid": 0,
+    "gid": 0,
+    "root": ""
+  },
+  "relay_devices": [
+    {
+      "name": "relay1",
+      "enable": true,
+      "windows_port": "COM4",
+      "channels": 1,
+      "baudrate": 9600,
+      "io_inverted": false,
+      "post_write_delay_ms": 100,
+      "polarity_inverted": false
+    }
+  ]
+}

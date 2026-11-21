@@ -1,0 +1,4 @@
+// app.rc — 资源脚本：把清单嵌进 exe，启用 Per-Monitor V2 DPI 与 v6 视觉样式。
+// 没有这条清单时：控件被系统按 96dpi 拉伸（字发虚）、按钮/树/状态栏退回 Windows 95 外观。
+
+1 24 "app.manifest"

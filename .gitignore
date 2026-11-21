@@ -1,0 +1,44 @@
+# 构建产物
+output/build/
+output/pdf/
+*.o
+*.d
+*.exe
+*.zip
+
+# 运行时
+work/logs/
+keys/ssh_host_rsa_key
+*.log
+auth_audit.log
+backend_child.log
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.swp
+.cache/
+output/selftest/
+output/*.txt
+output/s3run/
+output/s3test/
+output/s4check/
+output/s4run/
+output/s4test/
+output/ui_terminal.json
+output/ui_state.json
+output/ui_prefs.ini
+
+# 本地测试运行目录（闸门自建自清）
+output/s5check/
+output/s5check-off/
+output/s5check-token/
+output/aibrun/
+output/cfgtest/
+output/dist/
+output/disttest/
+output/acceptance/
+
+# SFTP 本地测试数据
+output/sftp_test/
+output/sftp_dl/
