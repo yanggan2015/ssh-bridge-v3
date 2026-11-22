@@ -116,8 +116,16 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);padding:0
 .item .meta{font-size:12px;color:var(--muted);margin:4px 0 8px;overflow-wrap:anywhere}
 .item .actions{display:flex;gap:6px;flex-wrap:wrap}
 pre.terminal{white-space:pre-wrap;word-break:break-word;background:#081820;color:#d9efe9;border-radius:12px;
-  padding:14px 15px;min-height:340px;max-height:56vh;overflow:auto;font:13px/1.48 ui-monospace,Consolas,monospace;
+  padding:14px 15px;min-height:340px;max-height:56vh;overflow:auto;font-family:ui-monospace,Consolas,monospace;
+  font-size:var(--term-font,13px);line-height:1.48;
   border:1px solid #12343a;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+pre.terminal mark{background:#f7d774;color:#173033;border-radius:3px;padding:0 1px}
+pre.terminal mark.active{background:#7ee0c8;color:#05332e;box-shadow:0 0 0 2px rgba(126,224,200,.45)}
+.terminal-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:11px 0 8px}
+.terminal-tools input{flex:1 1 150px;min-width:110px;font-size:12px}
+.terminal-tools .btn{padding:5px 9px;min-height:30px;font-size:11px}
+.terminal-card:fullscreen{background:var(--surface);padding:16px;min-height:100vh}
+.terminal-card:fullscreen .terminal{max-height:none;min-height:0;flex:1}
 pre{white-space:pre-wrap;word-break:break-word;background:#0c1820;color:#dcefe9;border-radius:10px;padding:12px;
   font:12px/1.5 ui-monospace,Consolas,monospace;max-height:300px;overflow:auto}
 .terminal-card{display:flex;flex-direction:column;min-height:480px}
@@ -150,11 +158,29 @@ pre{white-space:pre-wrap;word-break:break-word;background:#0c1820;color:#dcefe9;
 .field > span,.field > label{font-size:12px;font-weight:600;color:var(--ink-2)}
 .field .help{font-size:11px;color:var(--muted);font-weight:400}
 .field input,.field select,.field textarea{width:100%}
+.check-row{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);padding-top:2px}
+.check-row input{width:auto;accent-color:var(--accent)}
 .secret-wrap{display:flex;gap:5px;align-items:stretch}
 .secret-wrap input{flex:1}
 .secret-wrap .btn{min-height:0;padding:5px 9px;font-size:11px}
 .editor{background:var(--surface-2);border:1px solid var(--line);border-radius:13px;padding:15px;margin:0 0 14px}
 .editor[hidden]{display:none}
+.channel-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.chan-card{border:1px solid var(--line);border-radius:12px;background:#fff;padding:13px;display:flex;flex-direction:column;gap:8px}
+.chan-card .chan-top{display:flex;align-items:flex-start;gap:8px}
+.chan-card .chan-name{font-weight:700;font-size:14px;overflow-wrap:anywhere;flex:1}
+.chan-card .chan-detail{font-size:11px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+.chan-card .chan-actions{display:flex;gap:6px;flex-wrap:wrap}
+.chan-card .chan-actions .btn{padding:4px 8px;min-height:0;font-size:11px}
+.chan-form-section{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.agent-card{border:1px solid var(--line);border-radius:12px;background:var(--surface-2);padding:13px}
+.agent-card .k{font-size:11px;color:var(--muted)}
+.agent-card .v{font-size:17px;font-weight:700;margin-top:3px;overflow-wrap:anywhere}
+.agent-log{max-height:300px}
+.help-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}
+.help-item{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface-2)}
+.help-item code{font-size:11px;color:var(--accent-ink);overflow-wrap:anywhere}
 .editor-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
 .tabs{display:inline-flex;background:#e9f1ef;border-radius:10px;padding:3px;gap:2px}
 .tabs button{background:transparent;color:var(--ink-2);min-height:32px;padding:5px 11px;border-radius:8px;font-size:12px;font-weight:600}
@@ -213,8 +239,8 @@ dialog input{width:100%;margin-top:11px}
   .layout{display:block}
   aside.sidebar{position:static;height:auto;padding:14px}
   .brand{padding-bottom:10px}
-  nav{display:flex;flex-wrap:wrap;gap:6px;padding-bottom:3px}
-  nav a{flex:0 0 auto;padding:7px 10px;font-size:12px}
+  nav{display:flex;flex-wrap:wrap;gap:5px;padding-bottom:3px}
+  nav a{flex:0 0 auto;padding:6px 8px;font-size:11px}
   .nav-title{display:none}
   .sidebar-foot{display:none}
   main{padding:16px 12px 34px}
@@ -223,10 +249,13 @@ dialog input{width:100%;margin-top:11px}
   .header-tools{margin-top:12px;justify-content:flex-start}
   .token-box{width:100%}.token-box input{width:100%;flex:1}
   .card{padding:14px;border-radius:13px}
+  .card-head{flex-direction:column;align-items:stretch;gap:10px}
+  .card-head>.row-end{justify-content:flex-start}
   .form-grid,.grid-2,.grid-3{grid-template-columns:1fr}
   .terminal-card{min-height:390px}
   pre.terminal{min-height:280px;max-height:46vh}
   .channel-list{grid-template-columns:1fr}
+  .channel-cards,.agent-grid{grid-template-columns:1fr}
   .svc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .status-grid{grid-template-columns:1fr 1fr}
   .status-cell.wide{grid-column:1/-1}
@@ -403,6 +432,16 @@ std::string page_body(const std::string& page) {
       <div class="card-title"><div><h2>终端</h2><div class="terminal-meta"><span class="chip accent" id="activeName">未选择</span><span class="chip" id="wsState">WS 未连接</span></div></div></div>
       <div class="row-end"><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><span class="pill" id="ro">只读</span></div>
     </div>
+    <div class="terminal-tools">
+      <input id="termFind" placeholder="查找回显…" aria-label="查找回显">
+      <button class="btn ghost" id="findNext" type="button">下一个</button>
+      <button class="btn ghost" id="copyTerm" type="button">复制</button>
+      <a class="btn ghost" id="dlTerm" href="#" download>下载日志</a>
+      <button class="btn ghost" id="fontMinus" type="button" title="减小字号">A−</button>
+      <button class="btn ghost" id="fontPlus" type="button" title="增大字号">A+</button>
+      <button class="btn ghost" id="fullTerm" type="button">全屏</button>
+      <button class="btn ghost" id="clearBuf" type="button">清空缓冲</button>
+    </div>
     <pre class="terminal" id="term" aria-live="polite"></pre>
     <div class="terminal-foot"><input id="cmd" placeholder="输入到当前通道，Enter 发送" autocomplete="off" spellcheck="false"><button class="btn" id="send" type="button">发送</button><button class="btn ghost" id="clear" type="button">清屏</button></div>
     <div class="hint" id="hint"></div>
@@ -411,6 +450,89 @@ std::string page_body(const std::string& page) {
 <section class="card">
   <div class="card-head"><div class="card-title"><div><h2>服务状态</h2><div class="card-sub">服务开关在对应页面操作；这里只做总览。</div></div></div></div>
   <div class="svc-grid" id="svcBadges"></div>
+</section>
+)HTML";
+    }
+    if (page == "channels") {
+        return R"HTML(
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><div><h2>通道</h2><div class="card-sub">串口与 SSH 通道的新增、编辑、改名、删除；保存后由 UI 线程重载。</div></div></div>
+    <div class="row-end"><button class="btn ghost" id="loadChannels" type="button">刷新</button><button class="btn" id="newSerial" type="button">新增串口</button><button class="btn" id="newSsh" type="button">新增 SSH</button></div>
+  </div>
+  <div class="row-end" style="margin-bottom:11px"><span class="chip" id="chanCount">--</span><span class="chip" id="chanOnline">--</span><span class="form-status" id="chanNote">写接口需要 token。</span></div>
+  <div class="channel-cards" id="chanCards"></div>
+</section>
+<section class="card editor" id="chanEditor" hidden>
+  <div class="card-head">
+    <div class="card-title"><div><h2 id="chanEditorTitle">编辑通道</h2><div class="card-sub" id="chanEditorSub">串口和 SSH 字段会按类型切换。</div></div></div>
+    <span class="chip" id="chanKindChip">串口</span>
+  </div>
+  <div class="form-grid">
+    <label class="field"><span>通道名</span><input id="cName" maxlength="40" placeholder="例如 ok3568-com5"><span class="help">≤40 字符，不能含 |，不能与现有通道重名。</span></label>
+    <label class="field"><span>类型</span><input id="cKind" readonly></label>
+    <label class="field"><span>串口设备</span><input id="cDevice" placeholder="COM5 或 loop:ai"></label>
+    <label class="field"><span>波特率</span><input id="cBaud" type="number" min="50" max="4000000" step="1" value="115200"></label>
+    <label class="field"><span>数据位</span><select id="cDataBits"><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
+    <label class="field"><span>校验</span><select id="cParity"><option value="N">N · 无</option><option value="E">E · 偶</option><option value="O">O · 奇</option><option value="M">M · Mark</option><option value="S">S · Space</option></select></label>
+    <label class="field"><span>停止位</span><select id="cStopBits"><option value="10">1</option><option value="15">1.5</option><option value="20">2</option></select></label>
+    <label class="field"><span>流控</span><select id="cFlow"><option value="none">none</option><option value="rtscts">rtscts</option><option value="xonxoff">xonxoff</option></select></label>
+    <label class="field"><span>行尾</span><select id="cLineEnding"><option value="none">none</option><option value="lf">LF</option><option value="crlf">CRLF</option><option value="cr">CR</option></select></label>
+    <label class="field"><span>编码</span><input id="cEncoding" placeholder="utf-8"></label>
+    <label class="field"><span>用户名（可选）</span><input id="cUsername" placeholder="串口登录用户"></label>
+    <label class="field"><span>密码（可选）</span><input id="cPassword" type="password" autocomplete="off"></label>
+    <label class="field"><span>主机</span><input id="cHost" placeholder="192.168.1.10"></label>
+    <label class="field"><span>SSH 端口</span><input id="cPort" type="number" min="1" max="65535" value="22"></label>
+    <label class="field"><span>SSH 用户名</span><input id="cSshUser" placeholder="root"></label>
+    <label class="field"><span>SSH 密码</span><input id="cSshPassword" type="password" autocomplete="off"></label>
+    <label class="field"><span>TERM</span><input id="cTerm" placeholder="xterm-256color"></label>
+    <label class="field"><span>Keepalive 秒</span><input id="cKeepalive" type="number" min="0" max="3600" value="3"></label>
+    <label class="field"><span>终端列</span><input id="cWidth" type="number" min="40" max="500" value="120"></label>
+    <label class="field"><span>终端行</span><input id="cHeight" type="number" min="10" max="200" value="32"></label>
+    <label class="field"><span>连接超时 ms</span><input id="cTimeout" type="number" min="100" max="120000" step="100" value="5000"></label>
+    <label class="check-row"><input id="cAutoOpen" type="checkbox"> 自动打开</label>
+    <label class="check-row"><input id="cTimestamp" type="checkbox"> 回显时间戳</label>
+    <label class="check-row"><input id="cDtr" type="checkbox" checked> DTR</label>
+    <label class="check-row"><input id="cRts" type="checkbox" checked> RTS</label>
+    <label class="check-row"><input id="cDiscoverable" type="checkbox"> 允许局域网发现</label>
+    <label class="check-row"><input id="cLogEnabled" type="checkbox" checked> 写入日志</label>
+  </div>
+  <div class="editor-actions">
+    <button class="btn" id="saveChannel" type="button">保存通道</button>
+    <button class="btn ghost" id="cancelChannel" type="button">取消</button>
+    <span class="form-status" id="chanEditNote"></span>
+  </div>
+</section>
+)HTML";
+    }
+    if (page == "agent") {
+        return R"HTML(
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><div><h2>Agent UI 桥</h2><div class="card-sub">本机 AI 控制面：capabilities → tree → action → state。此页只做只读自检，不执行点击。</div></div></div>
+    <span class="chip" id="agentChip">读取中</span>
+  </div>
+  <div class="agent-grid" id="agentMetrics">
+    <div class="agent-card"><div class="k">协议</div><div class="v" id="agProto">--</div></div>
+    <div class="agent-card"><div class="k">控件数</div><div class="v" id="agTree">--</div></div>
+    <div class="agent-card"><div class="k">通道</div><div class="v" id="agChannels">--</div></div>
+    <div class="agent-card"><div class="k">动作次数</div><div class="v" id="agActions">--</div></div>
+  </div>
+  <div class="form-grid" style="margin-top:14px">
+    <label class="field"><span>Agent 地址</span><input id="agBase" placeholder="http://127.0.0.1:18096"><span class="help">浏览器需与 ssh-bridge 在同一台机器；远程访问时 127.0.0.1 指向浏览器本机。</span></label>
+    <label class="field"><span>X-Ui-Token</span><input id="agToken" type="password" autocomplete="off" placeholder="agent.token 为空时留空"></label>
+  </div>
+  <div class="editor-actions">
+    <button class="btn" id="agProbe" type="button">运行自检</button>
+    <button class="btn ghost" id="agCaps" type="button">查看 capabilities</button>
+    <button class="btn ghost" id="agReloadCfg" type="button">从应用读取端口</button>
+    <span class="form-status" id="agNote"></span>
+  </div>
+</section>
+<section class="card">
+  <div class="card-head"><div class="card-title"><div><h2>接口速查</h2><div class="card-sub">控制器必须串行调用 /action；ok:true 后要读 /state 或 /control 验证业务结果。</div></div></div><a class="btn ghost" href="/api/help" target="_blank">Web API JSON</a></div>
+  <div class="help-list" id="agentHelp"></div>
+  <pre id="agentJson" class="agent-log" style="margin-top:12px">运行自检后显示 capabilities / tree / state / logs 摘要。</pre>
 </section>
 )HTML";
     }
@@ -459,6 +581,20 @@ std::string page_body(const std::string& page) {
   </div>
   <div id="actList" class="list"></div>
 </section>
+<details class="card">
+  <summary style="cursor:pointer;font-weight:700">Lua / DSL 速查（v3）</summary>
+  <div class="help-list" style="margin-top:12px">
+    <div class="help-item"><code>channel.mark()</code><div class="card-sub">记录日志游标</div></div>
+    <div class="help-item"><code>channel.write(s)</code><div class="card-sub">原样写入，换行自己写 \r\n</div></div>
+    <div class="help-item"><code>channel.send("&lt;ctrl+c&gt;")</code><div class="card-sub">单键/字符</div></div>
+    <div class="help-item"><code>channel.wait_mark(m, "login:", 30)</code><div class="card-sub">等回显关键字，超时返回 nil</div></div>
+    <div class="help-item"><code>channel.exec(cmd, timeout)</code><div class="card-sub">发命令并等空闲</div></div>
+    <div class="help-item"><code>relay_mode("relay1", 1, "pulse", 0.5)</code><div class="card-sub">hold_on / hold_off / pulse</div></div>
+    <div class="help-item"><code>host_exec(cmd, timeout_ms)</code><div class="card-sub">本机执行，返回 ok/exit_code/output</div></div>
+    <div class="help-item"><code>action("ID")</code><div class="card-sub">调用同通道按钮，嵌套上限 6</div></div>
+  </div>
+  <div class="hint">整段脚本约 180 秒上限；send_keys 和 msleep 单次 ≤120 秒。简单脚本一行一条：write / send / keys / login / relay / msleep / remotecmd / hostcmd / expect / action。完整说明见 docs/脚本参考-S12.md。</div>
+</details>
 )HTML";
     }
     if (page == "button-script") {
@@ -506,23 +642,50 @@ std::string page_body(const std::string& page) {
     if (page == "tftp" || page == "nfs" || page == "share") {
         std::string svc = page;
         std::string title = svc == "tftp" ? "TFTP 服务" : (svc == "nfs" ? "NFS 服务" : "共享目录");
-        std::string desc = svc == "tftp" ? "TFTP 启停、端口/根目录状态，以及共享文件管理。"
-                           : svc == "nfs" ? "NFS 导出状态与共享文件管理。"
-                                          : "HTTP 共享状态、访问地址与共享文件管理。";
+        std::string desc = svc == "tftp" ? "TFTP 配置、启停、根目录状态，以及共享文件管理。"
+                           : svc == "nfs" ? "NFS 别名/UID/GID 配置、导出状态与共享文件管理。"
+                                          : "HTTP 共享端口/根目录配置、访问地址与共享文件管理。";
+        std::string fields = R"HTML(
+    <label class="field"><span>启用</span><select id="svcEnable"><option value="false">关闭</option><option value="true">开启</option></select></label>
+    <label class="field"><span>根目录</span><input id="svcRoot" placeholder="留空使用默认共享根"><span class="help">相对路径按应用工作目录解析；保存后由服务重载。</span></label>
+)HTML";
+        if (svc == "tftp") fields += R"HTML(
+    <label class="field"><span>端口</span><input id="svcPort" type="number" min="1" max="65535" value="69"></label>
+    <label class="field"><span>绑定 IP</span><input id="svcBind" placeholder="留空监听全部网卡"></label>
+    <label class="check-row"><input id="svcWrite" type="checkbox" checked> 允许客户端写入</label>
+)HTML";
+        else if (svc == "nfs") fields += R"HTML(
+    <label class="field"><span>导出别名</span><input id="svcAlias" placeholder="/share"><span class="help">必须以 / 开头。</span></label>
+    <label class="field"><span>UID</span><input id="svcUid" type="number" min="0" max="65535" value="0"></label>
+    <label class="field"><span>GID</span><input id="svcGid" type="number" min="0" max="65535" value="0"></label>
+)HTML";
+        else fields += R"HTML(
+    <label class="field"><span>HTTP 端口</span><input id="svcPort" type="number" min="1" max="65535" value="18082"></label>
+)HTML";
         std::string html = R"HTML(
+<section class="card" id="svcConfigCard">
+  <div class="card-head">
+    <div class="card-title"><div><h2>__TITLE__ 配置</h2><div class="card-sub">__DESC__</div></div></div>
+    <span class="chip" id="svcCfgState">读取中</span>
+  </div>
+  <div class="form-grid">__FIELDS__</div>
+  <div class="editor-actions"><button class="btn" id="saveSvcCfg" type="button">保存配置</button><span class="form-status" id="svcCfgNote"></span></div>
+</section>
 <section class="card" id="svcCard">
   <div class="card-head">
-    <div class="card-title"><div><h2>__TITLE__</h2><div class="card-sub">__DESC__</div></div></div>
+    <div class="card-title"><div><h2>__TITLE__ 运行状态</h2><div class="card-sub">服务开关也可单独启停；配置启用后由 apply_config 自动同步。</div></div></div>
     <div class="row-end"><button class="btn ghost" id="loadSvc" type="button">刷新</button><button class="btn ghost" id="startSvc" type="button">启动</button><button class="btn danger" id="stopSvc" type="button">停止</button></div>
   </div>
   <div class="service-summary" id="svcBox"></div>
   <div class="hint" id="svcHint"></div>
 </section>
 )HTML";
-        std::size_t p = html.find("__TITLE__");
-        if (p != std::string::npos) html.replace(p, 9, title);
+        std::size_t p = std::string::npos;
+        while ((p = html.find("__TITLE__")) != std::string::npos) html.replace(p, 9, title);
         p = html.find("__DESC__");
         if (p != std::string::npos) html.replace(p, 8, desc);
+        p = html.find("__FIELDS__");
+        if (p != std::string::npos) html.replace(p, 10, fields);
         return html + std::string(kFileBrowserHtml);
     }
     if (page == "tcp-forward") {
@@ -575,7 +738,8 @@ std::string page_body(const std::string& page) {
 std::string page_script(const std::string& page) {
     if (page == "dashboard") {
         return R"JS(
-let ws=null, LAST=null, LAST_CH='';
+let ws=null, LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[];
+const FONT_KEY='sb3_term_font';
 const SVC_DEFS=[['tftp','TFTP','/tftp'],['share','共享','/share'],['nfs','NFS','/nfs'],['inbound','入站 SSH','/tunnel'],['tcp_forward','TCP','/tcp-forward'],['tunnel','隧道','/tunnel'],['discovery','发现','/tcp-forward']];
 function isOnline(c){return c.state==='ready'||c.state==='online'}
 function chType(c){return c.kind==='ssh'?'SSH':'串口'}
@@ -586,14 +750,14 @@ function renderChannels(st){
     const b=document.createElement('button');b.type='button';b.className='channel-item'+(c.name===active?' active':'');
     b.innerHTML='<span class="status-dot '+(isOnline(c)?'on':'off')+'"></span><span class="ch-main"><span class="ch-name"></span><span class="ch-detail"></span></span><span class="ch-num"></span>';
     b.querySelector('.ch-name').textContent=c.name;
-    b.querySelector('.ch-detail').textContent=chType(c)+' · '+esc(c.state)+(c.detail?' · '+c.detail:'');
+    b.querySelector('.ch-detail').textContent=chType(c)+' · '+c.state+(c.detail?' · '+c.detail:'');
     b.querySelector('.ch-num').textContent='TX '+fmtBytes(c.tx_bytes||0)+' · RX '+fmtBytes(c.rx_bytes||0);
     b.onclick=()=>{if(sel)sel.value=c.name;if(c.name!==LAST_CH)connect();renderChannels(st)};
     box.appendChild(b);
   });
   const online=st.channels.filter(isOnline).length;
   $('#onlineCount').textContent=online+' / '+st.channels.length+' 在线';
-  if(!st.channels.length)box.innerHTML='<div class="empty" style="padding:18px 8px"><strong>没有通道</strong><p>先在配置页添加串口或 SSH 通道。</p></div>';
+  if(!st.channels.length)box.innerHTML='<div class="empty" style="padding:18px 8px"><strong>没有通道</strong><p><a href="/channels">去通道管理新增</a></p></div>';
 }
 function renderServices(st){
   const box=$('#svcBadges');if(!box||!st)return;
@@ -606,15 +770,43 @@ function renderServices(st){
     box.appendChild(a);
   });
 }
-function connect(){
+function renderTerm(){
+  const p=$('#term');if(!p)return;
+  const q=TERM_FIND.trim();
+  if(!q){p.textContent=TERM_TEXT;TERM_MARKS=[];TERM_HIT=0;return}
+  let html='',lower=TERM_TEXT.toLowerCase(),ql=q.toLowerCase(),pos=0,hits=0;
+  while(pos<TERM_TEXT.length&&hits<500){
+    const idx=lower.indexOf(ql,pos);if(idx<0)break;
+    html+=esc(TERM_TEXT.slice(pos,idx));
+    html+='<mark class="'+(hits===TERM_HIT?'active':'')+'" data-hit="'+hits+'">'+esc(TERM_TEXT.slice(idx,idx+q.length))+'</mark>';
+    pos=idx+q.length;hits++;
+  }
+  html+=esc(TERM_TEXT.slice(pos));
+  p.innerHTML=html;TERM_MARKS=Array.from(p.querySelectorAll('mark'));
+  if(!TERM_MARKS.length)p.textContent=TERM_TEXT;
+  else if(TERM_MARKS[TERM_HIT])TERM_MARKS[TERM_HIT].scrollIntoView({block:'nearest'});
+}
+function appendTerm(t){
+  TERM_TEXT+=t;if(TERM_TEXT.length>180000)TERM_TEXT=TERM_TEXT.slice(-120000);
+  renderTerm();const p=$('#term');if(p&&!TERM_FIND.trim())p.scrollTop=p.scrollHeight;
+}
+function applyFont(px){
+  px=Math.max(10,Math.min(22,px||13));localStorage.setItem(FONT_KEY,String(px));
+  const card=$('.terminal-card');if(card)card.style.setProperty('--term-font',px+'px');
+}
+async function connect(){
   if(ws){try{ws.close()}catch(e){};ws=null}
   const ch=$('#ch').value; if(!ch){$('#term').textContent='没有通道';return}
-  LAST_CH=ch;$('#term').textContent='';$('#activeName').textContent=ch;$('#hint').textContent='正在连接 '+ch+' …';
+  LAST_CH=ch;TERM_TEXT='';TERM_FIND='';TERM_HIT=0;renderTerm();
+  $('#activeName').textContent=ch;$('#hint').textContent='正在连接 '+ch+' …';
+  const dl=$('#dlTerm');if(dl)dl.href='/log/download?channel='+encodeURIComponent(ch);
+  const seed=await api('/log?'+qs({channel:ch,chars:16000}));
+  if(seed.j&&seed.j.text&&$('#ch').value===ch){TERM_TEXT=seed.j.text;renderTerm();const p=$('#term');if(p)p.scrollTop=p.scrollHeight}
   const proto=location.protocol==='https:'?'wss':'ws';
   ws=new WebSocket(proto+'://'+location.host+'/ws/log?channel='+encodeURIComponent(ch));
   ws.binaryType='arraybuffer';
   ws.onopen=()=>{$('#hint').textContent='WS 已连接 · '+ch;$('#wsState').textContent='WS 已连接';$('#wsState').className='chip on'};
-  ws.onmessage=e=>{const t=bytesText(e.data);const p=$('#term');p.textContent+=t;if(p.textContent.length>180000)p.textContent=p.textContent.slice(-120000);p.scrollTop=p.scrollHeight};
+  ws.onmessage=e=>appendTerm(bytesText(e.data));
   ws.onclose=()=>{$('#hint').textContent='WS 已断开';$('#wsState').textContent='WS 已断开';$('#wsState').className='chip warn'};
   ws.onerror=()=>{$('#hint').textContent='WS 连接失败';$('#wsState').textContent='连接失败';$('#wsState').className='chip danger'};
 }
@@ -629,7 +821,21 @@ async function dashLoad(){
 }
 $('#reload').onclick=dashLoad;
 $('#ch').onchange=connect;
-$('#clear').onclick=()=>{$('#term').textContent='';$('#hint').textContent='已清屏'};
+$('#clear').onclick=()=>{TERM_TEXT='';renderTerm();$('#hint').textContent='已清屏'};
+$('#termFind').oninput=e=>{TERM_FIND=e.target.value;TERM_HIT=0;renderTerm()};
+$('#findNext').onclick=()=>{if(!TERM_MARKS.length){toast('没有匹配内容');return}TERM_HIT=(TERM_HIT+1)%TERM_MARKS.length;renderTerm()};
+$('#copyTerm').onclick=async()=>{
+  try{await navigator.clipboard.writeText(TERM_TEXT);toast('回显已复制')}
+  catch(e){const t=document.createElement('textarea');t.value=TERM_TEXT;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('回显已复制')}
+};
+$('#fontMinus').onclick=()=>{applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10)-1)};
+$('#fontPlus').onclick=()=>{applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10)+1)};
+$('#fullTerm').onclick=async()=>{const c=$('.terminal-card');if(!document.fullscreenElement){if(c.requestFullscreen)await c.requestFullscreen()}else await document.exitFullscreen()};
+document.addEventListener('fullscreenchange',()=>{const b=$('#fullTerm');if(b)b.textContent=document.fullscreenElement?'退出全屏':'全屏'});
+$('#clearBuf').onclick=async()=>{
+  const ch=$('#ch').value;if(!ch)return;if(!await askConfirm('清空通道缓冲','将清空 '+ch+' 的共享 ring，所有终端/网页都会看不到旧回显。','清空',true))return;
+  const r=await api('/log/clear?channel='+encodeURIComponent(ch),{method:'POST'});if(r.status===200){TERM_TEXT='';renderTerm();toast('缓冲已清空')}else toast('清空失败：'+r.status+' '+r.t,'error');
+};
 $('#send').onclick=async()=>{
   const ch=$('#ch').value,data=$('#cmd').value+'\r';if(!ch)return;
   const r=await api('/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,data})});
@@ -637,8 +843,155 @@ $('#send').onclick=async()=>{
   else{$('#hint').textContent='已写入 '+ch;$('#cmd').value=''}
 };
 $('#cmd').onkeydown=e=>{if(e.key==='Enter')$('#send').click()};
-setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){LAST=r.j;renderChannels(r.j);renderServices(r.j);$('#onlineCount').textContent=r.j.channels.filter(isOnline).length+' / '+r.j.channels.length+' 在线'}},5000);
+applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10));
+setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){LAST=r.j;renderChannels(r.j);renderServices(r.j)}},5000);
 dashLoad();
+)JS";
+    }
+    if (page == "channels") {
+        return R"JS(
+let CHAN={boards:[],ssh:[]}, EDIT={kind:'serial',old:''}, CHAN_STATUS={};
+const SERIAL_IDS=['cDevice','cBaud','cDataBits','cParity','cStopBits','cFlow','cLineEnding','cEncoding','cUsername','cPassword','cAutoOpen','cTimestamp','cDtr','cRts'];
+const SSH_IDS=['cHost','cPort','cSshUser','cSshPassword','cTerm','cKeepalive','cWidth','cHeight','cTimeout'];
+function chOnline(name){const c=(CHAN_STATUS.channels||[]).find(x=>x.name===name);return c&&(c.state==='ready'||c.state==='online')}
+function showField(el,on){if(!el)return;const box=el.closest('.field')||el.closest('.check-row')||el;box.style.display=on?'':'none'}
+function setVal(id,v){const e=$('#'+id);if(e)e.value=v==null?'':String(v)}
+function setChk(id,v){const e=$('#'+id);if(e)e.checked=!!v}
+function showKind(kind){
+  $('#cKind').value=kind==='ssh'?'SSH':'串口';
+  $('#chanKindChip').textContent=kind==='ssh'?'SSH':'串口';
+  SERIAL_IDS.forEach(id=>showField($('#'+id),kind!=='ssh'));
+  SSH_IDS.forEach(id=>showField($('#'+id),kind==='ssh'));
+  $('#chanEditorTitle').textContent=(EDIT.old?'编辑 ':'新增 ')+(kind==='ssh'?'SSH 通道':'串口通道');
+  $('#chanEditorSub').textContent=kind==='ssh'?'SSH 出站连接参数；保存后由 UI 线程重载并重连。':'串口设备参数；loop: 设备可用于无硬件验收。';
+}
+function findChannel(kind,name){const key=kind==='ssh'?'ssh':'boards';return (CHAN[key]||[]).find(x=>x.name===name)}
+function renderChannelsPage(){
+  const box=$('#chanCards');if(!box)return;
+  const all=[...(CHAN.boards||[]).map(c=>({...c,_kind:'serial'})),...(CHAN.ssh||[]).map(c=>({...c,_kind:'ssh'}))];
+  $('#chanCount').textContent=all.length+' 个通道';
+  $('#chanOnline').textContent=all.filter(c=>chOnline(c.name)).length+' 在线';
+  if(!all.length){box.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-mark">+</div><strong>还没有通道</strong><p>新增一个 loop: 串口或 SSH 通道开始。</p></div>';return}
+  box.innerHTML='';
+  all.forEach(c=>{
+    const d=document.createElement('div');d.className='chan-card';
+    const detail=c._kind==='ssh'?(c.username||'')+'@'+(c.host||'')+':'+(c.port||22):(c.serial_device||'')+' · '+(c.baudrate||115200)+' baud';
+    d.innerHTML='<div class="chan-top"><span class="status-dot '+(chOnline(c.name)?'on':'off')+'"></span><span class="chan-name"></span><span class="chip">'+(c._kind==='ssh'?'SSH':'串口')+'</span></div><div class="chan-detail"></div><div class="chan-actions"><button class="btn ghost" data-edit="1" type="button">编辑</button><button class="btn danger" data-del="1" type="button">删除</button></div>';
+    d.querySelector('.chan-name').textContent=c.name;
+    d.querySelector('.chan-detail').textContent=detail+' · '+(chOnline(c.name)?'在线':'离线')+(c.auto_open===false?' · 手动打开':'');
+    d.querySelector('[data-edit]').onclick=()=>editChannel(c._kind,c.name);
+    d.querySelector('[data-del]').onclick=()=>delChannel(c._kind,c.name);
+    box.appendChild(d);
+  });
+}
+async function loadChannels(){
+  const [a,b]=await Promise.all([api('/api/channels'),api('/status')]);
+  if(a.status===401){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>需要 token</strong><p>在右上角填入 web.token 后再读取通道。</p></div>';$('#chanNote').textContent='只读模式：通道列表需要 token。';return}
+  if(!a.j||!a.j.ok){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>读取失败</strong></div>';$('#chanCards p')&&($('#chanCards p').textContent=a.t||('HTTP '+a.status));$('#chanNote').textContent='读取失败';return}
+  CHAN=a.j;CHAN_STATUS=b.j||{};$('#chanNote').textContent='配置读写需要 token；保存后约 1 秒重载。';renderChannelsPage();
+}
+function blankChannel(kind){
+  EDIT={kind,old:''};showKind(kind);
+  setVal('cName','');setVal('cDevice','loop:ai');setVal('cBaud',115200);setVal('cDataBits','8');setVal('cParity','N');setVal('cStopBits','10');setVal('cFlow','none');setVal('cLineEnding','none');setVal('cEncoding','utf-8');setVal('cUsername','');setVal('cPassword','');
+  setChk('cAutoOpen',true);setChk('cTimestamp',false);setChk('cDtr',true);setChk('cRts',true);
+  setVal('cHost','');setVal('cPort',22);setVal('cSshUser','root');setVal('cSshPassword','');setVal('cTerm','xterm-256color');setVal('cKeepalive',3);setVal('cWidth',120);setVal('cHeight',32);setVal('cTimeout',5000);
+  setChk('cDiscoverable',false);setChk('cLogEnabled',true);
+  $('#chanEditNote').textContent='';$('#chanEditor').hidden=false;$('#chanEditor').scrollIntoView({behavior:'smooth',block:'start'});setTimeout(()=>$('#cName').focus(),80);
+}
+function editChannel(kind,name){
+  const c=findChannel(kind,name);if(!c)return;EDIT={kind,old:name};showKind(kind);
+  setVal('cName',c.name);setVal('cDevice',c.serial_device);setVal('cBaud',c.baudrate);setVal('cDataBits',c.databits||8);setVal('cParity',c.parity||'N');setVal('cStopBits',c.stopbits_x10||10);setVal('cFlow',c.flowcontrol||'none');setVal('cLineEnding',c.line_ending||'none');setVal('cEncoding',c.encoding||'utf-8');setVal('cUsername',c.username);setVal('cPassword',c.password);
+  setChk('cAutoOpen',c.auto_open!==false);setChk('cTimestamp',!!c.timestamp);setChk('cDtr',c.dtr!==false);setChk('cRts',c.rts!==false);
+  setVal('cHost',c.host);setVal('cPort',c.port||22);setVal('cSshUser',c.username);setVal('cSshPassword',c.password);setVal('cTerm',c.term||'xterm-256color');setVal('cKeepalive',c.keepalive==null?3:c.keepalive);setVal('cWidth',c.width||120);setVal('cHeight',c.height||32);setVal('cTimeout',c.connect_timeout_ms||5000);
+  setChk('cDiscoverable',!!c.discoverable);setChk('cLogEnabled',c.log_enabled!==false);
+  $('#chanEditNote').textContent='';$('#chanEditor').hidden=false;$('#chanEditor').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function collectChannel(){
+  const kind=EDIT.kind,ch={name:$('#cName').value.trim()};
+  if(kind==='serial'){
+    ch.serial_device=$('#cDevice').value.trim();ch.baudrate=Number($('#cBaud').value||115200);ch.databits=Number($('#cDataBits').value||8);ch.parity=$('#cParity').value;ch.stopbits_x10=Number($('#cStopBits').value||10);ch.flowcontrol=$('#cFlow').value;ch.line_ending=$('#cLineEnding').value;ch.encoding=$('#cEncoding').value.trim();ch.username=$('#cUsername').value.trim();ch.password=$('#cPassword').value;
+    ch.auto_open=$('#cAutoOpen').checked;ch.timestamp=$('#cTimestamp').checked;ch.dtr=$('#cDtr').checked;ch.rts=$('#cRts').checked;
+  }else{
+    ch.host=$('#cHost').value.trim();ch.port=Number($('#cPort').value||22);ch.username=$('#cSshUser').value.trim();ch.password=$('#cSshPassword').value;ch.term=$('#cTerm').value.trim()||'xterm-256color';ch.width=Number($('#cWidth').value||120);ch.height=Number($('#cHeight').value||32);ch.connect_timeout_ms=Number($('#cTimeout').value||5000);ch.keepalive=Number($('#cKeepalive').value||0);
+  }
+  ch.discoverable=$('#cDiscoverable').checked;ch.log_enabled=$('#cLogEnabled').checked;
+  return {kind:EDIT.kind==='ssh'?'ssh':'serial',old_name:EDIT.old,channel:ch};
+}
+async function saveChannel(){
+  const btn=$('#saveChannel'),payload=collectChannel();
+  if(!payload.channel.name){$('#chanEditNote').textContent='通道名不能为空';return}
+  setBusy(btn,true,'保存中…');
+  const r=await api('/api/channels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  setBusy(btn,false);
+  if(!r.j||!r.j.ok){$('#chanEditNote').textContent=(r.j&&r.j.error)||('HTTP '+r.status+' '+r.t);toast('保存失败','error');return}
+  toast('通道已保存，正在重载');$('#chanEditor').hidden=true;setTimeout(loadChannels,1400);setTimeout(loadChannels,2600);
+}
+async function delChannel(kind,name){
+  if(!await askConfirm('删除通道','确定删除 '+name+'？该通道的按钮、快捷指令和分屏引用会一起清理，此操作不可撤销。','删除',true))return;
+  const r=await api('/api/channels/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,name})});
+  if(!r.j||!r.j.ok){toast('删除失败：'+((r.j&&r.j.error)||r.status),'error');return}
+  toast('通道已删除，正在重载');setTimeout(loadChannels,1400);setTimeout(loadChannels,2600);
+}
+$('#newSerial').onclick=()=>blankChannel('serial');
+$('#newSsh').onclick=()=>blankChannel('ssh');
+$('#loadChannels').onclick=loadChannels;
+$('#saveChannel').onclick=saveChannel;
+$('#cancelChannel').onclick=()=>{$('#chanEditor').hidden=true};
+loadChannels();
+)JS";
+    }
+    if (page == "agent") {
+        return R"JS(
+let AG_CFG=null, AG_LAST=null;
+const AG_HELP=[
+ ['GET','/ping','存活与协议版本'],
+ ['GET','/capabilities','动作白名单与端口'],
+ ['GET','/ui-tree','扁平控件树'],
+ ['GET','/control?id=ID','单控件完整快照'],
+ ['GET','/state','业务真值：通道、分屏、服务、Web'],
+ ['POST','/action','{id,action,text,value}；一次只允许一个'],
+ ['GET','/logs?since=N','环形动作日志']
+];
+function agBase(){return ($('#agBase').value||'http://127.0.0.1:18096').trim().replace(/\/+$/,'')}
+function agHeaders(){const h={};const t=($('#agToken').value||'').trim();if(t)h['X-Ui-Token']=t;return h}
+async function agFetch(path,opt){
+  opt=opt||{};
+  try{const r=await fetch(agBase()+path,{...opt,headers:{...agHeaders(),...(opt.headers||{})},cache:'no-store'});const text=await r.text();let j=null;try{j=JSON.parse(text)}catch(e){};return {status:r.status,j,text}}
+  catch(e){return {status:0,j:null,text:String(e)}}
+}
+function agMetric(id,v){const e=$('#'+id);if(e)e.textContent=v}
+function agRenderHelp(){
+  const box=$('#agentHelp');if(!box)return;box.innerHTML='';
+  AG_HELP.forEach(row=>{const d=document.createElement('div');d.className='help-item';d.innerHTML='<code></code><div class="card-sub" style="margin-top:5px"></div><div class="tiny" style="margin-top:4px"></div>';d.querySelector('code').textContent=row[1];d.querySelector('.card-sub').textContent=row[0]+' · '+row[2];d.querySelector('.tiny').textContent=row[0]==='POST'?'需要 X-Ui-Token（若 agent.token 非空）':'只读，无 body';box.appendChild(d)})
+}
+async function agProbe(){
+  const btn=$('#agProbe');setBusy(btn,true,'自检中…');$('#agNote').textContent='正在请求 '+agBase()+' …';
+  const caps=await agFetch('/capabilities'),tree=await agFetch('/ui-tree'),state=await agFetch('/state'),logs=await agFetch('/logs?since=0');
+  const ok=caps.status===200&&tree.status===200&&state.status===200&&logs.status===200;
+  $('#agentChip').textContent=ok?'自检通过':'自检失败';$('#agentChip').className='chip '+(ok?'on':'danger');
+  agMetric('agProto',caps.j?caps.j.protocol:'--');agMetric('agTree',tree.j?tree.j.count:'--');
+  const ch=(state.j&&state.j.state&&Array.isArray(state.j.state.channels))?state.j.state.channels.length:'--';
+  agMetric('agChannels',ch);agMetric('agActions',state.j?state.j.action_count:'--');
+  const errs=[caps,tree,state,logs].filter(x=>x.status!==200).map(x=>x.status?x.status+' '+x.text.slice(0,80):x.text.slice(0,80));
+  $('#agNote').textContent=ok?'四个只读探针均通过；动作测试请在 Agent/脚本侧串行执行。':'失败：'+errs.join(' | ');
+  AG_LAST={caps:caps.j,uiTree:tree.j,state:state.j,logs:logs.j,errors:errs};
+  $('#agentJson').textContent=JSON.stringify(AG_LAST,null,2);
+  setBusy(btn,false);
+}
+async function agCaps(){
+  const r=await agFetch('/capabilities');$('#agentJson').textContent=r.text||'(empty)';$('#agNote').textContent='HTTP '+r.status;
+}
+async function agLoadCfg(){
+  const r=await api('/api/agent/status');
+  if(!r.j||!r.j.ok){$('#agentChip').textContent='需要 Web token';$('#agentChip').className='chip warn';$('#agNote').textContent='读取 Agent 配置需要右上角 web token；可手动填地址自检。';return}
+  AG_CFG=r.j;if(!$('#agBase').value)$('#agBase').value=r.j.base_url;
+  $('#agentChip').textContent=r.j.enable?'已启用':'已关闭';$('#agentChip').className='chip '+(r.j.enable?'on':'off');
+  $('#agNote').textContent='端口 '+r.j.port+' · '+(r.j.token_required?'需要 X-Ui-Token':'无 token')+' · '+r.j.base_url;
+}
+$('#agProbe').onclick=agProbe;
+$('#agCaps').onclick=agCaps;
+$('#agReloadCfg').onclick=agLoadCfg;
+agRenderHelp();agLoadCfg();
 )JS";
     }
     if (page == "config") {
@@ -981,6 +1334,37 @@ async function svcLoad(){
   svcRender(r.j);const s=(r.j.services||r.j)[SVC]||{};
   const st=$('#svcHint');if(st)st.textContent=s.error?('错误：'+s.error):(s.on?'服务运行中':'服务已停止');
 }
+function svcCfgApply(c){
+  c=c||{};const en=$('#svcEnable');if(en)en.value=String(!!c.enable);
+  const root=$('#svcRoot');if(root)root.value=c.root||'';
+  if($('#svcPort'))$('#svcPort').value=c.port||(SVC==='tftp'?69:18082);
+  if($('#svcBind'))$('#svcBind').value=c.bind_ip||'';
+  if($('#svcWrite'))$('#svcWrite').checked=c.allow_write!==false;
+  if($('#svcAlias'))$('#svcAlias').value=c.alias||'/share';
+  if($('#svcUid'))$('#svcUid').value=c.uid==null?0:c.uid;
+  if($('#svcGid'))$('#svcGid').value=c.gid==null?0:c.gid;
+  const chip=$('#svcCfgState');if(chip){chip.textContent=c.enable?'配置启用':'配置关闭';chip.className='chip '+(c.enable?'on':'off')}
+}
+async function svcCfgLoad(){
+  const r=await api('/api/'+SVC+'/config');
+  if(!r.j||!r.j.ok){$('#svcCfgNote').textContent='读取失败：'+(r.j&&r.j.error||r.t);return}
+  svcCfgApply(r.j.config||r.j);$('#svcCfgNote').textContent='配置已读取；保存后由 UI 线程重载。';
+}
+async function svcCfgSave(){
+  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  const btn=$('#saveSvcCfg');setBusy(btn,true,'保存中…');
+  const cfg={enable:$('#svcEnable').value==='true',root:$('#svcRoot').value.trim()};
+  if($('#svcPort'))cfg.port=Number($('#svcPort').value||(SVC==='tftp'?69:18082));
+  if($('#svcBind'))cfg.bind_ip=$('#svcBind').value.trim();
+  if($('#svcWrite'))cfg.allow_write=$('#svcWrite').checked;
+  if($('#svcAlias'))cfg.alias=$('#svcAlias').value.trim();
+  if($('#svcUid'))cfg.uid=Number($('#svcUid').value||0);
+  if($('#svcGid'))cfg.gid=Number($('#svcGid').value||0);
+  const r=await api('/api/'+SVC+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  setBusy(btn,false);
+  if(!r.j||!r.j.ok){$('#svcCfgNote').textContent='保存失败：'+(r.j&&r.j.error||r.t);toast('保存失败','error');return}
+  $('#svcCfgNote').textContent='已保存，配置正在重载';toast(SVC_LABEL[SVC]+' 配置已保存');setTimeout(()=>{svcCfgLoad();svcLoad()},1400);setTimeout(()=>{svcCfgLoad();svcLoad()},2600);
+}
 async function svcSet(on){
   if(!tok()){toast('写操作需要 Bearer token','error');return}
   const note=$('#svcHint');if(note)note.textContent=on?'正在启动…':'正在停止…';
@@ -988,7 +1372,9 @@ async function svcSet(on){
   if(!r.r.ok){if(note)note.textContent='失败：'+(r.j&&r.j.error||r.t);toast('服务操作失败','error');return}
   toast(SVC_LABEL[SVC]+(on?' 已启动':' 已停止'));setTimeout(svcLoad,700);
 }
-$('#loadSvc').onclick=svcLoad;$('#startSvc').onclick=()=>svcSet(true);$('#stopSvc').onclick=()=>svcSet(false);svcLoad();
+$('#loadSvc').onclick=svcLoad;$('#startSvc').onclick=()=>svcSet(true);$('#stopSvc').onclick=()=>svcSet(false);
+$('#saveSvcCfg').onclick=svcCfgSave;
+svcLoad();svcCfgLoad();
 )JS" + std::string(kFileBrowserJs) + "\nfileInit();";
     }
     if (page == "tcp-forward") {

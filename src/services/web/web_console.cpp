@@ -43,6 +43,7 @@ namespace {
 
 const char* kNav[][3] = {
     {"dashboard", "仪表盘", "总览"},
+    {"channels", "通道管理", "总览"},
     {"actions", "板控动作", "操作"},
     {"button-script", "快捷/脚本", "操作"},
     {"relay", "继电器", "操作"},
@@ -51,6 +52,7 @@ const char* kNav[][3] = {
     {"share", "共享目录", "服务"},
     {"tcp-forward", "TCP 转发", "服务"},
     {"tunnel", "隧道", "服务"},
+    {"agent", "Agent 接口", "系统"},
     {"config", "配置", "系统"},
 };
 
@@ -61,6 +63,8 @@ std::string page_title(const std::string& page) {
 
 std::string page_subtitle(const std::string& page) {
     if (page == "dashboard") return "终端、通道与服务状态总览；同一份 ring，不另开设备连接。";
+    if (page == "channels") return "串口与 SSH 通道的新增、编辑、改名和删除；保存后由 UI 线程重载。";
+    if (page == "agent") return "查看本机 Agent UI 桥配置，并直接做 capabilities / tree / state / logs 自检。";
     if (page == "config") return "基础 / 详细两套表单；保存后由 UI 线程重载，避免 Web 线程直接改内存。";
     if (page == "actions") return "编辑并测试板控按钮：commands、relay、script 三种执行方式。";
     if (page == "button-script") return "管理每个通道底部的快捷指令，发送只走当前通道。";
@@ -137,6 +141,73 @@ cJSON* channel_object(cJSON* root, const std::string& name) {
         }
     }
     return nullptr;
+}
+
+// config 兼容旧版 {名字: {...}} 映射；Web 写回前统一转数组，避免把旧板卡清空。
+cJSON* ensure_channel_array(cJSON* root, const char* key) {
+    cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsArray(arr)) return arr;
+    cJSON* out = cJSON_CreateArray();
+    if (cJSON_IsObject(arr)) {
+        cJSON* child = nullptr;
+        cJSON_ArrayForEach(child, arr) {
+            cJSON* item = cJSON_Duplicate(child, 1);
+            if (cJSON_IsObject(item) && !cJSON_GetObjectItemCaseSensitive(item, "name"))
+                cJSON_AddStringToObject(item, "name", child->string ? child->string : "");
+            cJSON_AddItemToArray(out, item);
+        }
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(root, key);
+    cJSON_AddItemToObject(root, key, out);
+    return out;
+}
+
+cJSON* find_named_in_array(cJSON* arr, const std::string& name, int* index) {
+    if (!cJSON_IsArray(arr)) return nullptr;
+    int i = 0;
+    cJSON* it = nullptr;
+    cJSON_ArrayForEach(it, arr) {
+        if (cJSON_IsObject(it) && json_str(it, "name") == name) {
+            if (index) *index = i;
+            return it;
+        }
+        ++i;
+    }
+    return nullptr;
+}
+
+void copy_str_field(cJSON* dst, const cJSON* src, const char* key) {
+    const cJSON* v = cJSON_GetObjectItemCaseSensitive(src, key);
+    if (cJSON_IsString(v) && v->valuestring) {
+        cJSON_DeleteItemFromObjectCaseSensitive(dst, key);
+        cJSON_AddStringToObject(dst, key, v->valuestring);
+    }
+}
+
+void copy_int_field(cJSON* dst, const cJSON* src, const char* key, int def, int lo, int hi) {
+    const cJSON* v = cJSON_GetObjectItemCaseSensitive(src, key);
+    int n = cJSON_IsNumber(v) ? static_cast<int>(v->valuedouble) : def;
+    n = std::max(lo, std::min(hi, n));
+    cJSON_DeleteItemFromObjectCaseSensitive(dst, key);
+    cJSON_AddNumberToObject(dst, key, n);
+}
+
+void copy_bool_field(cJSON* dst, const cJSON* src, const char* key, bool def) {
+    const cJSON* v = cJSON_GetObjectItemCaseSensitive(src, key);
+    bool b = cJSON_IsBool(v) ? cJSON_IsTrue(v) : (cJSON_IsNumber(v) ? v->valuedouble != 0 : def);
+    cJSON_DeleteItemFromObjectCaseSensitive(dst, key);
+    cJSON_AddBoolToObject(dst, key, b);
+}
+
+bool valid_channel_name(const std::string& name, std::string* err) {
+    if (name.empty()) { if (err) *err = "通道名不能为空"; return false; }
+    if (name.size() > 40) { if (err) *err = "通道名过长（≤40 字符）"; return false; }
+    if (name.find('|') != std::string::npos || name.find('\n') != std::string::npos ||
+        name.find('\r') != std::string::npos) {
+        if (err) *err = "通道名不能含 | 或换行";
+        return false;
+    }
+    return true;
 }
 
 void add_action_json(cJSON* o, const BoardActionConfig& a) {
@@ -710,6 +781,42 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         reply_json(c, 200, root);
         return;
     }
+    if (path == "/log/download") {
+        std::string ch = query_var(hm, "channel");
+        auto b = bridge(ch);
+        if (!b) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
+            return;
+        }
+        uint64_t e = 0, s = 0;
+        std::string all = b->read_all(&e, &s);
+        std::string fn = "ssh-bridge-" + ch + ".log";
+        for (char& x : fn) if (!std::isalnum(static_cast<unsigned char>(x)) && x != '-' && x != '_' && x != '.') x = '_';
+        std::string hdr = "Content-Type: text/plain; charset=utf-8\r\n"
+                          "Content-Disposition: attachment; filename=\"" + fn + "\"\r\n"
+                          "Cache-Control: no-store\r\n";
+        mg_http_reply(c, 200, hdr.c_str(), "%s", all.c_str());
+        return;
+    }
+    if (path == "/log/clear") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        std::string ch = query_var(hm, "channel");
+        auto b = bridge(ch);
+        if (!b) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
+            return;
+        }
+        b->clear();
+        reply_json_text(c, 200, "{\"ok\":true,\"channel\":\"" + ch + "\"}");
+        return;
+    }
     if (path == "/write") {
         if (!write_ok(hm)) {
             reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
@@ -762,6 +869,318 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         reply_text(c, 200, core ? core->config_json_text() : "{}", "application/json; charset=utf-8");
+        return;
+    }
+    if (path == "/api/help") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddStringToObject(out, "service", "ssh-bridge-web");
+        cJSON_AddStringToObject(out, "protocol", "1.1");
+        cJSON_AddStringToObject(out, "auth", "写入接口使用 Authorization: Bearer <web.token>；只读接口公开");
+        cJSON* ops = cJSON_AddArrayToObject(out, "operations");
+        auto op = [&](const char* method, const char* path, const char* desc, const char* auth) {
+            cJSON* e = cJSON_CreateObject();
+            cJSON_AddStringToObject(e, "method", method);
+            cJSON_AddStringToObject(e, "path", path);
+            cJSON_AddStringToObject(e, "description", desc);
+            cJSON_AddStringToObject(e, "auth", auth);
+            cJSON_AddItemToArray(ops, e);
+        };
+        op("GET", "/status", "应用、通道、服务、分屏状态", "public");
+        op("GET", "/log?channel=NAME&chars=N", "通道最近回显", "public");
+        op("GET", "/log/download?channel=NAME", "下载通道日志", "public");
+        op("POST", "/log/clear?channel=NAME", "清空通道日志缓冲", "token");
+        op("GET", "/ws/log?channel=NAME", "WebSocket 二进制回显流", "public");
+        op("POST", "/write?channel=NAME", "向通道发送文本", "token");
+        op("GET", "/api/help", "本机可读接口清单", "public");
+        op("GET", "/api/config", "完整配置 JSON（含密钥，需 token）", "token");
+        op("POST", "/api/config/save", "保存完整配置 JSON", "token");
+        op("GET", "/api/channels", "串口/SSH 通道列表", "token");
+        op("POST", "/api/channels", "新增或编辑通道 {kind,old_name,channel}", "token");
+        op("POST", "/api/channels/delete", "删除通道 {kind,name}", "token");
+        op("GET", "/api/actions", "板控动作列表", "public");
+        op("POST", "/api/actions", "新增/编辑板控动作", "token");
+        op("POST", "/api/actions/delete", "删除板控动作", "token");
+        op("GET", "/api/quick/commands", "快捷指令列表", "public");
+        op("POST", "/api/quick/commands", "新增/编辑快捷指令", "token");
+        op("GET", "/api/relay/devices", "继电器设备列表", "public");
+        op("POST", "/api/relay/devices", "新增/编辑继电器设备", "token");
+        op("POST", "/api/relay/devices/delete", "删除继电器设备", "token");
+        op("GET", "/api/files?path=REL", "共享根目录列表", "public");
+        op("POST", "/api/files/upload", "上传 multipart 文件", "token");
+        op("GET", "/api/files/download?path=REL", "下载共享文件", "public");
+        op("POST", "/api/files/delete", "删除共享文件/空目录", "token");
+        op("POST", "/api/files/mkdir", "新建共享目录", "token");
+        op("GET", "/api/tftp/config", "TFTP 配置", "public");
+        op("POST", "/api/tftp/config", "保存 TFTP 配置", "token");
+        op("GET", "/api/nfs/config", "NFS 配置", "public");
+        op("POST", "/api/nfs/config", "保存 NFS 配置", "token");
+        op("GET", "/api/share/config", "HTTP 共享配置", "public");
+        op("POST", "/api/share/config", "保存 HTTP 共享配置", "token");
+        op("GET", "/api/tcp-forward", "TCP 转发运行状态", "public");
+        op("GET", "/api/tcp-forward/config", "TCP 转发配置", "public");
+        op("POST", "/api/tcp-forward/config", "保存 TCP 转发配置", "token");
+        op("GET", "/api/tunnel", "隧道运行状态", "public");
+        op("GET", "/api/tunnel/config", "隧道配置", "public");
+        op("POST", "/api/tunnel/config", "保存隧道配置", "token");
+        op("GET", "/api/agent/status", "Agent UI 桥配置与端点", "token");
+        op("POST", "/service", "启停服务 {name,on}", "token");
+        op("POST", "/action", "执行板控动作 {id,backend?}", "token");
+        op("GET", "/job?id=N", "查询动作输出", "public");
+        cJSON* pages = cJSON_AddArrayToObject(out, "pages");
+        for (const char* p : {"dashboard", "channels", "actions", "button-script", "relay", "tftp",
+                              "nfs", "share", "tcp-forward", "tunnel", "agent", "config"})
+            cJSON_AddItemToArray(pages, cJSON_CreateString(p));
+        reply_json(c, 200, out);
+        return;
+    }
+    if (path == "/api/agent/status") {
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"agent status requires Bearer token\"}");
+            return;
+        }
+        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
+        cJSON* agent = cJSON_IsObject(root) ? cJSON_GetObjectItemCaseSensitive(root, "agent") : nullptr;
+        int port = agent ? json_int(agent, "port", 18096) : 18096;
+        bool enable = agent ? json_bool(agent, "enable", true) : true;
+        std::string token = agent ? json_str(agent, "token") : std::string();
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddBoolToObject(out, "enable", enable);
+        cJSON_AddNumberToObject(out, "port", port);
+        cJSON_AddBoolToObject(out, "token_required", !token.empty());
+        cJSON_AddStringToObject(out, "base_url", ("http://127.0.0.1:" + std::to_string(port)).c_str());
+        cJSON* eps = cJSON_AddArrayToObject(out, "endpoints");
+        for (const char* e : {"/ping", "/capabilities", "/ui-tree", "/control?id=ID", "/state",
+                              "/action", "/logs?since=N"})
+            cJSON_AddItemToArray(eps, cJSON_CreateString(e));
+        cJSON_Delete(root);
+        reply_json(c, 200, out);
+        return;
+    }
+    if (path == "/api/channels") {
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"channels requires Bearer token\"}");
+            return;
+        }
+        if (!core) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"core not ready\"}");
+            return;
+        }
+        if (!method_is(hm, "GET") && !method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET or POST required\"}");
+            return;
+        }
+        cJSON* root = cJSON_Parse(core->config_json_text().c_str());
+        if (!cJSON_IsObject(root)) {
+            cJSON_Delete(root);
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"config parse failed\"}");
+            return;
+        }
+        if (method_is(hm, "GET")) {
+            ensure_channel_array(root, "boards");
+            ensure_channel_array(root, "ssh");
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", true);
+            cJSON_AddItemToObject(out, "boards",
+                                  cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(root, "boards"), 1));
+            cJSON_AddItemToObject(out, "ssh",
+                                  cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(root, "ssh"), 1));
+            cJSON_Delete(root);
+            reply_json(c, 200, out);
+            return;
+        }
+
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        cJSON* ch = body ? cJSON_GetObjectItemCaseSensitive(body, "channel") : nullptr;
+        std::string kind = body ? json_str(body, "kind") : std::string();
+        std::string old_name = body ? util::trim(json_str(body, "old_name")) : std::string();
+        std::string name = cJSON_IsObject(ch) ? util::trim(json_str(ch, "name")) : std::string();
+        std::string err;
+        if (!cJSON_IsObject(ch) || (kind != "serial" && kind != "ssh") ||
+            !valid_channel_name(name, &err)) {
+            cJSON_Delete(body);
+            cJSON_Delete(root);
+            cJSON* e = cJSON_CreateObject();
+            cJSON_AddBoolToObject(e, "ok", false);
+            cJSON_AddStringToObject(e, "error", err.empty() ? "kind/channel/name invalid" : err.c_str());
+            reply_json(c, 400, e);
+            return;
+        }
+        ensure_channel_array(root, "boards");
+        ensure_channel_array(root, "ssh");
+        if (channel_object(root, name) && name != old_name) {
+            cJSON_Delete(body);
+            cJSON_Delete(root);
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"通道名已存在\"}");
+            return;
+        }
+        cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
+        int idx = -1;
+        cJSON* target = find_named_in_array(arr, old_name.empty() ? name : old_name, &idx);
+        if (!target && !old_name.empty()) {
+            cJSON_Delete(body);
+            cJSON_Delete(root);
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"通道不存在\"}");
+            return;
+        }
+        bool created = false;
+        if (!target) {
+            target = cJSON_CreateObject();
+            cJSON_AddItemToArray(arr, target);
+            created = true;
+        }
+        if (!name.empty()) {
+            cJSON_DeleteItemFromObjectCaseSensitive(target, "name");
+            cJSON_AddStringToObject(target, "name", name.c_str());
+        }
+        if (kind == "serial") {
+            std::string dev = util::trim(json_str(ch, "serial_device"));
+            if (dev.empty()) {
+                cJSON_Delete(body);
+                cJSON_Delete(root);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"串口设备不能为空\"}");
+                return;
+            }
+            copy_str_field(target, ch, "serial_device");
+            copy_int_field(target, ch, "baudrate", 115200, 50, 4000000);
+            copy_int_field(target, ch, "databits", 8, 5, 8);
+            copy_str_field(target, ch, "parity");
+            copy_int_field(target, ch, "stopbits_x10", 10, 10, 20);
+            copy_str_field(target, ch, "flowcontrol");
+            copy_bool_field(target, ch, "dtr", true);
+            copy_bool_field(target, ch, "rts", true);
+            copy_str_field(target, ch, "line_ending");
+            copy_str_field(target, ch, "encoding");
+            copy_bool_field(target, ch, "auto_open", true);
+            copy_bool_field(target, ch, "timestamp", false);
+            copy_bool_field(target, ch, "discoverable", false);
+            copy_str_field(target, ch, "username");
+            copy_str_field(target, ch, "password");
+            copy_bool_field(target, ch, "log_enabled", true);
+        } else {
+            std::string host = util::trim(json_str(ch, "host"));
+            if (host.empty()) {
+                cJSON_Delete(body);
+                cJSON_Delete(root);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"SSH 主机不能为空\"}");
+                return;
+            }
+            copy_str_field(target, ch, "host");
+            copy_int_field(target, ch, "port", 22, 1, 65535);
+            copy_str_field(target, ch, "username");
+            copy_str_field(target, ch, "password");
+            copy_str_field(target, ch, "term");
+            copy_int_field(target, ch, "width", 120, 40, 500);
+            copy_int_field(target, ch, "height", 32, 10, 200);
+            copy_int_field(target, ch, "connect_timeout_ms", 5000, 100, 120000);
+            const cJSON* ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive");
+            if (!cJSON_IsNumber(ka)) ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive_s");
+            copy_int_field(target, ch, "keepalive", cJSON_IsNumber(ka) ? static_cast<int>(ka->valuedouble) : 3,
+                          0, 3600);
+            copy_bool_field(target, ch, "discoverable", false);
+            copy_bool_field(target, ch, "log_enabled", true);
+        }
+        // 改名时同步分屏画框里保存的通道名。
+        if (!old_name.empty() && old_name != name) {
+            cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
+            cJSON* panes = ui ? cJSON_GetObjectItemCaseSensitive(ui, "pane_channels") : nullptr;
+            if (cJSON_IsArray(panes)) {
+                std::vector<int> hit;
+                int i = 0;
+                for (cJSON* p = panes->child; p; p = p->next, ++i) {
+                    if (cJSON_IsString(p) && p->valuestring && old_name == p->valuestring) hit.push_back(i);
+                }
+                for (int h : hit) cJSON_ReplaceItemInArray(panes, h, cJSON_CreateString(name.c_str()));
+            }
+        }
+        if (created) {
+            const cJSON* buttons = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
+            if (buttons) cJSON_AddItemToObject(target, "buttons", cJSON_Duplicate(buttons, 1));
+            const cJSON* quick = cJSON_GetObjectItemCaseSensitive(ch, "quick_commands");
+            if (quick) cJSON_AddItemToObject(target, "quick_commands", cJSON_Duplicate(quick, 1));
+        }
+        std::string text = json_text(root, false), save_err;
+        bool saved = core->save_config_json(text, &save_err);
+        cJSON_Delete(body);
+        if (!saved) {
+            cJSON* e = cJSON_CreateObject();
+            cJSON_AddBoolToObject(e, "ok", false);
+            cJSON_AddStringToObject(e, "error", save_err.c_str());
+            reply_json(c, 500, e);
+            return;
+        }
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddStringToObject(out, "name", name.c_str());
+        cJSON_AddStringToObject(out, "kind", kind.c_str());
+        reply_json(c, 200, out);
+        if (notify) PostMessageW(static_cast<HWND>(notify), kMsgWebReload, 0, 0);
+        return;
+    }
+    if (path == "/api/channels/delete") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"channels requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string kind = body ? json_str(body, "kind") : std::string();
+        std::string name = body ? util::trim(json_str(body, "name")) : std::string();
+        if (!cJSON_IsObject(body) || (kind != "serial" && kind != "ssh") || name.empty()) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"kind/name required\"}");
+            return;
+        }
+        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
+        if (!cJSON_IsObject(root)) {
+            cJSON_Delete(body);
+            cJSON_Delete(root);
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"config parse failed\"}");
+            return;
+        }
+        cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
+        int idx = -1;
+        cJSON* target = find_named_in_array(arr, name, &idx);
+        if (!target) {
+            cJSON_Delete(body);
+            cJSON_Delete(root);
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"通道不存在\"}");
+            return;
+        }
+        cJSON_DeleteItemFromArray(arr, idx);
+        cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
+        cJSON* panes = ui ? cJSON_GetObjectItemCaseSensitive(ui, "pane_channels") : nullptr;
+        if (cJSON_IsArray(panes)) {
+            std::vector<int> hit;
+            int i = 0;
+            for (cJSON* p = panes->child; p; p = p->next, ++i) {
+                if (cJSON_IsString(p) && p->valuestring && name == p->valuestring) hit.push_back(i);
+            }
+            for (int h : hit) cJSON_ReplaceItemInArray(panes, h, cJSON_CreateString(""));
+        }
+        cJSON_Delete(body);
+        std::string text = json_text(root, false), save_err;
+        bool saved = core->save_config_json(text, &save_err);
+        if (!saved) {
+            cJSON* e = cJSON_CreateObject();
+            cJSON_AddBoolToObject(e, "ok", false);
+            cJSON_AddStringToObject(e, "error", save_err.c_str());
+            reply_json(c, 500, e);
+            return;
+        }
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddStringToObject(out, "name", name.c_str());
+        reply_json(c, 200, out);
+        if (notify) PostMessageW(static_cast<HWND>(notify), kMsgWebReload, 0, 0);
         return;
     }
     if (path == "/api/actions") {
@@ -1484,6 +1903,72 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         reply_json_text(c, 200, "{\"ok\":true,\"path\":\"" + rel + "\"}");
+        return;
+    }
+    if (path == "/api/tftp/config" || path == "/api/nfs/config" || path == "/api/share/config") {
+        const std::string key = path.find("tftp") != std::string::npos ? "tftp"
+                              : path.find("nfs") != std::string::npos ? "nfs" : "share";
+        if (method_is(hm, "POST")) {
+            if (!write_ok(hm)) {
+                reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+                return;
+            }
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            if (!cJSON_IsObject(body)) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+                return;
+            }
+            bool enable = json_bool(body, "enable", false);
+            int port = json_int(body, "port", key == "tftp" ? 69 : (key == "nfs" ? 2049 : 18082));
+            std::string root = util::trim(json_str(body, "root"));
+            std::string bind_ip = util::trim(json_str(body, "bind_ip"));
+            std::string alias = util::trim(json_str(body, "alias"));
+            int uid = json_int(body, "uid", 0);
+            int gid = json_int(body, "gid", 0);
+            bool allow_write = json_bool(body, "allow_write", true);
+            cJSON_Delete(body);
+            if ((key != "nfs" && (port < 1 || port > 65535)) || uid < 0 || uid > 65535 || gid < 0 || gid > 65535) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"端口或 UID/GID 超出范围\"}");
+                return;
+            }
+            if (key == "nfs" && (!alias.empty() && alias[0] != '/')) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"NFS 别名必须以 / 开头\"}");
+                return;
+            }
+            std::string err;
+            bool ok = patch_config([&](cJSON* cfg_root) -> bool {
+                cJSON_DeleteItemFromObjectCaseSensitive(cfg_root, key.c_str());
+                cJSON* sec = cJSON_AddObjectToObject(cfg_root, key.c_str());
+                if (!sec) { err = "cannot create service config"; return false; }
+                cJSON_AddBoolToObject(sec, "enable", enable);
+                if (key == "nfs") {
+                    cJSON_AddStringToObject(sec, "alias", alias.empty() ? "/share" : alias.c_str());
+                    cJSON_AddNumberToObject(sec, "uid", uid);
+                    cJSON_AddNumberToObject(sec, "gid", gid);
+                } else {
+                    cJSON_AddNumberToObject(sec, "port", port);
+                    if (key == "tftp") {
+                        cJSON_AddStringToObject(sec, "bind_ip", bind_ip.c_str());
+                        cJSON_AddBoolToObject(sec, "allow_write", allow_write);
+                    }
+                }
+                cJSON_AddStringToObject(sec, "root", root.c_str());
+                return true;
+            }, &err);
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", ok);
+            cJSON_AddStringToObject(out, "error", err.c_str());
+            reply_json(c, ok ? 200 : 400, out);
+            return;
+        }
+        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
+        cJSON* sec = cJSON_IsObject(root) ? cJSON_GetObjectItemCaseSensitive(root, key.c_str()) : nullptr;
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddItemToObject(out, "config", cJSON_IsObject(sec) ? cJSON_Duplicate(sec, 1) : cJSON_CreateObject());
+        cJSON_Delete(root);
+        reply_json(c, 200, out);
         return;
     }
     if (path == "/service") {
