@@ -51,10 +51,11 @@ RESULT: ALL PASS
 
 ### 2.3 打包与升级
 
-- r13 zip：4,217,680 B，SHA-256 `86718DE1DE48D82DF117132C6E4ADC91FBB8C9DD6E5EBCC22B32C3348091601D`
+- r13 zip：4,217,716 B，SHA-256 `2E3626CB82EE0FE322E76A83AA0AE494E31A5F93D00DBC2E929D2E9834F92A21`
 - exe：SHA-256 `5797513875B70E7D491AA12EE8C0E606D28AB8CA8176C8FE75CF7035DD291894`
-- 独立包 `output\s13-dist-test3` 冒烟 9/9 PASS。
+- 独立包 `output\s13-dist-test4` 冒烟 9/9 PASS。
 - 本地 r12 → r13 升级：旧 pid 27220 被停止，新 pid 30676 自动启动，`VERSION.txt=3.0-s13-r13`，安装后 exe SHA 与清单一致。
+- 更新器优先下载 GitHub Release 资产，raw 分支作为备用；在 raw 连接被重置的网络下，`update-asset2` 仍从 Release 资产完成 r12 → r13 升级。
 
 ## 3. 边界
 
