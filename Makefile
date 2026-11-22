@@ -76,6 +76,7 @@ SOURCES := \
   src/services/tunnel/tunnel_manager.cpp \
   src/services/discovery/discovery_service.cpp \
   src/services/web/web_console.cpp \
+  src/services/web/web_pages.cpp \
   src/services/service_manager.cpp
 
 THIRD_SOURCES := \
