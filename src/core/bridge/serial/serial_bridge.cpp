@@ -370,6 +370,7 @@ std::string SerialBridge::status_json() const {
     cJSON_AddNumberToObject(o, "baudrate", cfg_.baudrate);
     cJSON_AddNumberToObject(o, "buffer", static_cast<double>(core_.log().capacity()));
     cJSON_AddNumberToObject(o, "total", static_cast<double>(core_.log().total()));
+    cJSON_AddNumberToObject(o, "epoch", static_cast<double>(core_.log().epoch()));
     cJSON_AddNumberToObject(o, "rx_bytes", static_cast<double>(core_.rx_bytes()));
     cJSON_AddNumberToObject(o, "tx_bytes", static_cast<double>(core_.tx_bytes()));
     cJSON_AddNumberToObject(o, "echo_latency_us", static_cast<double>(core_.echo_latency_us()));

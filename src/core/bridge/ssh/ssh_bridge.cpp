@@ -274,6 +274,8 @@ std::string SshBridge::status_json() const {
     cJSON_AddNumberToObject(o, "echo_count", static_cast<double>(core_.echo_count()));
     cJSON_AddNumberToObject(o, "queue", static_cast<double>(cmds_.depth()));
     cJSON_AddNumberToObject(o, "buffer", static_cast<double>(core_.log().capacity()));
+    cJSON_AddNumberToObject(o, "total", static_cast<double>(core_.log().total()));
+    cJSON_AddNumberToObject(o, "epoch", static_cast<double>(core_.log().epoch()));
     cJSON_AddBoolToObject(o, "log_enabled", cfg_.log_enabled);
     char* s = cJSON_PrintUnformatted(o);
     std::string out = s ? s : "{}";

@@ -32,12 +32,12 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A2-1 | `/status?view=agent` | 精简通道表、服务、锁摘要；不含 UI 树 | `agent_scan.cpp` | 5 通道、服务、锁字段正确 | 计划 |
-| A2-2 | `/agent/scan` | 连接态、终端态、缓冲区、按钮、features、错误、网段 | `agent_scan.cpp` | 全通道无遗漏；只读不发字节 | 计划 |
-| A2-3 | `/agent/probe` | 被动读日志尾部；五态状态机 + unknown；confidence | `agent_scan.cpp` | shell/login/password/uboot/disconnected 各 1 例 | 计划 |
-| A2-4 | `/agent/state` | 单通道连接、终端、游标、锁、最近动作、last_error | `agent_scan.cpp` | 与 `/status` 同源；无重复状态 | 计划 |
-| A2-5 | `/actions?view=agent` | id/label/backend/enabled/kind/requires_lock；与 UI 按钮同源 | `agent_scan.cpp` | 与 `/api/actions` 数量/id 一致；disabled 正确 | 计划 |
-| A2-6 | 只读保证 | probe/scan/state 不写 cmdq、不发 Enter、不打开串口 | `agent_scan.cpp` | 调用前后 TX 字节数不变 | 计划 |
+| A2-1 | `/status?view=agent` | 精简通道表、服务、锁摘要；不含 UI 树 | `agent_scan.cpp` | 5 通道、服务、锁字段正确 | 已完成 |
+| A2-2 | `/agent/scan` | 连接态、终端态、缓冲区、按钮、features、错误、网段 | `agent_scan.cpp` | 全通道无遗漏；只读不发字节 | 已完成 |
+| A2-3 | `/agent/probe` | 被动读日志尾部；五态状态机 + unknown；confidence | `agent_scan.cpp` | shell/login/password/uboot/disconnected 各 1 例 | 已完成 |
+| A2-4 | `/agent/state` | 单通道连接、终端、游标、锁、最近动作、last_error | `agent_scan.cpp` | 与 `/status` 同源；无重复状态 | 已完成 |
+| A2-5 | `/actions?view=agent` | id/label/backend/enabled/kind/requires_lock；与 UI 按钮同源 | `agent_scan.cpp` | 与 `/api/actions` 数量/id 一致；disabled 正确 | 已完成 |
+| A2-6 | 只读保证 | probe/scan/state 不写 cmdq、不发 Enter、不打开串口 | `agent_scan.cpp` | 调用前后 TX 字节数不变 | 已完成 |
 
 ## 3. P0-C：日志增量与持久化
 
@@ -175,3 +175,18 @@ C1 完成前不写 C2；C4 完成前不做 C5；A10-7（关闭 18096）必须在
 - 验证：`agent-contract-smoke` 82/82、`api-smoke` 58/58、`api-v3-smoke` 43/43、`agent-smoke` 63/63、`web-v3-audit` 120/120。
 - 隔离验证：`agent.enable=false` 时 18081 三处 `ui_bridge.enabled` 均为 false、18096 端口关闭，4/4；证据 `output/ux-audit/agent-contract-ui-disabled.json`。
 - 旧 `web-audit-round5.js` 仍在等待已不存在的 `#tcpBox`，属过期选择器；现行页面审计以 `web-v3-audit.js` 为准。
+
+## 14. C2 完成记录（2026-11-23）
+
+- 新增 `src/services/agent/agent_scan.{h,cpp}`：统一通道对象、只读上下文、被动终端探测、Agent 按钮视图；不写 cmdq、不发 Enter、不打开串口、不调用 18096。
+- 新增路由：`GET /status?view=agent`、`GET /agent/scan`、`GET /agent/probe`、`GET /agent/state`、`GET /actions?view=agent`；非 GET 全部 405 结构化错误。
+- `serial_bridge::status_json()` 增加 `epoch`；`ssh_bridge::status_json()` 增加 `total/epoch`，供状态与后续 `/log?since=` 使用。
+- `/api/help` 已实现操作由 45 增至 49，新增 `agent.scan.get`、`agent.probe.get`、`agent.state.get`、`actions.agent.get`。
+- `agent_scan` 通道对象提供 `name/kind/detail/running/started/state`、`connection`、`buffer(capacity/total/epoch/disk)`、`counters`、`terminal`、`buttons`、`features`；`total` 即下一次增量读取的候选 `since`。
+- 终端态按“最靠后命中”判定：未运行 `disconnected/high`；`login:/username:`、`password:`、`U-Boot>`/`=>`/`Hit any key`、`root@`/末行 `$`/`#`；无标记 `unknown/low`；末尾 80 字节内 `high`，否则 `medium`。`tail` clamp 64–16384，默认 2048；evidence 最多 120 字符。
+- 锁与动作审计仍显式占位：`locks.enforced=false`、`note=lease lock lands in C5`；`/agent/state.last_action=null`、`note=action audit lands in C4/C6`，不伪造能力。
+- 验证：C2 `agent-context-smoke` 73/73；C1 `agent-contract-smoke` 82/82；`api-smoke` 58/58；`api-v3-smoke` 43/43；`agent-smoke` 63/63；`web-v3-audit` 120/120。
+- 只读断言：scan/probe/state 调用前后 `tx_bytes` 相等；终端五类注入 + 离线通道六态均通过。
+- 隔离验证：`agent.enable=false` 时 18081 的 health/help/status 均报告 `ui_bridge.enabled:false`，18096 端口关闭，且 `/agent/scan` 仍返回 5 通道，5/5；证据 `output/ux-audit/agent-context-ui-disabled.json`。
+- 结果与脚本：`output/webtest/agent-context-smoke.js`、`output/ux-audit/agent-context-result.json`；构建日志 `output/wc-build.log`。
+- 测试后已恢复基线配置 `output/ux-audit/config-before-web.json`，SHA-256 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`；当前运行仅 18096，18081 关闭。

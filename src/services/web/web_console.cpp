@@ -35,6 +35,7 @@
 #include "core/bridge/bridge.h"
 #include "core/util/util.h"
 #include "services/agent/agent_contract.h"
+#include "services/agent/agent_scan.h"
 #include "services/board_actions/board_action_runner.h"
 #include "services/service_manager.h"
 #include "ui/ui_messages.h"
@@ -802,6 +803,71 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         cJSON_AddStringToObject(out, "kind", r.kind.c_str());
         cJSON_AddBoolToObject(out, "running", r.running);
         reply_json(c, 200, out);
+        return;
+    }
+    if (path == "/status" && query_var(hm, "view") == "agent") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        reply_json_text(c, 200, agent::status_agent_json(core, services));
+        return;
+    }
+    if (path == "/agent/scan") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        reply_json_text(c, 200, agent::scan_json(core, services));
+        return;
+    }
+    if (path == "/agent/probe") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        agent::ResolveResult r = agent::resolve_channel(core, query_var(hm, "board"),
+                                                        query_var(hm, "link"), query_var(hm, "channel"));
+        if (!r.ok) {
+            reply_json_text(c, r.http_status,
+                            agent::error_json(r.error_code, r.error_message, new_request_id()));
+            return;
+        }
+        int tail = std::atoi(query_var(hm, "tail", "2048").c_str());
+        reply_json_text(c, 200, agent::probe_json(core, r.name, tail));
+        return;
+    }
+    if (path == "/agent/state") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        agent::ResolveResult r = agent::resolve_channel(core, query_var(hm, "board"),
+                                                        query_var(hm, "link"), query_var(hm, "channel"));
+        if (!r.ok) {
+            reply_json_text(c, r.http_status,
+                            agent::error_json(r.error_code, r.error_message, new_request_id()));
+            return;
+        }
+        reply_json_text(c, 200, agent::state_json(core, services, r.name));
+        return;
+    }
+    if (path == "/actions" && query_var(hm, "view") == "agent") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        std::string channel = query_var(hm, "channel");
+        if (!channel.empty()) {
+            agent::ResolveResult r = agent::resolve_channel(core, "", "", channel);
+            if (!r.ok) {
+                reply_json_text(c, r.http_status,
+                                agent::error_json(r.error_code, r.error_message, new_request_id()));
+                return;
+            }
+            channel = r.name;
+        }
+        reply_json_text(c, 200, agent::actions_agent_json(core, channel));
         return;
     }
     if (path == "/favicon.ico") {
