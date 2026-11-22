@@ -42,7 +42,7 @@ python tests\terminal_bracketed_paste.py --base http://127.0.0.1:18096 --channel
 - [ ] 多打 `Z` 后 DEL 再补 `K`，输出 `BACK_<tag>_K`
 - [ ] 物理消息路径：`terminal_physical_key_check.ps1` 报 `PHY-backspace`、`PHY-up` 均 PASS（1 B / 3 B）
 - [ ] 分屏路由：`terminal_pane_routing_check.ps1` 6 项 PASS，`term.send` 与 `WM_KEYDOWN` 只增活动窗格通道
-- [ ] bracketed paste：`terminal_bracketed_paste.py` 的 hold / submit 均 PASS；`--selftest term` 含 `T4U-13`
+- [ ] bracketed paste：`terminal_bracketed_paste.py` 的 hold / submit 均 PASS；该用例走 `term.paste_text`，不依赖剪贴板；`--selftest term` 含 `T4U-13`
 
 ## 配套门禁
 
@@ -53,5 +53,5 @@ python tests\terminal_bracketed_paste.py --base http://127.0.0.1:18096 --channel
 
 ## 最近一次结果
 
-- 回环 11/11、`ssh-demo1` 5/5、`ssh-demo2` 5/5、`ztl-com3` 5/5、`ok3568-com5` 5/5；物理消息路径 `PHY-backspace` / `PHY-up` PASS；分屏路由 6/6 PASS
-- 产品代码与 r15 一致；本轮仅测试脚本与文档变化，未重发安装包
+- 回环 11/11、`ssh-demo1` 5/5、`ssh-demo2` 5/5、`ztl-com3` 5/5、`ok3568-com5` 5/5；物理消息路径 `PHY-backspace` / `PHY-up` PASS；分屏路由 6/6 PASS；`term.paste_text` 真实 SSH hold/submit ALL PASS
+- 产品代码为 r17：新增无剪贴板桥动作 `term.paste_text`，UI 桥控件数 72；`ui_bridge_check` 41 项、`step0/1/3/4`、`quality_gate` 126 个源文件全部 PASS

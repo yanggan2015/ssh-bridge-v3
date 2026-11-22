@@ -2,7 +2,8 @@ param(
     [string]$Out = 'C:\code\ssh-bridge-windows3\output\acceptance\s13\window.png',
     [string]$Id = '',
     [int]$W = 0,
-    [int]$H = 0
+    [int]$H = 0,
+    [string]$Base = 'http://127.0.0.1:18086'
 )
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -18,7 +19,7 @@ public class PW4 {
 }
 "@
 [PW4]::SetProcessDPIAware() | Out-Null
-$tree = Invoke-RestMethod 'http://127.0.0.1:18086/ui-tree' -TimeoutSec 10
+$tree = Invoke-RestMethod "$Base/ui-tree" -TimeoutSec 10
 $ctl = if ($Id) { $tree.controls | Where-Object { $_.id -eq $Id } | Select-Object -First 1 } else { $tree.controls | Select-Object -First 1 }
 $root = [PW4]::GetAncestor([IntPtr]::new([Int64]$ctl.hwnd), 2)
 if ($W -gt 0 -and $H -gt 0) {

@@ -27,7 +27,7 @@ $expected = @(
     'menu.view.copy', 'menu.view.paste', 'menu.view.reload', 'menu.view.clear',
     'menu.view.findnext', 'menu.view.focussearch',
     'menu.tray.show', 'menu.tray.hide', 'menu.tray.exit',
-    'term.input', 'term.send', 'term.search', 'term.scroll',
+    'term.input', 'term.send', 'term.paste_text', 'term.search', 'term.scroll',
     'term.clear', 'term.copy', 'term.paste', 'term.reload', 'term.focus',
     'term.split1', 'term.split2', 'term.split4'
 )
