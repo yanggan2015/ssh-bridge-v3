@@ -1065,7 +1065,12 @@ void Shell::on_channel_applied(const std::string& name, int ms) {
         refresh_channels(name);
         note_status(L"通道已生效：" + widen(name) + L" · " + std::to_wstring(ms) + L" ms");
     } else {
-        refresh_channels(std::string());
+        // 删除当前通道后优先切到第一条剩余通道，避免留下空终端。
+        std::string next;
+        for (const AppCore::Entry& e : core_->entries()) {
+            if (!e.name.empty()) { next = e.name; break; }
+        }
+        refresh_channels(next);
         note_status(L"已删除通道：" + widen(name) + L" · " + std::to_wstring(ms) + L" ms");
     }
     dump_state();

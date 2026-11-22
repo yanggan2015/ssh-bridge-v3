@@ -4,6 +4,7 @@
 界面直读同一份环形日志；附带只监听 `127.0.0.1` 的 AI 控件桥。
 
 - 窗口自适应：客户区 `<820 DIP` 自动收起左侧通道管理器，`>=820 DIP` 自动恢复；工具栏“收起/展开”和 `Ctrl+B` 可手动切换，最小窗口 `480 × 480 DIP`。
+- 删除通道：两次确认后落盘；删除当前通道会切到第一条剩余通道，不会留下空终端。
 
 - 源码仓库：<https://github.com/yanggan2015/ssh-bridge-v3>
 - 二进制发布仓库：<https://github.com/yanggan2015/ssh-bridge-v3-releases>
@@ -136,6 +137,8 @@ pwsh -NoProfile -File tests\step4_check.ps1          # 需 python + paramiko；-
 pwsh -NoProfile -File tests\ui_bridge_check.ps1
 # 响应式验收（9 项；需应用已在 18086 运行）
 pwsh -NoProfile -File tests\ui_responsive_check.ps1
+# 删除通道闭环（8 项；自行起隔离实例，串口/SSH/最后一个通道）
+pwsh -NoProfile -File tests\ui_delete_channel_check.ps1
 # 打包分发（exe + 示例配置 + 使用说明 + ui_probe）
 pwsh -NoProfile -File scripts\package.ps1
 # 只看数据面
