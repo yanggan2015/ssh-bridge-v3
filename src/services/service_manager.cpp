@@ -519,7 +519,7 @@ std::string ServiceManager::state_json() const {
     cJSON* root = cJSON_CreateObject();
     cJSON* t = cJSON_AddObjectToObject(root, "tftp");
     cJSON_AddBoolToObject(t, "on", tftp_running());
-    cJSON_AddNumberToObject(t, "port", tftp_ ? tftp_svc_port(tftp_) : cfg_.tftp.port);
+    cJSON_AddNumberToObject(t, "port", tftp_running() ? tftp_svc_port(tftp_) : cfg_.tftp.port);
     cJSON_AddStringToObject(t, "root", tftp_running() ? tftp_svc_root(tftp_) : share_root_.c_str());
     cJSON_AddStringToObject(t, "note", tftp_status().c_str());
     cJSON* s = cJSON_AddObjectToObject(root, "share");

@@ -12,15 +12,20 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <deque>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <map>
 #include <mutex>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -36,11 +41,17 @@
 namespace sb3 {
 namespace {
 
-const char* kNav[][2] = {
-    {"dashboard", "仪表盘"}, {"config", "配置"}, {"actions", "板控动作"},
-    {"button-script", "快捷/脚本"}, {"relay", "继电器"}, {"tftp", "TFTP"},
-    {"nfs", "NFS"}, {"share", "共享目录"}, {"tcp-forward", "TCP 转发"},
-    {"tunnel", "隧道"},
+const char* kNav[][3] = {
+    {"dashboard", "仪表盘", "总览"},
+    {"actions", "板控动作", "操作"},
+    {"button-script", "快捷/脚本", "操作"},
+    {"relay", "继电器", "操作"},
+    {"tftp", "TFTP", "服务"},
+    {"nfs", "NFS", "服务"},
+    {"share", "共享目录", "服务"},
+    {"tcp-forward", "TCP 转发", "服务"},
+    {"tunnel", "隧道", "服务"},
+    {"config", "配置", "系统"},
 };
 
 std::string page_title(const std::string& page) {
@@ -48,9 +59,28 @@ std::string page_title(const std::string& page) {
     return "ssh-bridge";
 }
 
+std::string page_subtitle(const std::string& page) {
+    if (page == "dashboard") return "终端、通道与服务状态总览；同一份 ring，不另开设备连接。";
+    if (page == "config") return "基础 / 详细两套表单；保存后由 UI 线程重载，避免 Web 线程直接改内存。";
+    if (page == "actions") return "编辑并测试板控按钮：commands、relay、script 三种执行方式。";
+    if (page == "button-script") return "管理每个通道底部的快捷指令，发送只走当前通道。";
+    if (page == "relay") return "管理继电器设备、端口与通道，并做 ON/OFF/脉冲测试。";
+    if (page == "tftp") return "TFTP 启停、端口与根目录状态，以及共享文件管理。";
+    if (page == "nfs") return "NFS 导出状态、共享根目录与文件管理。";
+    if (page == "share") return "HTTP 共享状态、访问地址与共享文件管理。";
+    if (page == "tcp-forward") return "板卡 IP 末段映射到本地端口；保存后由 UI 线程重载。";
+    if (page == "tunnel") return "外部 eadk-tunnel / frpc 子进程；HTTP 与入站 SSH 分别映射。";
+    return "同一份通道 ring / cmdq。";
+}
+
 std::string nav_html(const std::string& page) {
     std::string out;
+    std::string group;
     for (const auto& n : kNav) {
+        if (group != n[2]) {
+            group = n[2];
+            out += "<div class=\"nav-title\">" + group + "</div>";
+        }
         out += "<a href=\"/" + std::string(n[0]) + "\"" +
                (page == n[0] ? " class=\"on\"" : "") + ">" + n[1] + "</a>";
     }
@@ -62,17 +92,212 @@ std::string page_shell(const std::string& page, const std::string& body, const s
                        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                        "<title>" + page_title(page) + " · ssh-bridge</title>"
                        "<link rel=\"stylesheet\" href=\"/static/app.css\"></head><body><div class=\"layout\">"
-                       "<aside><div class=\"brand\">ssh-bridge<small>v3 · Web 控制台</small></div><nav>" +
-                       nav_html(page) + "</nav><div class=\"aside-foot\">S9 · HTTP + WS<br>read-only 无 token</div></aside>"
-                       "<main><header><div><h1>" + page_title(page) + "</h1><div class=\"sub\">同一份通道 ring / cmdq，不另开设备连接。</div></div>"
-                       "<div class=\"row\"><input id=\"tokenBox\" type=\"password\" placeholder=\"Bearer token\"><button id=\"saveToken\">保存 token</button></div></header>" +
-                       body + "<script src=\"/static/app.js\"></script><script>" + script + "</script></main></div></body></html>";
+                       "<aside class=\"sidebar\"><a class=\"brand\" href=\"/dashboard\"><span class=\"brand-mark\">SB</span><span><strong>ssh-bridge</strong><small>v3 · Web 控制台</small></span></a><nav>" +
+                       nav_html(page) + "</nav><div class=\"sidebar-foot\"><div class=\"side-status\"><span class=\"status-dot\" id=\"sideDot\"></span><span id=\"sideState\">只读模式</span></div><div class=\"side-meta\">S9 · HTTP + WS<br>Bearer token · 仅本机/受信网络</div></div></aside>"
+                       "<main><div class=\"shell\"><header class=\"page-head\"><div class=\"title-wrap\"><h1>" + page_title(page) + "</h1><div class=\"sub\">" + page_subtitle(page) + "</div></div>"
+                       "<div class=\"header-tools\"><span class=\"chip\" id=\"tokenState\">只读</span><div class=\"token-box\"><input id=\"tokenBox\" type=\"password\" placeholder=\"Bearer token\" autocomplete=\"off\" spellcheck=\"false\" aria-label=\"Bearer token\"><button id=\"saveToken\" class=\"btn ghost\" type=\"button\">保存 token</button></div></div></header>" +
+                       body + "</div></main></div>"
+                       "<div class=\"toast\" id=\"toast\" aria-live=\"polite\"></div>"
+                       "<dialog id=\"confirmDlg\"><form method=\"dialog\"><div class=\"dialog-body\"><h3 id=\"confirmTitle\">确认</h3><p id=\"confirmText\"></p></div><div class=\"dialog-actions\"><button class=\"btn ghost\" value=\"cancel\">取消</button><button class=\"btn danger\" id=\"confirmOk\" value=\"ok\">确认</button></div></form></dialog>"
+                       "<dialog id=\"promptDlg\"><form method=\"dialog\"><div class=\"dialog-body\"><h3 id=\"promptTitle\">输入</h3><label class=\"muted\" id=\"promptLabel\" for=\"promptInput\">名称</label><input id=\"promptInput\" autocomplete=\"off\"></div><div class=\"dialog-actions\"><button class=\"btn ghost\" value=\"cancel\">取消</button><button class=\"btn\" id=\"promptOk\" value=\"ok\">确定</button></div></form></dialog>"
+                       "<script src=\"/static/app.js\"></script><script>" + script + "</script></body></html>";
     return html;
 }
 
 std::string json_str(const cJSON* obj, const char* key) {
     const cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, key);
     return (cJSON_IsString(v) && v->valuestring) ? std::string(v->valuestring) : std::string();
+}
+
+int json_int(const cJSON* obj, const char* key, int def) {
+    const cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, key);
+    return cJSON_IsNumber(v) ? static_cast<int>(v->valuedouble) : def;
+}
+
+bool json_bool(const cJSON* obj, const char* key, bool def) {
+    const cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (cJSON_IsBool(v)) return cJSON_IsTrue(v);
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0;
+    return def;
+}
+
+bool valid_id(const std::string& id) {
+    static const std::regex re("^[A-Za-z0-9_.-]{1,64}$");
+    return std::regex_match(id, re);
+}
+
+cJSON* channel_object(cJSON* root, const std::string& name) {
+    if (!cJSON_IsObject(root)) return nullptr;
+    for (const char* key : {"boards", "ssh"}) {
+        cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
+        if (!cJSON_IsArray(arr)) continue;
+        cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, arr) {
+            if (cJSON_IsObject(it) && json_str(it, "name") == name) return it;
+        }
+    }
+    return nullptr;
+}
+
+void add_action_json(cJSON* o, const BoardActionConfig& a) {
+    cJSON_AddStringToObject(o, "id", a.id.c_str());
+    cJSON_AddStringToObject(o, "label", a.label.c_str());
+    cJSON_AddBoolToObject(o, "enable", a.enable);
+    cJSON_AddStringToObject(o, "backend", a.backend.c_str());
+    cJSON_AddStringToObject(o, "kind", a.backend.c_str());
+    cJSON_AddStringToObject(o, "run", a.run.c_str());
+    cJSON* cmds = cJSON_AddArrayToObject(o, "commands");
+    for (const std::string& c : a.commands) cJSON_AddItemToArray(cmds, cJSON_CreateString(c.c_str()));
+    cJSON_AddNumberToObject(o, "delay_ms", a.delay_ms);
+    cJSON_AddStringToObject(o, "relay", a.relay.c_str());
+    cJSON_AddNumberToObject(o, "relay_channel", a.channel);
+    cJSON_AddStringToObject(o, "mode", a.mode.c_str());
+    cJSON_AddNumberToObject(o, "hold_seconds", a.hold_seconds);
+    cJSON_AddBoolToObject(o, "polarity_inverted", a.polarity_inverted);
+    cJSON_AddStringToObject(o, "script", a.script.c_str());
+}
+
+bool parse_action(const cJSON* o, BoardActionConfig* out, std::string* err) {
+    if (!cJSON_IsObject(o) || !out) {
+        if (err) *err = "action 必须是对象";
+        return false;
+    }
+    BoardActionConfig a;
+    a.id = json_str(o, "id");
+    a.label = json_str(o, "label");
+    a.enable = json_bool(o, "enable", true);
+    a.backend = json_str(o, "backend");
+    if (a.backend.empty()) a.backend = "commands";
+    a.run = json_str(o, "run");
+    if (a.run.empty()) a.run = "channel";
+    if (!valid_id(a.id)) {
+        if (err) *err = "id 只允许字母、数字、点、下划线、短横线，长度 1-64";
+        return false;
+    }
+    if (a.label.empty()) {
+        if (err) *err = "label 不能为空";
+        return false;
+    }
+    if (a.backend != "commands" && a.backend != "relay" && a.backend != "script") {
+        if (err) *err = "backend 必须是 commands/relay/script";
+        return false;
+    }
+    a.delay_ms = std::max(0, json_int(o, "delay_ms", 200));
+    a.relay = json_str(o, "relay");
+    a.channel = json_int(o, "relay_channel", json_int(o, "channel", 1));
+    a.mode = json_str(o, "mode");
+    if (a.mode.empty()) a.mode = "pulse";
+    a.hold_seconds = 1.0;
+    const cJSON* hold = cJSON_GetObjectItemCaseSensitive(o, "hold_seconds");
+    if (cJSON_IsNumber(hold)) a.hold_seconds = hold->valuedouble;
+    a.polarity_inverted = json_bool(o, "polarity_inverted", false);
+    a.script = json_str(o, "script");
+    const cJSON* cmds = cJSON_GetObjectItemCaseSensitive(o, "commands");
+    if (cJSON_IsArray(cmds)) {
+        cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, cmds) {
+            if (cJSON_IsString(it) && it->valuestring && *it->valuestring) {
+                a.commands.push_back(it->valuestring);
+            }
+        }
+    }
+    if (a.backend == "commands" && a.commands.empty()) {
+        if (err) *err = "commands 至少需要一条非空命令";
+        return false;
+    }
+    if (a.backend == "script" && a.script.empty()) {
+        if (err) *err = "script 不能为空";
+        return false;
+    }
+    if (a.backend == "relay" && a.relay.empty()) {
+        if (err) *err = "relay 不能为空";
+        return false;
+    }
+    *out = a;
+    return true;
+}
+
+std::string now_text(std::filesystem::file_time_type t) {
+    auto sys = std::chrono::system_clock::now() +
+               std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                   t - std::filesystem::file_time_type::clock::now());
+    std::time_t tt = std::chrono::system_clock::to_time_t(sys);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &tt);
+#else
+    localtime_r(&tt, &tm);
+#endif
+    char buf[32] = "";
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm);
+    return buf;
+}
+
+bool safe_share_path(ServiceManager* services, const std::string& rel,
+                     std::filesystem::path* out, std::string* err) {
+    if (!services || !out) {
+        if (err) *err = "服务未就绪";
+        return false;
+    }
+    std::string r = rel;
+    std::replace(r.begin(), r.end(), '\\', '/');
+    if (r.size() >= 2 && r[1] == ':') {
+        if (err) *err = "不允许绝对路径";
+        return false;
+    }
+    while (!r.empty() && r.front() == '/') r.erase(r.begin());
+    std::vector<std::string> parts;
+    std::string cur;
+    for (char c : r) {
+        if (c == '/') {
+            if (!cur.empty()) parts.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) parts.push_back(cur);
+    for (const std::string& p : parts) {
+        if (p == ".") continue;
+        if (p == ".." || p.find(':') != std::string::npos || p.find('\0') != std::string::npos) {
+            if (err) *err = "路径不允许包含 .. 或盘符";
+            return false;
+        }
+    }
+    try {
+        std::filesystem::path root = std::filesystem::weakly_canonical(
+            std::filesystem::u8path(services->share_root()));
+        std::filesystem::path p = std::filesystem::weakly_canonical(
+            root / std::filesystem::u8path(r));
+        std::string root_s = root.lexically_normal().generic_u8string();
+        std::string p_s = p.lexically_normal().generic_u8string();
+        std::transform(root_s.begin(), root_s.end(), root_s.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::transform(p_s.begin(), p_s.end(), p_s.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (p_s != root_s && p_s.rfind(root_s + "/", 0) != 0) {
+            if (err) *err = "路径越出共享根目录";
+            return false;
+        }
+        *out = p;
+        return true;
+    } catch (const std::exception& e) {
+        if (err) *err = std::string("路径解析失败：") + e.what();
+        return false;
+    }
+}
+
+bool reply_file_bytes(mg_connection* c, const std::string& data, const std::string& name) {
+    std::string safe;
+    for (char ch : name) safe += (ch == '"' || ch == '\\' || ch == '\r' || ch == '\n') ? '_' : ch;
+    std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+                      "Content-Length: " + std::to_string(data.size()) +
+                      "\r\nContent-Disposition: attachment; filename=\"" + safe + "\""
+                      "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+    mg_send(c, hdr.data(), hdr.size());
+    mg_send(c, data.data(), data.size());
+    c->is_draining = 1;
+    return true;
 }
 
 std::string json_text(cJSON* root, bool formatted = false) {
@@ -173,6 +398,8 @@ struct WebConsole::Impl {
     std::string status() const;
     std::string actions() const;
     std::string quick() const;
+    std::string relay_devices() const;
+    bool patch_config(const std::function<bool(cJSON*)>& apply, std::string* err);
     std::string jobs_json(int id) const;
     std::string page(const std::string& name) const;
     void handle_http(mg_connection* c, mg_http_message* hm);
@@ -212,12 +439,10 @@ std::string WebConsole::Impl::actions() const {
             const std::vector<BoardActionConfig>* btns = core->buttons_of(e.name);
             if (!btns) continue;
             for (const BoardActionConfig& a : *btns) {
-                if (!a.enable) continue;
                 cJSON* o = cJSON_CreateObject();
                 cJSON_AddStringToObject(o, "channel", e.name.c_str());
-                cJSON_AddStringToObject(o, "id", a.id.c_str());
-                cJSON_AddStringToObject(o, "label", a.label.c_str());
-                cJSON_AddStringToObject(o, "kind", a.backend.c_str());
+                add_action_json(o, a);
+                cJSON_AddStringToObject(o, "channel_kind", e.kind.c_str());
                 cJSON_AddItemToArray(items, o);
             }
         }
@@ -232,9 +457,11 @@ std::string WebConsole::Impl::quick() const {
         for (const AppCore::Entry& e : core->entries()) {
             const std::vector<QuickCommandConfig>* qs = core->quick_commands_of(e.name);
             if (!qs) continue;
-            for (const QuickCommandConfig& q : *qs) {
+            for (std::size_t i = 0; i < qs->size(); ++i) {
+                const QuickCommandConfig& q = (*qs)[i];
                 cJSON* o = cJSON_CreateObject();
                 cJSON_AddStringToObject(o, "channel", e.name.c_str());
+                cJSON_AddNumberToObject(o, "index", static_cast<double>(i));
                 cJSON_AddStringToObject(o, "label", q.label.c_str());
                 cJSON_AddStringToObject(o, "command", q.command.c_str());
                 cJSON_AddItemToArray(items, o);
@@ -242,6 +469,65 @@ std::string WebConsole::Impl::quick() const {
         }
     }
     return json_text(root);
+}
+
+std::string WebConsole::Impl::relay_devices() const {
+    cJSON* root = cJSON_CreateObject();
+    cJSON* items = cJSON_AddArrayToObject(root, "items");
+    cJSON* states = services ? cJSON_Parse(services->relay_json().c_str()) : nullptr;
+    if (core) {
+        for (const RelayDeviceConfig& d : core->config().relays) {
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "name", d.name.c_str());
+            cJSON_AddBoolToObject(o, "enable", d.enable);
+            cJSON_AddBoolToObject(o, "enabled", d.enable);
+            cJSON_AddStringToObject(o, "port", d.windows_port.c_str());
+            cJSON_AddStringToObject(o, "windows_port", d.windows_port.c_str());
+            cJSON_AddStringToObject(o, "linux_port", d.linux_port.c_str());
+            cJSON_AddNumberToObject(o, "channels", d.channels);
+            cJSON_AddNumberToObject(o, "baudrate", d.baudrate);
+            cJSON_AddBoolToObject(o, "io_inverted", d.io_inverted);
+            cJSON_AddNumberToObject(o, "post_write_delay_ms", d.post_write_delay_ms);
+            cJSON_AddBoolToObject(o, "polarity_inverted", d.polarity_inverted);
+            cJSON* state = nullptr;
+            if (cJSON_IsArray(states)) {
+                cJSON* it = nullptr;
+                cJSON_ArrayForEach(it, states) {
+                    if (cJSON_IsObject(it) && json_str(it, "name") == d.name) {
+                        state = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(it, "state"), 1);
+                        break;
+                    }
+                }
+            }
+            if (state) cJSON_AddItemToObject(o, "state", state);
+            else cJSON_AddItemToObject(o, "state", cJSON_CreateArray());
+            cJSON_AddItemToArray(items, o);
+        }
+    }
+    cJSON_Delete(states);
+    return json_text(root);
+}
+
+bool WebConsole::Impl::patch_config(const std::function<bool(cJSON*)>& apply, std::string* err) {
+    if (!core) {
+        if (err) *err = "core 未就绪";
+        return false;
+    }
+    cJSON* root = cJSON_Parse(core->config_json_text().c_str());
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        if (err) *err = "当前配置无法解析";
+        return false;
+    }
+    if (!apply(root)) {
+        cJSON_Delete(root);
+        if (err && err->empty()) *err = "配置修改被拒绝";
+        return false;
+    }
+    std::string text = json_text(root, false);
+    if (!core->save_config_json(text, err)) return false;
+    if (notify) PostMessageW(static_cast<HWND>(notify), kMsgWebReload, 0, 0);
+    return true;
 }
 
 std::string WebConsole::Impl::jobs_json(int id) const {
@@ -371,25 +657,25 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
 
     if (path == "/static/app.css") {
         mg_str* inm = mg_http_get_header(hm, "If-None-Match");
-        if (inm && std::string(inm->buf, inm->len) == "\"sb3-s9-css\"") {
-            mg_http_reply(c, 304, "ETag: \"sb3-s9-css\"\r\nCache-Control: max-age=3600\r\n", "");
+        if (inm && std::string(inm->buf, inm->len) == "\"sb3-s14-css\"") {
+            mg_http_reply(c, 304, "ETag: \"sb3-s14-css\"\r\nCache-Control: max-age=3600\r\n", "");
             return;
         }
         mg_http_reply(c, 200,
-                      "Content-Type: text/css; charset=utf-8\r\nETag: \"sb3-s9-css\"\r\n"
+                      "Content-Type: text/css; charset=utf-8\r\nETag: \"sb3-s14-css\"\r\n"
                       "Cache-Control: max-age=3600\r\nAccess-Control-Allow-Origin: *\r\n",
                       "%s", web_pages::kCss);
         return;
     }
     if (path == "/static/app.js") {
         mg_str* inm = mg_http_get_header(hm, "If-None-Match");
-        if (inm && std::string(inm->buf, inm->len) == "\"sb3-s9-js\"") {
-            mg_http_reply(c, 304, "ETag: \"sb3-s9-js\"\r\nCache-Control: max-age=3600\r\n", "");
+        if (inm && std::string(inm->buf, inm->len) == "\"sb3-s14-js\"") {
+            mg_http_reply(c, 304, "ETag: \"sb3-s14-js\"\r\nCache-Control: max-age=3600\r\n", "");
             return;
         }
         mg_http_reply(c, 200,
                       "Content-Type: application/javascript; charset=utf-8\r\n"
-                      "ETag: \"sb3-s9-js\"\r\nCache-Control: max-age=3600\r\n"
+                      "ETag: \"sb3-s14-js\"\r\nCache-Control: max-age=3600\r\n"
                       "Access-Control-Allow-Origin: *\r\n",
                       "%s", web_pages::kCommonJs);
         return;
@@ -479,7 +765,201 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         return;
     }
     if (path == "/api/actions") {
+        if (method_is(hm, "POST")) {
+            if (!write_ok(hm)) {
+                reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+                return;
+            }
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            if (!cJSON_IsObject(body)) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+                return;
+            }
+            std::string channel = json_str(body, "channel");
+            std::string old_id = json_str(body, "old_id");
+            const cJSON* ao = cJSON_GetObjectItemCaseSensitive(body, "action");
+            BoardActionConfig a;
+            std::string err;
+            if (!parse_action(ao, &a, &err)) {
+                cJSON_Delete(body);
+                cJSON* root = cJSON_CreateObject();
+                cJSON_AddBoolToObject(root, "ok", false);
+                cJSON_AddStringToObject(root, "error", err.c_str());
+                reply_json(c, 400, root);
+                return;
+            }
+            cJSON_Delete(body);
+            bool ok = patch_config([&](cJSON* root) -> bool {
+                cJSON* ch = channel_object(root, channel);
+                if (!cJSON_IsObject(ch)) {
+                    err = "channel not found";
+                    return false;
+                }
+                cJSON* buttons = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
+                if (!cJSON_IsArray(buttons)) {
+                    buttons = cJSON_AddArrayToObject(ch, "buttons");
+                    if (!buttons) {
+                        err = "cannot create buttons";
+                        return false;
+                    }
+                }
+                int found = -1;
+                cJSON* it = nullptr;
+                int idx = 0;
+                cJSON_ArrayForEach(it, buttons) {
+                    if (cJSON_IsObject(it) && json_str(it, "id") == (old_id.empty() ? a.id : old_id)) {
+                        found = idx;
+                        break;
+                    }
+                    ++idx;
+                }
+                if (!old_id.empty() && found < 0) {
+                    err = "old_id not found";
+                    return false;
+                }
+                if (old_id.empty() && found >= 0) {
+                    err = "id already exists";
+                    return false;
+                }
+                if (a.backend == "relay") {
+                    bool relay_ok = false;
+                    cJSON* devs = cJSON_GetObjectItemCaseSensitive(root, "relay_devices");
+                    cJSON* dev = nullptr;
+                    if (cJSON_IsArray(devs)) {
+                        cJSON_ArrayForEach(dev, devs) {
+                            if (cJSON_IsObject(dev) && json_str(dev, "name") == a.relay) {
+                                relay_ok = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!relay_ok) {
+                        err = "relay not found";
+                        return false;
+                    }
+                }
+                cJSON* o = cJSON_CreateObject();
+                add_action_json(o, a);
+                if (found >= 0) cJSON_DeleteItemFromArray(buttons, found);
+                cJSON_AddItemToArray(buttons, o);
+                return true;
+            }, &err);
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", ok);
+            cJSON_AddStringToObject(root, "error", err.c_str());
+            if (ok) cJSON_AddStringToObject(root, "reload", "posted");
+            reply_json(c, ok ? 200 : 400, root);
+            return;
+        }
         reply_json_text(c, 200, actions());
+        return;
+    }
+    if (path == "/api/actions/delete") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string channel = json_str(body, "channel");
+        std::string id = json_str(body, "id");
+        cJSON_Delete(body);
+        std::string err;
+        bool ok = patch_config([&](cJSON* root) -> bool {
+            cJSON* ch = channel_object(root, channel);
+            if (!cJSON_IsObject(ch)) {
+                err = "channel not found";
+                return false;
+            }
+            cJSON* buttons = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
+            if (!cJSON_IsArray(buttons)) {
+                err = "action not found";
+                return false;
+            }
+            int idx = 0;
+            cJSON* it = nullptr;
+            cJSON_ArrayForEach(it, buttons) {
+                if (cJSON_IsObject(it) && json_str(it, "id") == id) {
+                    cJSON_DeleteItemFromArray(buttons, idx);
+                    return true;
+                }
+                ++idx;
+            }
+            err = "action not found";
+            return false;
+        }, &err);
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", ok);
+        cJSON_AddStringToObject(root, "error", err.c_str());
+        reply_json(c, ok ? 200 : 400, root);
+        return;
+    }
+    if (path == "/api/quick/commands") {
+        if (method_is(hm, "POST")) {
+            if (!write_ok(hm)) {
+                reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+                return;
+            }
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            if (!cJSON_IsObject(body)) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+                return;
+            }
+            std::string channel = json_str(body, "channel");
+            std::string label = json_str(body, "label");
+            std::string command = json_str(body, "command");
+            std::string op = json_str(body, "op");
+            int index = json_int(body, "index", -1);
+            cJSON_Delete(body);
+            if (label.empty() && op != "delete") {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"label 不能为空\"}");
+                return;
+            }
+            std::string err;
+            bool ok = patch_config([&](cJSON* root) -> bool {
+                cJSON* ch = channel_object(root, channel);
+                if (!cJSON_IsObject(ch)) {
+                    err = "channel not found";
+                    return false;
+                }
+                cJSON* qs = cJSON_GetObjectItemCaseSensitive(ch, "quick_commands");
+                if (!cJSON_IsArray(qs)) {
+                    qs = cJSON_AddArrayToObject(ch, "quick_commands");
+                    if (!qs) {
+                        err = "cannot create quick_commands";
+                        return false;
+                    }
+                }
+                int size = cJSON_GetArraySize(qs);
+                if (op == "delete") {
+                    if (index < 0 || index >= size) {
+                        err = "quick command not found";
+                        return false;
+                    }
+                    cJSON_DeleteItemFromArray(qs, index);
+                    return true;
+                }
+                cJSON* item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "label", label.c_str());
+                cJSON_AddStringToObject(item, "command", command.c_str());
+                if (index >= 0 && index < size) {
+                    cJSON_DeleteItemFromArray(qs, index);
+                }
+                cJSON_AddItemToArray(qs, item);
+                return true;
+            }, &err);
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", ok);
+            cJSON_AddStringToObject(root, "error", err.c_str());
+            reply_json(c, ok ? 200 : 400, root);
+            return;
+        }
+        reply_json_text(c, 200, quick());
         return;
     }
     if (path == "/quick") {
@@ -531,6 +1011,10 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         }
         if (!found) {
             reply_json_text(c, 404, "{\"ok\":false,\"error\":\"action not found\"}");
+            return;
+        }
+        if (!found->enable) {
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"action disabled\"}");
             return;
         }
         int job = spawn_action(ch, id);
@@ -593,8 +1077,413 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         reply_json_text(c, 200, services ? services->relay_json() : "[]");
         return;
     }
+    if (path == "/api/relay/devices") {
+        if (method_is(hm, "POST")) {
+            if (!write_ok(hm)) {
+                reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+                return;
+            }
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            if (!cJSON_IsObject(body)) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+                return;
+            }
+            const cJSON* dev = cJSON_GetObjectItemCaseSensitive(body, "device");
+            if (!cJSON_IsObject(dev)) dev = body;
+            std::string old_name = json_str(body, "old_name");
+            std::string name = json_str(dev, "name");
+            std::string port = json_str(dev, "windows_port");
+            if (port.empty()) port = json_str(dev, "port");
+            std::string linux_port = json_str(dev, "linux_port");
+            int channels = json_int(dev, "channels", 2);
+            int baud = json_int(dev, "baudrate", 9600);
+            int delay = json_int(dev, "post_write_delay_ms", 0);
+            bool enable = json_bool(dev, "enable", json_bool(dev, "enabled", true));
+            bool io_inv = json_bool(dev, "io_inverted", false);
+            bool pol_inv = json_bool(dev, "polarity_inverted", false);
+            cJSON_Delete(body);
+            if (name.empty() || port.empty() || channels < 1 || channels > 16 || baud < 1200 || baud > 115200 || delay < 0) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"设备名/端口不能为空，通道 1-16，波特率 1200-115200\"}");
+                return;
+            }
+            std::string err;
+            bool ok = patch_config([&](cJSON* root) -> bool {
+                cJSON* devs = cJSON_GetObjectItemCaseSensitive(root, "relay_devices");
+                if (!cJSON_IsArray(devs)) {
+                    devs = cJSON_AddArrayToObject(root, "relay_devices");
+                    if (!devs) {
+                        err = "cannot create relay_devices";
+                        return false;
+                    }
+                }
+                cJSON* existing = nullptr;
+                cJSON* it = nullptr;
+                cJSON_ArrayForEach(it, devs) {
+                    if (!cJSON_IsObject(it)) continue;
+                    std::string n = json_str(it, "name");
+                    if (!old_name.empty() && n == old_name) existing = it;
+                    if (name == n && old_name != name) existing = it;
+                }
+                if (!old_name.empty() && !existing) {
+                    err = "relay device not found";
+                    return false;
+                }
+                if (old_name.empty() && existing) {
+                    err = "relay device name already exists";
+                    return false;
+                }
+                if (old_name.empty()) {
+                    existing = cJSON_CreateObject();
+                    cJSON_AddItemToArray(devs, existing);
+                }
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "name");
+                cJSON_AddStringToObject(existing, "name", name.c_str());
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "enable");
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "enabled");
+                cJSON_AddBoolToObject(existing, "enable", enable);
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "windows_port");
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "port");
+                cJSON_AddStringToObject(existing, "windows_port", port.c_str());
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "linux_port");
+                cJSON_AddStringToObject(existing, "linux_port", linux_port.c_str());
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "channels");
+                cJSON_AddNumberToObject(existing, "channels", channels);
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "baudrate");
+                cJSON_AddNumberToObject(existing, "baudrate", baud);
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "io_inverted");
+                cJSON_AddBoolToObject(existing, "io_inverted", io_inv);
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "post_write_delay_ms");
+                cJSON_AddNumberToObject(existing, "post_write_delay_ms", delay);
+                cJSON_DeleteItemFromObjectCaseSensitive(existing, "polarity_inverted");
+                cJSON_AddBoolToObject(existing, "polarity_inverted", pol_inv);
+                if (!old_name.empty() && old_name != name) {
+                    for (const char* key : {"boards", "ssh"}) {
+                        cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
+                        cJSON* ch = nullptr;
+                        if (!cJSON_IsArray(arr)) continue;
+                        cJSON_ArrayForEach(ch, arr) {
+                            cJSON* btns = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
+                            cJSON* btn = nullptr;
+                            if (!cJSON_IsArray(btns)) continue;
+                            cJSON_ArrayForEach(btn, btns) {
+                                cJSON* rel = cJSON_GetObjectItemCaseSensitive(btn, "relay");
+                                if (cJSON_IsString(rel) && rel->valuestring &&
+                                    std::string(rel->valuestring) == old_name) {
+                                    cJSON_DeleteItemFromObjectCaseSensitive(btn, "relay");
+                                    cJSON_AddStringToObject(btn, "relay", name.c_str());
+                                }
+                            }
+                        }
+                    }
+                }
+                return true;
+            }, &err);
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", ok);
+            cJSON_AddStringToObject(root, "error", err.c_str());
+            reply_json(c, ok ? 200 : 400, root);
+            return;
+        }
+        reply_json_text(c, 200, relay_devices());
+        return;
+    }
+    if (path == "/api/relay/devices/delete") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string name = json_str(body, "name");
+        cJSON_Delete(body);
+        std::string err;
+        bool ok = patch_config([&](cJSON* root) -> bool {
+            cJSON* devs = cJSON_GetObjectItemCaseSensitive(root, "relay_devices");
+            if (!cJSON_IsArray(devs)) {
+                err = "relay device not found";
+                return false;
+            }
+            int idx = 0;
+            cJSON* it = nullptr;
+            cJSON_ArrayForEach(it, devs) {
+                if (cJSON_IsObject(it) && json_str(it, "name") == name) break;
+                ++idx;
+            }
+            if (!cJSON_IsObject(it)) {
+                err = "relay device not found";
+                return false;
+            }
+            cJSON* refs = cJSON_CreateArray();
+            for (const char* key : {"boards", "ssh"}) {
+                cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
+                cJSON* ch = nullptr;
+                if (!cJSON_IsArray(arr)) continue;
+                cJSON_ArrayForEach(ch, arr) {
+                    cJSON* btns = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
+                    cJSON* btn = nullptr;
+                    if (!cJSON_IsArray(btns)) continue;
+                    cJSON_ArrayForEach(btn, btns) {
+                        cJSON* rel = cJSON_GetObjectItemCaseSensitive(btn, "relay");
+                        if (cJSON_IsString(rel) && rel->valuestring && std::string(rel->valuestring) == name) {
+                            cJSON_AddItemToArray(refs, cJSON_CreateString(json_str(btn, "id").c_str()));
+                        }
+                    }
+                }
+            }
+            if (cJSON_GetArraySize(refs) > 0) {
+                cJSON* root2 = cJSON_CreateObject();
+                cJSON_AddBoolToObject(root2, "ok", false);
+                cJSON_AddStringToObject(root2, "error", "设备仍被板控按钮引用，请先修改这些按钮");
+                cJSON_AddItemToObject(root2, "refs", refs);
+                err = json_text(root2, false);
+                return false;
+            }
+            cJSON_Delete(refs);
+            cJSON_DeleteItemFromArray(devs, idx);
+            return true;
+        }, &err);
+        if (!ok && err.rfind("{", 0) == 0) {
+            reply_json_text(c, 409, err);
+            return;
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", ok);
+        cJSON_AddStringToObject(root, "error", err.c_str());
+        reply_json(c, ok ? 200 : 400, root);
+        return;
+    }
     if (path == "/services") {
         reply_json_text(c, 200, services ? services->state_json() : "{}");
+        return;
+    }
+    if (path == "/api/files/download") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        std::string rel = query_var(hm, "path");
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_share_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        std::uintmax_t sz = std::filesystem::file_size(p, ec);
+        if (ec || sz > 64ull * 1024 * 1024) {
+            reply_json_text(c, 413, "{\"ok\":false,\"error\":\"file too large (max 64MB)\"}");
+            return;
+        }
+        std::ifstream in(p, std::ios::binary);
+        std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (!in && !data.empty()) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"read failed\"}");
+            return;
+        }
+        reply_file_bytes(c, data, p.filename().u8string());
+        return;
+    }
+    if (path == "/api/files") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        std::string rel = query_var(hm, "path");
+        std::string err;
+        std::filesystem::path p;
+        if (!safe_share_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_directory(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"directory not found\"}");
+            return;
+        }
+        struct Row {
+            std::string name, path, mtime;
+            uintmax_t size = 0;
+            bool dir = false;
+        };
+        std::vector<Row> rows;
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(
+                     p, std::filesystem::directory_options::skip_permission_denied, ec)) {
+                if (ec && !entry.exists()) continue;
+                Row r;
+                r.name = entry.path().filename().u8string();
+                r.path = rel.empty() ? r.name : (rel + "/" + r.name);
+                r.dir = entry.is_directory(ec);
+                if (!r.dir) {
+                    r.size = entry.file_size(ec);
+                    if (ec) r.size = 0;
+                }
+                r.mtime = now_text(entry.last_write_time(ec));
+                if (ec) r.mtime.clear();
+                rows.push_back(std::move(r));
+                if (rows.size() >= 2000) break;
+            }
+        } catch (const std::exception& e) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"list failed\"}");
+            return;
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+            if (a.dir != b.dir) return a.dir;
+            return a.name < b.name;
+        });
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "root", services->share_root().c_str());
+        cJSON_AddStringToObject(root, "path", rel.c_str());
+        std::filesystem::path parent = std::filesystem::u8path(rel).parent_path();
+        cJSON_AddStringToObject(root, "parent", parent.generic_u8string().c_str());
+        cJSON* items = cJSON_AddArrayToObject(root, "items");
+        for (const Row& r : rows) {
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "name", r.name.c_str());
+            cJSON_AddStringToObject(o, "path", r.path.c_str());
+            cJSON_AddBoolToObject(o, "dir", r.dir);
+            cJSON_AddNumberToObject(o, "size", static_cast<double>(r.size));
+            cJSON_AddStringToObject(o, "mtime", r.mtime.c_str());
+            cJSON_AddItemToArray(items, o);
+        }
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/api/files/upload") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        if (hm->body.len > 16ull * 1024 * 1024) {
+            reply_json_text(c, 413, "{\"ok\":false,\"error\":\"upload too large (max 16MB)\"}");
+            return;
+        }
+        std::string dir = query_var(hm, "path");
+        std::string name = query_var(hm, "name");
+        if (name.empty() || name == "." || name == ".." ||
+            name.find('/') != std::string::npos || name.find('\\') != std::string::npos) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"filename 非法\"}");
+            return;
+        }
+        std::string rel = dir.empty() ? name : (dir + "/" + name);
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_share_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_directory(p.parent_path(), ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"目标目录不存在\"}");
+            return;
+        }
+        if (std::filesystem::exists(p, ec)) {
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"同名文件已存在\"}");
+            return;
+        }
+        std::ofstream out(p, std::ios::binary);
+        if (!out) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"创建文件失败\"}");
+            return;
+        }
+        std::string data = body_string(hm);
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+        out.close();
+        if (!out) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"写入失败\"}");
+            return;
+        }
+        reply_json_text(c, 200, "{\"ok\":true,\"path\":\"" + rel + "\"}");
+        return;
+    }
+    if (path == "/api/files/delete") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string rel = json_str(body, "path");
+        cJSON_Delete(body);
+        std::filesystem::path p;
+        std::string err;
+        if (rel.empty() || !safe_share_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + (err.empty() ? "path 不能为空" : err) + "\"}");
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::path root = std::filesystem::weakly_canonical(
+            std::filesystem::u8path(services->share_root()), ec);
+        if (!ec && std::filesystem::equivalent(root, p, ec)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"不能删除共享根目录\"}");
+            return;
+        }
+        if (!std::filesystem::exists(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        if (std::filesystem::is_directory(p, ec) && !std::filesystem::is_empty(p, ec)) {
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"目录非空，未删除\"}");
+            return;
+        }
+        if (!std::filesystem::remove(p, ec)) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"删除失败\"}");
+            return;
+        }
+        reply_json_text(c, 200, "{\"ok\":true}");
+        return;
+    }
+    if (path == "/api/files/mkdir") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string dir = json_str(body, "path");
+        std::string name = json_str(body, "name");
+        cJSON_Delete(body);
+        if (name.empty() || name == "." || name == ".." ||
+            name.find('/') != std::string::npos || name.find('\\') != std::string::npos) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"目录名非法\"}");
+            return;
+        }
+        std::string rel = dir.empty() ? name : (dir + "/" + name);
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_share_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec)) {
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"同名目录已存在\"}");
+            return;
+        }
+        if (!std::filesystem::create_directory(p, ec)) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"创建目录失败\"}");
+            return;
+        }
+        reply_json_text(c, 200, "{\"ok\":true,\"path\":\"" + rel + "\"}");
         return;
     }
     if (path == "/service") {
@@ -645,6 +1534,128 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         cJSON_AddBoolToObject(root, "ok", ok);
         cJSON_AddStringToObject(root, "error", err.c_str());
         reply_json(c, ok ? 200 : 400, root);
+        return;
+    }
+    if (path == "/api/tcp-forward/config") {
+        if (method_is(hm, "POST")) {
+            if (!write_ok(hm)) {
+                reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+                return;
+            }
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            if (!cJSON_IsObject(body)) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+                return;
+            }
+            bool enable = json_bool(body, "enable", false);
+            std::string listen_ip = json_str(body, "listen_ip");
+            int port_base = json_int(body, "port_base", 22000);
+            int target_port = json_int(body, "target_port", 22);
+            std::string board_cidr = json_str(body, "board_cidr");
+            cJSON_Delete(body);
+            if (port_base < 1 || port_base > 65535 || target_port < 1 || target_port > 65535) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"端口必须在 1-65535\"}");
+                return;
+            }
+            std::string err;
+            bool ok = patch_config([&](cJSON* root) -> bool {
+                cJSON_DeleteItemFromObjectCaseSensitive(root, "tcp_forward");
+                cJSON* sec = cJSON_AddObjectToObject(root, "tcp_forward");
+                if (!sec) {
+                    err = "cannot create tcp_forward";
+                    return false;
+                }
+                cJSON_AddBoolToObject(sec, "enable", enable);
+                cJSON_AddStringToObject(sec, "listen_ip", listen_ip.c_str());
+                cJSON_AddNumberToObject(sec, "port_base", port_base);
+                cJSON_AddNumberToObject(sec, "target_port", target_port);
+                cJSON_AddStringToObject(sec, "board_cidr", board_cidr.c_str());
+                return true;
+            }, &err);
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", ok);
+            cJSON_AddStringToObject(root, "error", err.c_str());
+            reply_json(c, ok ? 200 : 400, root);
+            return;
+        }
+        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
+        cJSON* sec = cJSON_IsObject(root) ? cJSON_GetObjectItemCaseSensitive(root, "tcp_forward") : nullptr;
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddItemToObject(out, "config", cJSON_IsObject(sec) ? cJSON_Duplicate(sec, 1) : cJSON_CreateObject());
+        cJSON_Delete(root);
+        reply_json(c, 200, out);
+        return;
+    }
+    if (path == "/api/tunnel/config") {
+        if (method_is(hm, "POST")) {
+            if (!write_ok(hm)) {
+                reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+                return;
+            }
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            if (!cJSON_IsObject(body)) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+                return;
+            }
+            bool enable = json_bool(body, "enable", false);
+            bool map_http = json_bool(body, "map_http", true);
+            bool map_ssh = json_bool(body, "map_inbound_ssh", false);
+            std::string exe_path = json_str(body, "exe_path");
+            std::string server_addr = json_str(body, "server_addr");
+            int server_port = json_int(body, "server_port", 7000);
+            std::string token = json_str(body, "token");
+            int local_port = json_int(body, "local_port", 18081);
+            int remote_port = json_int(body, "remote_port", 0);
+            int ssh_local_port = json_int(body, "ssh_local_port", 2222);
+            int ssh_remote_port = json_int(body, "ssh_remote_port", 0);
+            cJSON_Delete(body);
+            if (server_port < 1 || server_port > 65535 || local_port < 1 || local_port > 65535 ||
+                (remote_port < 0 || remote_port > 65535) || (ssh_local_port < 1 || ssh_local_port > 65535) ||
+                (ssh_remote_port < 0 || ssh_remote_port > 65535)) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"端口范围 1-65535\"}");
+                return;
+            }
+            if (enable && server_addr.empty()) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"启用隧道时服务地址不能为空\"}");
+                return;
+            }
+            std::string err;
+            bool ok = patch_config([&](cJSON* root) -> bool {
+                cJSON_DeleteItemFromObjectCaseSensitive(root, "tunnel");
+                cJSON* sec = cJSON_AddObjectToObject(root, "tunnel");
+                if (!sec) {
+                    err = "cannot create tunnel";
+                    return false;
+                }
+                cJSON_AddBoolToObject(sec, "enable", enable);
+                cJSON_AddBoolToObject(sec, "map_http", map_http);
+                cJSON_AddBoolToObject(sec, "map_inbound_ssh", map_ssh);
+                cJSON_AddStringToObject(sec, "exe_path", exe_path.c_str());
+                cJSON_AddStringToObject(sec, "server_addr", server_addr.c_str());
+                cJSON_AddNumberToObject(sec, "server_port", server_port);
+                cJSON_AddStringToObject(sec, "token", token.c_str());
+                cJSON_AddNumberToObject(sec, "local_port", local_port);
+                cJSON_AddNumberToObject(sec, "remote_port", remote_port);
+                cJSON_AddNumberToObject(sec, "ssh_local_port", ssh_local_port);
+                cJSON_AddNumberToObject(sec, "ssh_remote_port", ssh_remote_port);
+                return true;
+            }, &err);
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", ok);
+            cJSON_AddStringToObject(root, "error", err.c_str());
+            reply_json(c, ok ? 200 : 400, root);
+            return;
+        }
+        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
+        cJSON* sec = cJSON_IsObject(root) ? cJSON_GetObjectItemCaseSensitive(root, "tunnel") : nullptr;
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddItemToObject(out, "config", cJSON_IsObject(sec) ? cJSON_Duplicate(sec, 1) : cJSON_CreateObject());
+        cJSON_Delete(root);
+        reply_json(c, 200, out);
         return;
     }
     if (path == "/api/tcp-forward" || path == "/api/tunnel" || path == "/api/discovery") {
