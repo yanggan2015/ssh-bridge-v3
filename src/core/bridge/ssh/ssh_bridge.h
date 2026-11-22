@@ -35,6 +35,7 @@ public:
     const std::string& name() const override { return cfg_.name; }
 
     std::size_t write(const void* data, std::size_t n) override;
+    bool resize_terminal(int cols, int rows) override;
     std::uint64_t echo_latency_us() const override { return core_.echo_latency_us(); }
     std::uint64_t echo_count() const override { return core_.echo_count(); }
     std::uint64_t tx_bytes() const override { return core_.tx_bytes(); }
@@ -72,6 +73,8 @@ private:
     std::atomic<bool> connected_{false};
     std::atomic<bool> stop_{false};
     std::atomic<bool> retry_now_{false};
+    std::atomic<int>  want_cols_{0};   // 最近一次 UI 请求的 PTY 尺寸，重连沿用
+    std::atomic<int>  want_rows_{0};
     std::atomic<std::uint64_t> rx_bytes_{0};
     std::atomic<std::uint64_t> tx_bytes_{0};
     std::atomic<std::uint64_t> reconnects_{0};

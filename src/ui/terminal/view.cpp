@@ -146,13 +146,31 @@ void TerminalView::sync_slot(Slot& slot, const RECT& rc) {
     RECT body{rc.left + 1, rc.top + header_h_, rc.right - 1, rc.bottom - 1};
     int cols = std::max(8, static_cast<int>(body.right - body.left) / std::max(1, cell_w_));
     int rows = std::max(2, static_cast<int>(body.bottom - body.top) / std::max(1, cell_h_));
+    int old_cols = slot.pane ? slot.pane->screen().cols() : 0;
+    int old_rows = slot.pane ? slot.pane->screen().rows() : 0;
+    IBridge* b = core_ ? core_->find(slot.channel) : nullptr;
     if (!slot.pane) {
+        slot.pty_cols = 0;
+        slot.pty_rows = 0;
         slot.pane.reset(new term::Pane());
         slot.pane->init(slot.channel, cols, rows, opt_.scrollback);
-        IBridge* b = core_ ? core_->find(slot.channel) : nullptr;
         if (b) slot.pane->replay(b);       // 首次打开显示尾部历史
     } else {
         slot.pane->resize(cols, rows);
+    }
+    if (old_cols != cols || old_rows != rows) sync_pty(slot);
+}
+
+void TerminalView::sync_pty(Slot& slot) {
+    if (!slot.pane || slot.channel.empty() || !core_) return;
+    IBridge* b = core_->find(slot.channel);
+    if (!b || !b->running()) return;       // 等通道 ready 后再补发，避免首次 resize 被丢
+    int cols = slot.pane->screen().cols();
+    int rows = slot.pane->screen().rows();
+    if (cols == slot.pty_cols && rows == slot.pty_rows) return;
+    if (b->resize_terminal(cols, rows)) {
+        slot.pty_cols = cols;
+        slot.pty_rows = rows;
     }
 }
 
@@ -267,6 +285,7 @@ bool TerminalView::pull_visible() {
         RECT rc = slot_rect(static_cast<int>(i), client);
         if (rc.bottom - rc.top < cell_h_ * 2) continue;
         sync_slot(slot, rc);
+        sync_pty(slot);            // 通道 ready 后补发首次 PTY 尺寸
         IBridge* b = core_ ? core_->find(slot.channel) : nullptr;
         if (b && slot.pane->pull(b)) any = true;
         slot.pane->resize(std::max(8, static_cast<int>(rc.right - rc.left - 2) / std::max(1, cell_w_)),

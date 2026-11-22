@@ -69,6 +69,8 @@ private:
     struct Slot {
         std::string                channel;
         std::unique_ptr<term::Pane> pane;
+        int                        pty_cols = 0;   // 已成功通知远端的 PTY 尺寸
+        int                        pty_rows = 0;
     };
 
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -79,6 +81,7 @@ private:
     RECT slot_rect(int idx, const RECT& client) const;
     int  slot_at(POINT pt) const;
     void sync_slot(Slot& slot, const RECT& rc);
+    void sync_pty(Slot& slot);
     void draw_all(HDC dc);
     void draw_slot(HDC dc, int idx, RECT rc, bool active);
     void draw_run(HDC dc, int x, int y, const std::wstring& text, int run_cols,
