@@ -32,64 +32,72 @@ foreach ($p in @($stage, $zip, $localManifest, $sumFile)) {
 }
 $m = Get-Content -LiteralPath $localManifest -Raw | ConvertFrom-Json
 if ($m.version -ne $Version) { throw "清单版本 $($m.version) 与参数 $Version 不一致" }
+$manifestRaw = Get-Content -LiteralPath $localManifest -Raw
+$builtMatch = [regex]::Match($manifestRaw, '"built_utc"\s*:\s*"([^"]+)"')
+$builtUtc = if ($builtMatch.Success) { $builtMatch.Groups[1].Value } else { [string]$m.built_utc }
 
-function Git([string]$work, [string[]]$args, [switch]$AllowFail) {
-    & git -C $work @args
-    if (-not $AllowFail -and $LASTEXITCODE -ne 0) { throw "git $($args -join ' ') 失败" }
+function RunGit([string]$work, [string[]]$gitArgs, [switch]$AllowFail) {
+    & git -C $work @gitArgs
+    if (-not $AllowFail -and $LASTEXITCODE -ne 0) { throw "git $($gitArgs -join ' ') 失败" }
 }
 
 if (-not (Test-Path -LiteralPath $ReleaseDir)) {
     New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
-    Git $ReleaseDir @('init')
+    RunGit $ReleaseDir @('init')
 }
 $gitDir = Join-Path $ReleaseDir '.git'
-if (-not (Test-Path -LiteralPath $gitDir)) { Git $ReleaseDir @('init') }
+if (-not (Test-Path -LiteralPath $gitDir)) { RunGit $ReleaseDir @('init') }
 $remotes = (& git -C $ReleaseDir remote) 2>$null
 if ($remotes -match '^origin$') {
-    Git $ReleaseDir @('remote', 'set-url', 'origin', "https://github.com/$Repo.git")
+    RunGit $ReleaseDir @('remote', 'set-url', 'origin', "https://github.com/$Repo.git")
 } else {
-    Git $ReleaseDir @('remote', 'add', 'origin', "https://github.com/$Repo.git")
+    RunGit $ReleaseDir @('remote', 'add', 'origin', "https://github.com/$Repo.git")
 }
 if (-not (& git -C $ReleaseDir config user.email)) {
-    Git $ReleaseDir @('config', 'user.email', 'yanggan2015@users.noreply.github.com')
-    Git $ReleaseDir @('config', 'user.name', 'yanggan2015')
+    RunGit $ReleaseDir @('config', 'user.email', 'yanggan2015@users.noreply.github.com')
+    RunGit $ReleaseDir @('config', 'user.name', 'yanggan2015')
 }
 
 & git -C $ReleaseDir fetch origin --prune 2>$null | Out-Null
 $hasBranch = (& git -C $ReleaseDir ls-remote --heads origin windows_x86_64) -match 'refs/heads/windows_x86_64$'
 if ($hasBranch) {
-    Git $ReleaseDir @('checkout', '-B', 'windows_x86_64', 'origin/windows_x86_64')
-    Git $ReleaseDir @('reset', '--hard', 'origin/windows_x86_64')
+    RunGit $ReleaseDir @('checkout', '-B', 'windows_x86_64', 'origin/windows_x86_64')
+    RunGit $ReleaseDir @('reset', '--hard', 'origin/windows_x86_64')
 } else {
-    Git $ReleaseDir @('checkout', '--orphan', 'windows_x86_64')
-    Git $ReleaseDir @('rm', '-rf', '.') -AllowFail
+    RunGit $ReleaseDir @('checkout', '--orphan', 'windows_x86_64')
+    RunGit $ReleaseDir @('rm', '-rf', '.') -AllowFail
 }
 
-# 发布分支只保留运行所需的二进制与工具，不复制示例配置、work 或日志。
+# 发布分支只保留运行所需的二进制与工具；zip 同时放进 packages/，
+# UPDATE.json 的 url 指向 raw 分支文件，避免依赖 github.com 页面跳转。
 Remove-Item -Recurse -Force (Join-Path $ReleaseDir 'ssh_bridge3') -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force (Join-Path $ReleaseDir 'packages') -ErrorAction SilentlyContinue
 Remove-Item -Force (Join-Path $ReleaseDir 'UPDATE.json') -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Join-Path $ReleaseDir 'ssh_bridge3\tools') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $ReleaseDir 'packages') | Out-Null
 Copy-Item -LiteralPath (Join-Path $stage 'ssh_bridge3.exe') -Destination (Join-Path $ReleaseDir 'ssh_bridge3\ssh_bridge3.exe') -Force
 Copy-Item -LiteralPath (Join-Path $stage 'README.md') -Destination (Join-Path $ReleaseDir 'ssh_bridge3\README.md') -Force
 Copy-Item -LiteralPath (Join-Path $stage 'VERSION.txt') -Destination (Join-Path $ReleaseDir 'ssh_bridge3\VERSION.txt') -Force
 Get-ChildItem -LiteralPath (Join-Path $stage 'tools') -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $ReleaseDir 'ssh_bridge3\tools') -Force
 }
-
 $zipName = Split-Path -Leaf $zip
+Copy-Item -LiteralPath $zip -Destination (Join-Path $ReleaseDir "packages\$zipName") -Force
+$rawZipUrl = "https://raw.githubusercontent.com/$Repo/windows_x86_64/packages/$zipName"
 $releaseManifest = [ordered]@{
-    product    = 'ssh-bridge v3'
-    version    = $Version
-    platform   = 'windows'
-    arch       = 'x86_64'
-    branch     = 'windows_x86_64'
-    zip        = $zipName
-    url        = "https://github.com/$Repo/releases/download/$tag/$zipName"
-    sha256     = [string]$m.sha256
-    size_bytes = [int64]$m.size_bytes
-    exe_sha256 = [string]$m.exe_sha256
-    built_utc  = [string]$m.built_utc
-    source     = 'https://github.com/yanggan2015/ssh-bridge-v3'
+    product     = 'ssh-bridge v3'
+    version     = $Version
+    platform    = 'windows'
+    arch        = 'x86_64'
+    branch      = 'windows_x86_64'
+    zip         = $zipName
+    url         = $rawZipUrl
+    github_url  = "https://github.com/$Repo/releases/download/$tag/$zipName"
+    sha256      = [string]$m.sha256
+    size_bytes  = [int64]$m.size_bytes
+    exe_sha256  = [string]$m.exe_sha256
+    built_utc   = $builtUtc
+    source      = 'https://github.com/yanggan2015/ssh-bridge-v3'
 }
 $manifestText = $releaseManifest | ConvertTo-Json
 Set-Content -LiteralPath (Join-Path $ReleaseDir 'UPDATE.json') -Value $manifestText -Encoding utf8NoBOM
@@ -102,25 +110,27 @@ This branch contains **binary downloads only**. Source code:
 <https://github.com/yanggan2015/ssh-bridge-v3>
 
 - App tree: [`ssh_bridge3/`](./ssh_bridge3/)
+- Installer package: [`packages/`](./packages/)
 - Update manifest: [`UPDATE.json`](./UPDATE.json)
-- Installer zip: [GitHub Releases](https://github.com/$Repo/releases)
+- GitHub Releases: <https://github.com/$Repo/releases>
 
 The app's **Help → Check for updates** button reads
-`https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json`.
+`https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json` and
+downloads the package from the same raw branch with SHA-256 verification.
 "@
 Set-Content -LiteralPath (Join-Path $ReleaseDir 'README.md') -Value $branchReadme -Encoding utf8NoBOM
 
-Git $ReleaseDir @('add', '-A')
+RunGit $ReleaseDir @('add', '-A')
 $dirty = (& git -C $ReleaseDir status --porcelain)
 if ($dirty) {
-    Git $ReleaseDir @('commit', '-m', "release windows_x86_64 $Version")
+    RunGit $ReleaseDir @('commit', '-m', "release windows_x86_64 $Version")
 } else {
     Write-Output 'release branch unchanged'
 }
 
 if (-not $SkipPush) {
     # 先推发布分支，保证空仓库有可挂 Release 的提交；随后立刻创建 Release 资产。
-    Git $ReleaseDir @('push', '-u', 'origin', 'HEAD:windows_x86_64')
+    RunGit $ReleaseDir @('push', '-u', 'origin', 'HEAD:windows_x86_64')
     Write-Output "pushed: https://github.com/$Repo/tree/windows_x86_64"
 
     & gh release view $tag -R $Repo 2>$null | Out-Null
@@ -151,11 +161,11 @@ Windows x64 便携安装包。
 & git -C $ReleaseDir fetch origin --prune 2>$null | Out-Null
 $hasMain = (& git -C $ReleaseDir ls-remote --heads origin main) -match 'refs/heads/main$'
 if ($hasMain) {
-    Git $ReleaseDir @('checkout', '-B', 'main', 'origin/main')
-    Git $ReleaseDir @('reset', '--hard', 'origin/main')
+    RunGit $ReleaseDir @('checkout', '-B', 'main', 'origin/main')
+    RunGit $ReleaseDir @('reset', '--hard', 'origin/main')
 } else {
-    Git $ReleaseDir @('checkout', '--orphan', 'main')
-    Git $ReleaseDir @('rm', '-rf', '.') -AllowFail
+    RunGit $ReleaseDir @('checkout', '--orphan', 'main')
+    RunGit $ReleaseDir @('rm', '-rf', '.') -AllowFail
 }
 $mainReadme = @"
 # ssh-bridge v3 — Releases
@@ -171,15 +181,15 @@ The app's **Help → Check for updates** button reads the manifest above and
 downloads the matching GitHub Release asset with SHA-256 verification.
 "@
 Set-Content -LiteralPath (Join-Path $ReleaseDir 'README.md') -Value $mainReadme -Encoding utf8NoBOM
-Git $ReleaseDir @('add', '-A')
+RunGit $ReleaseDir @('add', '-A')
 $mainDirty = (& git -C $ReleaseDir status --porcelain)
 if ($mainDirty) {
-    Git $ReleaseDir @('commit', '-m', 'docs: point main to windows_x86_64 binaries')
+    RunGit $ReleaseDir @('commit', '-m', 'docs: point main to windows_x86_64 binaries')
     if (-not $SkipPush) {
-        Git $ReleaseDir @('push', 'origin', 'HEAD:main')
+        RunGit $ReleaseDir @('push', 'origin', 'HEAD:main')
     }
 } elseif (-not $SkipPush -and -not $hasMain) {
-    Git $ReleaseDir @('push', 'origin', 'HEAD:main')
+    RunGit $ReleaseDir @('push', 'origin', 'HEAD:main')
 }
 if (-not $SkipPush) {
     & gh repo edit $Repo --default-branch main 2>$null | Out-Null
@@ -188,3 +198,5 @@ if (-not $SkipPush) {
 Write-Output "release manifest: https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json"
 Write-Output "release page: https://github.com/$Repo/releases/tag/$tag"
 Write-Output "zip sha256: $($m.sha256)"
+
+
