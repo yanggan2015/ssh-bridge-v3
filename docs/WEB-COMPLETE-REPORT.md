@@ -148,7 +148,8 @@
 
 - 测试配置：`output/terminal-test/ssh_bridge_config.json`
 - 基线备份：`output/ux-audit/config-before-web.json`
-- 恢复后 SHA-256 应为 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`。
+- 恢复后 SHA-256 已核验为 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`。
+- 恢复后重启验证：`web.on=false`、`readonly=true`、18081 拒绝连接；UI 桥仍可用，5 通道全部 ready。
 - 用户真实配置 `C:\Users\admin\.ssh-bridge\ssh_bridge_config.json` 未修改。
 
 ## 8. 交付
