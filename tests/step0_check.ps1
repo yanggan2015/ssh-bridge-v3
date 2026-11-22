@@ -65,7 +65,7 @@ if ($exeOk) {
         $proc.Refresh()
         $title = $proc.MainWindowTitle
     }
-    Check 'T0-7' '窗口标题' ($title -like '*SSH Bridge 3.0*') "title='$title'"
+    Check 'T0-7' '窗口标题' ($title -like '*ssh-bridge v3*') "title='$title'"
 }
 
 # ---------- T0-10/11 关闭与残留 ----------

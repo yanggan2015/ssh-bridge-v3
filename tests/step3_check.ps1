@@ -135,7 +135,7 @@ Start-Sleep -Seconds 2
 
 # ---------- T3-1 启动即建窗 ----------
 $title = if (-not $proc.HasExited) { $proc.MainWindowTitle } else { '' }
-Check 'T3-1' '启动即建窗' ($hwnd -ne [IntPtr]::Zero -and $title -like 'SSH Bridge 3.0*') "title='$title'"
+Check 'T3-1' '启动即建窗' ($hwnd -ne [IntPtr]::Zero -and $title -like 'ssh-bridge v3*') "title='$title'"
 
 # ---------- T3-2 通道树列出全部通道 ----------
 $st = State
@@ -228,3 +228,4 @@ if ($failCount -gt 0) {
 }
 Write-Host "RESULT: ALL PASS" -ForegroundColor Green
 exit 0
+

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -215,10 +216,16 @@ std::string ShareServer::list_page(const std::string& rel, const std::string& no
         try {
             if (!isdir) size = human_size(e.file_size());
             auto t = fs::last_write_time(e);
-            auto sec = std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count();
-            char tb[64];
-            std::snprintf(tb, sizeof(tb), "%lld", static_cast<long long>(sec));
-            mtime = tb;
+            auto delta = std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                t - fs::file_time_type::clock::now());
+            auto sys_t = std::chrono::system_clock::now() + delta;
+            std::time_t sec = std::chrono::system_clock::to_time_t(sys_t);
+            std::tm local{};
+            if (localtime_s(&local, &sec) == 0) {
+                char tb[64];
+                std::strftime(tb, sizeof(tb), "%Y-%m-%d %H:%M", &local);
+                mtime = tb;
+            }
         } catch (...) {}
         html << "<tr><td>" << (isdir ? "<span class=ico>▸</span>" : "<span class=ico>·</span>");
         if (isdir)

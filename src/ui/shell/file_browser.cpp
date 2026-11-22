@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cwchar>
+#include <cwctype>
 
 #include "app/app_core.h"
 #include "third_party/win_ui_bridge.h"
@@ -24,6 +25,29 @@ constexpr int kIdRefresh = 1403;
 constexpr int kIdList    = 1404;
 constexpr int kIdNote    = 1405;
 constexpr int kIdSftp    = 1406;
+
+constexpr std::size_t kMaxEntries = 500;
+
+bool hidden_or_system(const std::filesystem::path& path) {
+    DWORD attr = GetFileAttributesW(path.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES) return false;
+    return (attr & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
+}
+
+bool noise_file(const std::wstring& name) {
+    std::wstring ext = std::filesystem::path(name).extension().wstring();
+    if (ext.empty()) return false;
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+    static const wchar_t* const kNoise[] = {
+        L".tmp", L".log", L".bak", L".swp", L".swo", L".dmp", L".obj",
+        L".o", L".pdb", L".ilk", L".exp", L".lib", L".pyc", L".class",
+    };
+    for (const wchar_t* e : kNoise) {
+        if (ext == e) return true;
+    }
+    return false;
+}
 
 std::wstring size_text(unsigned long long bytes) {
     wchar_t buf[48] = L"";
@@ -71,7 +95,7 @@ bool FileBrowser::create(HINSTANCE inst, HWND parent, AppCore* core, HFONT font,
 void FileBrowser::build() {
     path_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"STATIC", L"",
                             WS_CHILD | WS_VISIBLE | SS_LEFTNOWORDWRAP | SS_CENTERIMAGE |
-                                SS_ENDELLIPSIS | SS_NOPREFIX,
+                                SS_PATHELLIPSIS | SS_NOPREFIX,
                             0, 0, 0, 0, hwnd_,
                             reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdPath)), inst_, nullptr);
     up_ = CreateWindowExW(0, L"BUTTON", L"上级", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
@@ -189,11 +213,19 @@ void FileBrowser::load_dir(const std::filesystem::path& dir) {
         std::filesystem::directory_iterator end;
         while (!ec && it != end) {
             const std::filesystem::directory_entry& de = *it;
+            if (hidden_or_system(de.path())) {
+                it.increment(ec);
+                continue;
+            }
             Entry e;
             e.name = de.path().filename().wstring();
             std::error_code type_ec;
             e.dir = de.is_directory(type_ec);
             if (!e.dir) {
+                if (noise_file(e.name)) {
+                    it.increment(ec);
+                    continue;
+                }
                 std::error_code size_ec;
                 auto sz = de.file_size(size_ec);
                 if (!size_ec) e.size = static_cast<unsigned long long>(sz);
@@ -210,12 +242,20 @@ void FileBrowser::load_dir(const std::filesystem::path& dir) {
         return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
     });
 
+    bool truncated = false;
+    if (entries_.size() > kMaxEntries) {
+        entries_.resize(kMaxEntries);
+        truncated = true;
+    }
+
     dir_ = dir;
     fill_list();
     if (!err.empty()) {
         set_note(err);
     } else {
-        set_note(L"共享目录 · " + std::to_wstring(entries_.size()) + L" 项");
+        std::wstring note = L"共享目录 · " + std::to_wstring(entries_.size()) + L" 项";
+        if (truncated) note += L"（已截断）";
+        set_note(note);
     }
     update_view();
 }
@@ -297,7 +337,19 @@ void FileBrowser::update_view() {
     ShowWindow(sftp_, ssh ? SW_SHOWNA : SW_HIDE);
 
     if (serial) {
-        if (path_) SetWindowTextW(path_, dir_.empty() ? L"" : dir_.wstring().c_str());
+        std::wstring shown;
+        if (!dir_.empty()) {
+            std::filesystem::path project = std::filesystem::u8path(core_->config().project_root);
+            std::filesystem::path rel = dir_.lexically_relative(project);
+            std::wstring rel_text = rel.wstring();
+            if (!rel.empty() && rel_text.rfind(L"..", 0) != 0 &&
+                rel_text != L".") {
+                shown = rel_text;
+            } else {
+                shown = dir_.wstring();
+            }
+        }
+        if (path_) SetWindowTextW(path_, shown.c_str());
         if (up_) EnableWindow(up_, dir_ != root_);
     } else if (ssh) {
         set_note(L"SSH 通道：使用 SFTP 面板浏览远端文件");

@@ -185,11 +185,6 @@ void FileServicePanel::build() {
     auto combo = [&](const wchar_t* text, int x, int y, int w, int h, int id) {
         return make(L"COMBOBOX", text, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, x, y, w, h, id);
     };
-    auto edit = [&](const wchar_t* text, int x, int y, int w, int h, int id, bool read_only) {
-        return make(L"EDIT", text,
-                    WS_BORDER | ES_LEFT | ES_AUTOHSCROLL | (read_only ? ES_READONLY : 0), x, y,
-                    w, h, id);
-    };
 
     label(L"文件服务", 20, 10, 260, 24, filesvc_ui::kIdTitle);
     make(L"BUTTON", L"共用目录（TFTP / 共享 / NFS）", BS_GROUPBOX, 16, 40, 1088, 70,

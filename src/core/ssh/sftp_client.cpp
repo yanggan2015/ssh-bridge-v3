@@ -359,11 +359,22 @@ bool SftpClient::upload(const std::string& local, const std::string& remote,
             if (cancel && cancel->load(std::memory_order_relaxed)) { ok = false; fail = "已取消"; break; }
             std::size_t got = std::fread(buf, 1, kChunk, f);
             if (got == 0) break;
-            if (sftp_write(rf, buf, got) < 0) {
-                ok = false;
-                fail = err_of(impl_->session, "写入远端失败");
-                break;
+            std::size_t written = 0;
+            while (written < got) {
+                int n = sftp_write(rf, buf + written, got - written);
+                if (n < 0) {
+                    ok = false;
+                    fail = err_of(impl_->session, "写入远端失败");
+                    break;
+                }
+                if (n == 0) {
+                    ok = false;
+                    fail = "写入远端失败（服务器返回 0 字节）";
+                    break;
+                }
+                written += static_cast<std::size_t>(n);
             }
+            if (!ok) break;
             sent += got;
             if (done) done->store(sent, std::memory_order_relaxed);
             throttle_to(sent - rate_base, rate_start, impl_->speed_limit, cancel);

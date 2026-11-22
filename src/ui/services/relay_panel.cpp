@@ -131,6 +131,8 @@ const BoardActionConfig* find_action(const std::vector<BoardActionConfig>& list,
 }
 
 std::string preset_script_body(int kind, const std::string& relay_name, int channels) {
+    (void)relay_name;
+    (void)channels;
     if (kind == 0) {
         return "--lua\r\n"
                "local m = channel.mark()\r\n"

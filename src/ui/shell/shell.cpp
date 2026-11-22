@@ -512,6 +512,21 @@ void Shell::note_status(const std::wstring& text) {
     update_status();
 }
 
+static std::wstring fit_status_text(HDC dc, const std::wstring& s, int max_px) {
+    if (s.empty() || max_px <= 0) return L"";
+    SIZE sz{};
+    if (!GetTextExtentPoint32W(dc, s.c_str(), static_cast<int>(s.size()), &sz) || sz.cx <= max_px)
+        return s;
+    const std::wstring ell = L"…";
+    for (int len = static_cast<int>(s.size()) - 1; len > 0; --len) {
+        std::wstring cand = s.substr(0, static_cast<std::size_t>(len)) + ell;
+        if (GetTextExtentPoint32W(dc, cand.c_str(), static_cast<int>(cand.size()), &sz) &&
+            sz.cx <= max_px)
+            return cand;
+    }
+    return ell;
+}
+
 void Shell::update_status() {
     std::wstring s0 = widen(core_->summary());
     std::wstring s1 = L"当前：无";
@@ -525,16 +540,25 @@ void Shell::update_status() {
     } else if (view_.split_count() > 1) {
         s1 = L"当前：画框" + std::to_wstring(pane_no) + L" · 空";
     }
+    RECT rc{};
+    GetClientRect(hwnd_, &rc);
+    int w = rc.right > 0 ? rc.right : 1000;
+    bool narrow = w < MulDiv(900, dpi_, 96);
     std::wstring s3;
     if (button_busy_) {
         double sec = button_start_ms_ ? static_cast<double>(util::now_ms() - button_start_ms_) / 1000.0 : 0.0;
         wchar_t buf[32] = L"";
         swprintf_s(buf, L"%.1fs", sec);
-        s3 = L"按钮：" + active_button_id_ + L"  执行中 " + buf;
+        if (narrow)
+            s3 = active_button_id_ + L" " + buf;
+        else
+            s3 = L"按钮：" + active_button_id_ + L"  执行中 " + buf;
     } else if (button_has_run_) {
-        s3 = std::wstring(button_last_ok_ ? L"✓ " : L"⚠ ") + L"按钮：" + active_button_id_;
+        s3 = std::wstring(button_last_ok_ ? L"✓ " : L"⚠ ");
+        if (!narrow) s3 += L"按钮：";
+        s3 += active_button_id_;
     } else {
-        s3 = L"按钮：未触发";
+        s3 = narrow ? L"未触发" : L"按钮：未触发";
     }
     std::wstring s4;
     if (!active_script_line_.empty()) {
@@ -544,15 +568,12 @@ void Shell::update_status() {
     } else {
         s4 = last_note_.empty() ? L"就绪" : last_note_;
     }
-    RECT rc{};
-    GetClientRect(hwnd_, &rc);
-    int w = rc.right > 0 ? rc.right : 1000;
     // Four parts: channel summary, current channel, triggered button, live script output.
     int parts[4];
-    if (w < MulDiv(900, dpi_, 96)) {
-        parts[0] = w * 22 / 100;
-        parts[1] = w * 50 / 100;
-        parts[2] = w * 70 / 100;
+    if (narrow) {
+        parts[0] = w * 18 / 100;
+        parts[1] = w * 42 / 100;
+        parts[2] = w * 69 / 100;
     } else {
         parts[0] = w * 12 / 100;
         parts[1] = w * 30 / 100;
@@ -560,10 +581,22 @@ void Shell::update_status() {
     }
     parts[3] = -1;
     SendMessageW(status_, SB_SETPARTS, 4, reinterpret_cast<LPARAM>(parts));
+    HDC sdc = GetDC(status_);
+    HFONT old_font = sdc ? static_cast<HFONT>(SelectObject(sdc, font_)) : nullptr;
+    if (sdc) {
+        s0 = fit_status_text(sdc, s0, parts[0] - 8);
+        s1 = fit_status_text(sdc, s1, parts[1] - parts[0] - 8);
+        s3 = fit_status_text(sdc, s3, parts[2] - parts[1] - 8);
+        s4 = fit_status_text(sdc, s4, w - parts[2] - 8);
+    }
     SendMessageW(status_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(s0.c_str()));
     SendMessageW(status_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(s1.c_str()));
     SendMessageW(status_, SB_SETTEXTW, 2, reinterpret_cast<LPARAM>(s3.c_str()));
     SendMessageW(status_, SB_SETTEXTW, 3, reinterpret_cast<LPARAM>(s4.c_str()));
+    if (sdc) {
+        SelectObject(sdc, old_font);
+        ReleaseDC(status_, sdc);
+    }
 
     const auto& entries = core_->entries();
     for (HTREEITEM item : channel_items_) {
@@ -723,8 +756,23 @@ int Shell::layout_board_buttons(int x, int y, int avail_w) {
 
     int scope_w = 0;
     if (multi && board_scope_ && IsWindow(board_scope_)) {
-        scope_w = MulDiv(190, dpi_, 96);
-        int cap = avail_w / 3;
+        int text_w = 0;
+        int len = GetWindowTextLengthW(board_scope_);
+        if (len > 0) {
+            std::wstring text(static_cast<std::size_t>(len) + 1, L'\0');
+            GetWindowTextW(board_scope_, text.data(), len + 1);
+            text.resize(static_cast<std::size_t>(len));
+            HDC dc = GetDC(board_scope_);
+            if (dc) {
+                HFONT old = static_cast<HFONT>(SelectObject(dc, font_));
+                SIZE sz{};
+                if (GetTextExtentPoint32W(dc, text.c_str(), len, &sz)) text_w = sz.cx;
+                SelectObject(dc, old);
+                ReleaseDC(board_scope_, dc);
+            }
+        }
+        scope_w = text_w + MulDiv(18, dpi_, 96);
+        int cap = avail_w / 2;
         if (scope_w > cap) scope_w = cap;
         if (scope_w < MulDiv(120, dpi_, 96)) scope_w = MulDiv(120, dpi_, 96);
         MoveWindow(board_scope_, x, y, scope_w, row_h, TRUE);
@@ -931,6 +979,7 @@ void Shell::check_update() {
     const std::wstring logDir = install + L"\\work\\logs";
     CreateDirectoryW(logDir.c_str(), nullptr);
     const std::wstring log = logDir + L"\\update-run.log";
+    DeleteFileW(log.c_str());
     std::wstring cmd = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& '" +
                        updater + L"' -Manifest '" + kUpdateManifest + L"' *> '" + log + L"'\"";
     STARTUPINFOW si{};
@@ -945,7 +994,69 @@ void Shell::check_update() {
     }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    update_log_path_ = log;
+    update_deadline_ms_ = GetTickCount64() + 60000;
+    update_checking_ = true;
     note_status(L"正在检查官方发布仓库；有新版本会自动校验并重启");
+    if (about_update_note_ && IsWindow(about_update_note_))
+        SetWindowTextW(about_update_note_, L"正在检查官方发布仓库…");
+}
+
+void Shell::poll_update_check() {
+    if (!update_checking_) return;
+    if (GetTickCount64() >= update_deadline_ms_) {
+        update_checking_ = false;
+        note_status(L"检查更新超时：请查看 work\\logs\\update-run.log");
+        if (about_update_note_ && IsWindow(about_update_note_))
+            SetWindowTextW(about_update_note_, L"检查更新超时，请查看 update-run.log");
+        return;
+    }
+
+    HANDLE h = CreateFileW(update_log_path_.c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    wchar_t buf[4096]{};
+    DWORD n = 0;
+    ReadFile(h, buf, sizeof(buf) - sizeof(wchar_t), &n, nullptr);
+    CloseHandle(h);
+    const std::wstring text(buf, n / sizeof(wchar_t));
+    auto about_note = [this](const std::wstring& s) {
+        if (about_update_note_ && IsWindow(about_update_note_))
+            SetWindowTextW(about_update_note_, s.c_str());
+    };
+
+    const std::size_t fail = text.find(L"UPDATE: FAIL ");
+    if (fail != std::wstring::npos) {
+        std::size_t end = text.find_first_of(L"\r\n", fail);
+        std::wstring detail = text.substr(fail + 13, end == std::wstring::npos
+                                                     ? std::wstring::npos : end - fail - 13);
+        if (detail.size() > 100) detail = detail.substr(0, 100) + L"…";
+        note_status(L"检查更新失败：" + detail);
+        about_note(L"检查更新失败：" + detail);
+        update_checking_ = false;
+        return;
+    }
+    if (text.find(L"UPDATE: OK already-up-to-date") != std::wstring::npos) {
+        note_status(L"已是最新版本：" + installed_version());
+        about_note(L"已是最新版本 · " + installed_version());
+        update_checking_ = false;
+        return;
+    }
+    if (text.find(L"UPDATE: OK installed=") != std::wstring::npos ||
+        text.find(L"UPDATE: OK restarted") != std::wstring::npos) {
+        note_status(L"更新已安装，正在重启应用…");
+        about_note(L"更新已安装，正在重启应用…");
+        update_checking_ = false;
+        return;
+    }
+    if (text.find(L"UPDATE: OK update-available") != std::wstring::npos) {
+        if (last_note_.find(L"正在下载") == std::wstring::npos) {
+            note_status(L"发现新版本，正在下载并校验…");
+            about_note(L"发现新版本，正在下载并校验…");
+        }
+        update_deadline_ms_ = GetTickCount64() + 300000;   // 下载大包时放宽等待
+    }
 }
 
 void Shell::show_about() {
@@ -981,10 +1092,13 @@ void Shell::show_about() {
                   aw - pad * 2, MulDiv(112, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutText)), inst_, nullptr);
     HWND updNote = CreateWindowW(L"STATIC",
-                  L"检查到新版本后自动下载、校验 SHA-256 并重启",
+                  (update_checking_ && !last_note_.empty()
+                       ? last_note_
+                       : std::wstring(L"检查到新版本后自动下载、校验 SHA-256 并重启")).c_str(),
                   WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(156, dpi_, 96),
                   aw - pad * 2, MulDiv(22, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutUpdateNote)), inst_, nullptr);
+    about_update_note_ = updNote;
     const int btnW = MulDiv(120, dpi_, 96);
     const int btnH = MulDiv(32, dpi_, 96);
     const int gap = MulDiv(16, dpi_, 96);
@@ -1458,6 +1572,7 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_TIMER:
         if (!IsWindowVisible(hwnd_)) return 0;   // 隐藏到托盘时不刷状态、不拉数据
+        poll_update_check();
         view_.pull_visible();
         update_status();
         return 0;

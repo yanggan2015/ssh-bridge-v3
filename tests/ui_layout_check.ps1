@@ -72,6 +72,17 @@ function Get-VisibleRows([IntPtr]$root) {
     return $rows
 }
 
+function Is-Ancestor([Int64]$a,[Int64]$b) {
+    $h = [IntPtr]$b
+    for ($k = 0; $k -lt 64; $k++) {
+        $p = [Win32Rect]::GetParent($h)
+        if ($p -eq [IntPtr]::Zero) { return $false }
+        if ([Int64]$p -eq $a) { return $true }
+        $h = $p
+    }
+    return $false
+}
+
 function Test-Root([IntPtr]$root, [string]$label) {
     $rows = Get-VisibleRows $root
     Write-Host ("[{0}] 可见控件 {1} 个（hwnd {2}）" -f $label, $rows.Count, $root)
@@ -100,6 +111,11 @@ function Test-Root([IntPtr]$root, [string]$label) {
         for ($j = $i + 1; $j -lt $rows.Count; $j++) {
             $a = $rows[$i]; $b = $rows[$j]
             if ($a.group -or $b.group) { continue }
+            # 容器与内部子控件必然重叠（如 Tab 内的 TreeView），不算遮挡。
+            # 用祖先链判断，避免把合法的父子嵌套误报成布局缺陷。
+            if ((Is-Ancestor $a.hwnd $b.hwnd) -or (Is-Ancestor $b.hwnd $a.hwnd)) { continue }
+            # Tab 控件是页面容器，页内控件与其矩形天然重合。
+            if ($a.cls -eq 'SysTabControl32' -or $b.cls -eq 'SysTabControl32') { continue }
             $ix = [Math]::Max(0, [Math]::Min($a.right, $b.right) - [Math]::Max($a.left, $b.left))
             $iy = [Math]::Max(0, [Math]::Min($a.bottom, $b.bottom) - [Math]::Max($a.top, $b.top))
             if ($ix -le 0 -or $iy -le 0) { continue }
@@ -155,4 +171,7 @@ if ($DialogClass) {
 if ($ok) { Write-Host 'RESULT: LAYOUT PASS'; exit 0 }
 Write-Host 'RESULT: LAYOUT FAIL' -ForegroundColor Red
 exit 1
+
+
+
 

@@ -107,11 +107,6 @@ void ReadMark(lua_State* L, int idx, std::uint64_t* epoch, std::uint64_t* seen) 
     lua_pop(L, 1);
 }
 
-std::string ReadDelta(IBridge* b, std::uint64_t* epoch, std::uint64_t* seen) {
-    if (!b || !epoch || !seen) return std::string();
-    return b->read_since(epoch, seen);
-}
-
 int LMsleep(lua_State* L) {
     int ms = static_cast<int>(luaL_checkinteger(L, 1));
     CheckDeadline(L);

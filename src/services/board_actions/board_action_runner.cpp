@@ -19,15 +19,6 @@ namespace {
 
 std::mutex g_log_mu;
 
-std::wstring widen(const std::string& s) {
-    if (s.empty()) return std::wstring();
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
-    if (n <= 0) return std::wstring();
-    std::wstring w(static_cast<std::size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), w.data(), n);
-    return w;
-}
-
 const RelayDeviceConfig* find_relay(const AppConfig& cfg, const std::string& name) {
     for (const RelayDeviceConfig& r : cfg.relays) {
         if (r.name == name) return &r;
@@ -241,7 +232,8 @@ BoardActionResult run_board_action(const AppConfig& cfg, const std::string& chan
         };
         ctx.action_invoker = [&](const std::string& id) -> ScriptActionResult {
             const BoardActionConfig* nested = find_action(cfg, channel, id);
-            if (!nested) return {false, "action '" + id + "' 不存在"};
+            if (!nested)
+                return ScriptActionResult{false, "action '" + id + "' 不存在", false, "", "", 0, false};
             BoardActionResult ar = run_board_action(cfg, channel, *nested, bridge, port_in_use,
                                                     depth + 1, progress);
             ScriptActionResult sr;

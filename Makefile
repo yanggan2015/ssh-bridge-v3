@@ -19,7 +19,7 @@ CXXFLAGS ?= -O2 -Wall -Wextra -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE -DLIBSS
 # 第三方 C 源码（mongoose/win_ui_bridge）：只开 -Wall；mongoose 内部未用变量按规范局部抑制
 CFLAGS ?= -O2 -Wall -Wno-unused-variable -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
           -DUI_BRIDGE_ENABLE -finput-charset=UTF-8 -fexec-charset=UTF-8 -pthread \
-          -UUNICODE -U_UNICODE -DLUA_USE_WINDOWS \
+          -UUNICODE -U_UNICODE \
           -Isrc/third_party -Isrc/third_party/lua -I$(MINGW)/include -I$(MINGW)/include/cjson
 
 LIBS := -mwindows -municode -static-libgcc -static-libstdc++ \

@@ -9,6 +9,9 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
 #include <windows.h>
 #include <wchar.h>
 
@@ -84,10 +87,6 @@ static void util_dirname(char *dst, size_t cap, const char *path) {
 }
 
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <iphlpapi.h>
-#include <windows.h>
 typedef SOCKET tftp_sock_t;
 #define TFTP_INVALID INVALID_SOCKET
 #define tftp_close closesocket

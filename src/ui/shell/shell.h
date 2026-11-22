@@ -45,6 +45,7 @@ private:
     void hide_self();
     void show_about();
     void check_update();
+    void poll_update_check();
     void next_hit();
     void note_status(const std::wstring& text);
     void dump_state();
@@ -77,6 +78,7 @@ private:
     HINSTANCE inst_    = nullptr;
     HWND      hwnd_    = nullptr;
     HWND      about_   = nullptr;
+    HWND      about_update_note_ = nullptr;
     HWND      tree_    = nullptr;
     HWND      left_tabs_ = nullptr;
     HWND      status_  = nullptr;
@@ -98,6 +100,9 @@ private:
     bool      sync_tree_binding_ = false;    // 正在把左树选中同步到激活画框，避免回写通道
     bool      layout_ready_ = false;         // 启动恢复完成前不写分屏布局，避免临时状态覆盖配置
     std::wstring last_note_;
+    std::wstring update_log_path_;
+    std::uint64_t update_deadline_ms_ = 0;
+    bool update_checking_ = false;
     std::wstring active_button_id_;
     std::wstring active_button_label_;
     std::wstring active_script_line_;
