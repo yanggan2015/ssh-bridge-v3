@@ -20,7 +20,7 @@ $base = 'http://127.0.0.1:18086'
 
 # 基线：每个控件必须登记稳定 id，且至少要有一个可执行动作
 $expected = @(
-    'btn.refresh', 'btn.reconnect', 'btn.clear',
+    'btn.refresh', 'btn.reconnect', 'btn.clear', 'btn.toggleTree',
     'tree.channels', 'label.status', 'edit.search', 'term.view', 'label.searchHint',
     'menu.file.exit', 'menu.help.about', 'menu.view.hide', 'menu.view.refresh',
     'menu.view.reconnect', 'menu.view.split1', 'menu.view.split2', 'menu.view.split4',

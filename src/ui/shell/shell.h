@@ -68,6 +68,7 @@ private:
     void show_relay_panel(int page);
     void show_file_panel();
     void refresh_board_buttons();
+    void toggle_left_panel();
     int layout_board_buttons(int x, int y, int avail_w);
     void on_board_button(std::size_t index);
 
@@ -79,7 +80,7 @@ private:
     HWND      left_tabs_ = nullptr;
     HWND      left_file_hint_ = nullptr;
     HWND      status_  = nullptr;
-    HWND      buttons_[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    HWND      buttons_[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     HFONT     font_    = nullptr;
     TrayIcon       tray_;
     TerminalView   view_;
@@ -105,6 +106,10 @@ private:
     bool      button_has_run_ = false;
     int       dpi_     = 96;
     int       left_page_ = 0;   // 0=通道 1=文件
+    bool      left_collapsed_ = false;       // 当前是否收起左侧通道管理器
+    bool      left_auto_collapsed_ = false;  // 本次收起由窄窗自动触发，变宽时可自动恢复
+    bool      left_user_override_ = false;   // 用户手动切换后，直到跨越宽度断点才恢复自动
+    bool      last_compact_ = false;         // 上一次布局是否处于窄窗模式
     int       board_strip_h_ = 0;
     std::vector<HTREEITEM> channel_items_;
     std::vector<BoardActionConfig> board_actions_;

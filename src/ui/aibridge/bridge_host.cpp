@@ -373,6 +373,10 @@ std::string build_state_json() {
     cJSON_AddBoolToObject(root, "about_open", FindWindowW(kAboutClass, nullptr) != nullptr);
     cJSON_AddBoolToObject(root, "tree_visible",
                           g_main ? IsWindowVisible(GetDlgItem(g_main, kIdTree)) != FALSE : FALSE);
+    cJSON_AddBoolToObject(ui, "left_visible",
+                          g_main ? IsWindowVisible(GetDlgItem(g_main, 1019)) != FALSE : FALSE);
+    cJSON_AddBoolToObject(ui, "left_collapsed",
+                          g_main ? IsWindowVisible(GetDlgItem(g_main, 1019)) == FALSE : FALSE);
     cJSON_AddNumberToObject(ui, "left_page",
                             g_main ? static_cast<double>(SendMessageW(GetDlgItem(g_main, 1019),
                                       TCM_GETCURSEL, 0, 0)) : 0.0);

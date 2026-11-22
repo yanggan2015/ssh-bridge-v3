@@ -73,6 +73,7 @@ constexpr int kIdcBtnReconnect = 1011;
 constexpr int kIdcBtnClear     = 1012;
 constexpr int kIdcBtnNew       = 1017;
 constexpr int kIdcBtnDisconnect = 1018;
+constexpr int kIdcTreeToggle   = 1022;
 constexpr int kIdcBoardBase = 5100;
 
 constexpr int kIdmExit       = 40001;
@@ -320,10 +321,10 @@ void Shell::build_children() {
                         DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
     if (!font_) font_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 
-    const wchar_t* btn_text[5] = {L"新建", L"刷新", L"重连", L"断开", L"清屏"};
-    const int btn_ids[5] = {kIdcBtnNew, kIdcBtnRefresh, kIdcBtnReconnect,
-                            kIdcBtnDisconnect, kIdcBtnClear};
-    for (int i = 0; i < 5; ++i) {
+    const wchar_t* btn_text[6] = {L"新建", L"刷新", L"重连", L"断开", L"清屏", L"收起"};
+    const int btn_ids[6] = {kIdcBtnNew, kIdcBtnRefresh, kIdcBtnReconnect,
+                            kIdcBtnDisconnect, kIdcBtnClear, kIdcTreeToggle};
+    for (int i = 0; i < 6; ++i) {
         buttons_[i] = CreateWindowExW(0, L"BUTTON", btn_text[i],
                                       WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                       0, 0, 0, 0, hwnd_,
@@ -331,6 +332,8 @@ void Shell::build_children() {
                                       inst_, nullptr);
         SendMessageW(buttons_[i], WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     }
+    // 第 6 个按钮：窄窗自动收起，宽窗自动展开；手动点击后保持到跨越宽度断点。
+    ui_bridge_set_id(buttons_[5], "btn.toggleTree");
 
     // 左侧固定工作区：通道 / 文件选项卡。文件页本轮先给结构说明，内容按通道类型后续接入。
     left_tabs_ = CreateWindowExW(0, WC_TABCONTROLW, L"",
@@ -553,7 +556,17 @@ void Shell::update_status() {
     GetClientRect(hwnd_, &rc);
     int w = rc.right > 0 ? rc.right : 1000;
     // Four parts: channel summary, current channel, triggered button, live script output.
-    int parts[4] = {w * 12 / 100, w * 30 / 100, w * 52 / 100, -1};
+    int parts[4];
+    if (w < MulDiv(900, dpi_, 96)) {
+        parts[0] = w * 22 / 100;
+        parts[1] = w * 50 / 100;
+        parts[2] = w * 70 / 100;
+    } else {
+        parts[0] = w * 12 / 100;
+        parts[1] = w * 30 / 100;
+        parts[2] = w * 52 / 100;
+    }
+    parts[3] = -1;
     SendMessageW(status_, SB_SETPARTS, 4, reinterpret_cast<LPARAM>(parts));
     SendMessageW(status_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(s0.c_str()));
     SendMessageW(status_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(s1.c_str()));
@@ -606,12 +619,34 @@ std::string Shell::current_channel() const {
 void Shell::layout() {
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    int gap   = MulDiv(8, dpi_, 96);
+    bool ultra  = rc.right < MulDiv(640, dpi_, 96);
+    bool narrow = rc.right < MulDiv(900, dpi_, 96);
+    int gap   = ultra ? MulDiv(4, dpi_, 96) : (narrow ? MulDiv(5, dpi_, 96) : MulDiv(8, dpi_, 96));
     int btn_h = MulDiv(26, dpi_, 96);
-    int btn_w = MulDiv(70, dpi_, 96);
-    for (int i = 0; i < 5; ++i) {
+    int btn_w = ultra ? MulDiv(44, dpi_, 96) : (narrow ? MulDiv(56, dpi_, 96) : MulDiv(70, dpi_, 96));
+    for (int i = 0; i < 6; ++i) {
         MoveWindow(buttons_[i], gap + i * (btn_w + gap), gap, btn_w, btn_h, TRUE);
     }
+
+    // 窄窗自动收起左侧通道管理器；手动切换优先，跨越宽度断点后恢复自动。
+    bool compact = rc.right < MulDiv(820, dpi_, 96);
+    if (compact != last_compact_) {
+        left_user_override_ = false;
+        last_compact_ = compact;
+    }
+    if (!left_user_override_) {
+        if (compact) {
+            if (!left_collapsed_) note_status(L"已收起");
+            left_collapsed_ = true;
+            left_auto_collapsed_ = true;
+        } else if (left_auto_collapsed_) {
+            left_collapsed_ = false;
+            left_auto_collapsed_ = false;
+            note_status(L"已展开");
+        }
+    }
+    if (buttons_[5]) SetWindowTextW(buttons_[5], left_collapsed_ ? L"展开" : L"收起");
+
     SendMessageW(status_, WM_SIZE, 0, 0);
     RECT sr{};
     GetWindowRect(status_, &sr);
@@ -623,39 +658,53 @@ void Shell::layout() {
     if (body_h < MulDiv(120, dpi_, 96)) body_h = MulDiv(120, dpi_, 96);
 
     int left_w = MulDiv(246, dpi_, 96);
-    MoveWindow(left_tabs_, gap, top, left_w, body_h, TRUE);
     int header = MulDiv(26, dpi_, 96);
-    if (left_tabs_) {
-        RECT tr{0, 0, left_w, body_h};
-        if (SendMessageW(left_tabs_, TCM_GETITEMRECT, 0, reinterpret_cast<LPARAM>(&tr) ) &&
-            tr.bottom > MulDiv(8, dpi_, 96))
-            header = tr.bottom + MulDiv(2, dpi_, 96);
-    }
-    int content_x = gap + MulDiv(4, dpi_, 96);
-    int content_y = top + header;
-    int content_w = left_w - MulDiv(8, dpi_, 96);
-    int content_h = body_h - header - MulDiv(4, dpi_, 96);
-    if (content_h < 0) content_h = 0;
-    MoveWindow(tree_, content_x, content_y, content_w, content_h, TRUE);
-    MoveWindow(left_file_hint_, content_x, content_y, content_w, content_h, TRUE);
-    if (left_page_ == 0) {
-        ShowWindow(tree_, SW_SHOWNA);
+    if (left_collapsed_) {
+        ShowWindow(left_tabs_, SW_HIDE);
+        ShowWindow(tree_, SW_HIDE);
         ShowWindow(left_file_hint_, SW_HIDE);
     } else {
-        ShowWindow(tree_, SW_HIDE);
-        ShowWindow(left_file_hint_, SW_SHOWNA);
+        ShowWindow(left_tabs_, SW_SHOWNA);
+        MoveWindow(left_tabs_, gap, top, left_w, body_h, TRUE);
+        if (left_tabs_) {
+            RECT tr{0, 0, left_w, body_h};
+            if (SendMessageW(left_tabs_, TCM_GETITEMRECT, 0, reinterpret_cast<LPARAM>(&tr)) &&
+                tr.bottom > MulDiv(8, dpi_, 96))
+                header = tr.bottom + MulDiv(2, dpi_, 96);
+        }
+        int content_x = gap + MulDiv(4, dpi_, 96);
+        int content_y = top + header;
+        int content_w = left_w - MulDiv(8, dpi_, 96);
+        int content_h = body_h - header - MulDiv(4, dpi_, 96);
+        if (content_h < 0) content_h = 0;
+        MoveWindow(tree_, content_x, content_y, content_w, content_h, TRUE);
+        MoveWindow(left_file_hint_, content_x, content_y, content_w, content_h, TRUE);
+        if (left_page_ == 0) {
+            ShowWindow(tree_, SW_SHOWNA);
+            ShowWindow(left_file_hint_, SW_HIDE);
+        } else {
+            ShowWindow(tree_, SW_HIDE);
+            ShowWindow(left_file_hint_, SW_SHOWNA);
+        }
     }
 
-    int label_w  = MulDiv(42, dpi_, 96);
-    int search_w = MulDiv(240, dpi_, 96);
-    int search_x = rc.right - gap * 2 - search_w;
+    int label_w  = ultra ? 0 : (narrow ? MulDiv(36, dpi_, 96) : MulDiv(42, dpi_, 96));
+    int search_w = ultra ? MulDiv(110, dpi_, 96) : (narrow ? MulDiv(170, dpi_, 96) : MulDiv(240, dpi_, 96));
+    int search_x = rc.right - (ultra ? gap : gap * 2) - search_w;
     int label_x  = search_x - label_w - MulDiv(6, dpi_, 96);
-    MoveWindow(search_label_, label_x, gap, label_w, btn_h, TRUE);
+    if (ultra) {
+        ShowWindow(search_label_, SW_HIDE);
+    } else {
+        MoveWindow(search_label_, label_x, gap, label_w, btn_h, TRUE);
+        ShowWindow(search_label_, SW_SHOWNA);
+    }
     MoveWindow(search_, search_x, gap, search_w, btn_h, TRUE);
+    SendMessageW(search_, EM_SETCUEBANNER, TRUE,
+                 reinterpret_cast<LPARAM>(ultra ? L"搜索（Enter）" : L"回看关键词（Enter 定位，F3 下一个）"));
     if (keyhint_) {
-        int hx = gap + 5 * (btn_w + gap) + MulDiv(14, dpi_, 96);
+        int hx = gap + 6 * (btn_w + gap) + MulDiv(14, dpi_, 96);
         int hw = label_x - hx - MulDiv(12, dpi_, 96);
-        if (hw >= MulDiv(210, dpi_, 96)) {
+        if (!narrow && hw >= MulDiv(210, dpi_, 96)) {
             MoveWindow(keyhint_, hx, gap, hw, btn_h, TRUE);
             ShowWindow(keyhint_, SW_SHOWNA);
         } else {
@@ -663,7 +712,7 @@ void Shell::layout() {
         }
     }
 
-    int term_x = gap + left_w + gap;
+    int term_x = gap + (left_collapsed_ ? 0 : left_w) + gap;
     int term_w = rc.right - term_x - gap;
     if (term_w < MulDiv(200, dpi_, 96)) term_w = MulDiv(200, dpi_, 96);
     board_strip_h_ = layout_board_buttons(term_x, top, term_w);
@@ -787,6 +836,20 @@ void Shell::on_left_tab_change() {
     left_page_ = static_cast<int>(SendMessageW(left_tabs_, TCM_GETCURSEL, 0, 0));
     if (left_page_ < 0) left_page_ = 0;
     layout();
+}
+
+void Shell::toggle_left_panel() {
+    left_collapsed_ = !left_collapsed_;
+    left_auto_collapsed_ = false;
+    left_user_override_ = true;
+    if (left_collapsed_) {
+        RECT rc{};
+        GetClientRect(hwnd_, &rc);
+        // 窄窗里手动收起，变宽时仍按自动策略恢复，不把窗口永久锁成单栏。
+        if (rc.right < MulDiv(820, dpi_, 96)) left_auto_collapsed_ = true;
+    }
+    layout();
+    note_status(left_collapsed_ ? L"已收起" : L"已展开");
 }
 
 void Shell::show_relay_panel(int page) {
@@ -1147,6 +1210,9 @@ void Shell::on_command(int id) {
         view_.clear_active();
         note_status(L"已清屏");
         break;
+    case kIdcTreeToggle:
+        toggle_left_panel();
+        break;
     case kIdmSplit1:
         view_.split(1);
         save_layout_state();
@@ -1360,14 +1426,15 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
         build_menu();
         build_children();
         {
-            ACCEL a[5] = {
+            ACCEL a[6] = {
                 {static_cast<BYTE>(FCONTROL | FVIRTKEY), 'N', kIdmChanNewSerial},
                 {FVIRTKEY, static_cast<WORD>(VK_F5), kIdmRefresh},
                 {FVIRTKEY, static_cast<WORD>(VK_F3), kIdmFindNext},
                 {static_cast<BYTE>(FCONTROL | FVIRTKEY), 'F', kIdmFocusSearch},
                 {FVIRTKEY, static_cast<WORD>(VK_F7), kIdmSftp},
+                {static_cast<BYTE>(FCONTROL | FVIRTKEY), 'B', kIdcTreeToggle},
             };
-            accel_ = CreateAcceleratorTableW(a, 5);
+            accel_ = CreateAcceleratorTableW(a, 6);
         }
         SetTimer(hwnd_, 1, 1000, nullptr);
         // 首帧布局/状态栏文本必须等窗口真正有尺寸后再做：
@@ -1382,8 +1449,8 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_GETMINMAXINFO: {
         // 最小窗口：低于这个尺寸终端会被工具栏/状态栏挤没
         auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
-        mmi->ptMinTrackSize.x = MulDiv(880, dpi_, 96);
-        mmi->ptMinTrackSize.y = MulDiv(520, dpi_, 96);
+        mmi->ptMinTrackSize.x = MulDiv(480, dpi_, 96);
+        mmi->ptMinTrackSize.y = MulDiv(480, dpi_, 96);
         return 0;
     }
 
