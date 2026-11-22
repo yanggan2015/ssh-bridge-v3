@@ -20,6 +20,8 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 更新器只替换 `ssh_bridge3.exe`、`README.md`、`VERSION.txt` 和 `tools\` 下的文件，
 从不修改 `ssh_bridge_config.json`、`work\`、`logs\`、`keys`。
 
+下载优先走清单里的 raw `url`；连续失败或 zip 完整性校验不通过时，会自动切换到同一 Release 的 `github_url` 资产，再校验 SHA-256 后安装。
+
 **切分口径：先造一个完整的终端工具，再往外挂扩展。** S1–S7 造出 `desktop.exe` 本体（原生 Win32 终端工具，做完即可日常使用、零端口）；S8–S13 是挂在这个工具上的扩展，每个独立开关，全关掉本体照常工作。整体框图见 `docs/架构总览.md`。
 
 ## 文档地图
