@@ -871,8 +871,11 @@ void Shell::check_update() {
         return;
     }
 
-    std::wstring cmd = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"" +
-                       updater + L"\" -Manifest \"" + kUpdateManifest + L"\"";
+    const std::wstring logDir = install + L"\\work\\logs";
+    CreateDirectoryW(logDir.c_str(), nullptr);
+    const std::wstring log = logDir + L"\\update-run.log";
+    std::wstring cmd = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& '" +
+                       updater + L"' -Manifest '" + kUpdateManifest + L"' *> '" + log + L"'\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESHOWWINDOW;
@@ -914,10 +917,11 @@ void Shell::show_about() {
     HWND txt = CreateWindowW(L"STATIC",
                   L"ssh-bridge v3 · 原生 Win32 单进程\r\n"
                   L"串口 / SSH / 日志共用一个 ring\r\n\r\n"
-                  L"官方发布仓库：yanggan2015/ssh-bridge-v3-releases\r\n"
+                  L"官方发布仓库：\r\n"
+                  L"github.com/yanggan2015/ssh-bridge-v3-releases\r\n"
                   L"AI 桥接：http://127.0.0.1:18086",
                   WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(44, dpi_, 96),
-                  aw - pad * 2, MulDiv(104, dpi_, 96), about_,
+                  aw - pad * 2, MulDiv(112, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutText)), inst_, nullptr);
     HWND updNote = CreateWindowW(L"STATIC",
                   L"检查到新版本后自动下载、校验 SHA-256 并重启",

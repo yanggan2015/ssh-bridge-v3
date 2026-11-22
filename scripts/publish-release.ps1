@@ -5,13 +5,13 @@
 # GitHub Release：v<Version>，资产为 zip + 本地 UPDATE.json + zip.sha256
 #
 # 用法：
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r2
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r2 -SkipPush
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r3
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r3 -SkipPush
 #
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r2',
+    [string]$Version = '3.0-s13-r3',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
@@ -60,9 +60,14 @@ if (-not (& git -C $ReleaseDir config user.email)) {
 
 & git -C $ReleaseDir fetch origin --prune 2>$null | Out-Null
 $hasBranch = (& git -C $ReleaseDir ls-remote --heads origin windows_x86_64) -match 'refs/heads/windows_x86_64$'
+$hasLocalBranch = $false
+& git -C $ReleaseDir show-ref --verify --quiet refs/heads/windows_x86_64
+if ($LASTEXITCODE -eq 0) { $hasLocalBranch = $true }
 if ($hasBranch) {
     RunGit $ReleaseDir @('checkout', '-B', 'windows_x86_64', 'origin/windows_x86_64')
     RunGit $ReleaseDir @('reset', '--hard', 'origin/windows_x86_64')
+} elseif ($hasLocalBranch) {
+    RunGit $ReleaseDir @('checkout', 'windows_x86_64')
 } else {
     RunGit $ReleaseDir @('checkout', '--orphan', 'windows_x86_64')
     RunGit $ReleaseDir @('rm', '-rf', '.') -AllowFail
@@ -160,13 +165,21 @@ Windows x64 便携安装包。
 # 主分支只放导航 README；发布分支负责二进制与清单。
 & git -C $ReleaseDir fetch origin --prune 2>$null | Out-Null
 $hasMain = (& git -C $ReleaseDir ls-remote --heads origin main) -match 'refs/heads/main$'
+$hasLocalMain = $false
+& git -C $ReleaseDir show-ref --verify --quiet refs/heads/main
+if ($LASTEXITCODE -eq 0) { $hasLocalMain = $true }
 if ($hasMain) {
     RunGit $ReleaseDir @('checkout', '-B', 'main', 'origin/main')
     RunGit $ReleaseDir @('reset', '--hard', 'origin/main')
+} elseif ($hasLocalMain) {
+    RunGit $ReleaseDir @('checkout', 'main')
 } else {
     RunGit $ReleaseDir @('checkout', '--orphan', 'main')
     RunGit $ReleaseDir @('rm', '-rf', '.') -AllowFail
 }
+Remove-Item -Recurse -Force (Join-Path $ReleaseDir 'ssh_bridge3') -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force (Join-Path $ReleaseDir 'packages') -ErrorAction SilentlyContinue
+Remove-Item -Force (Join-Path $ReleaseDir 'UPDATE.json') -ErrorAction SilentlyContinue
 $mainReadme = @"
 # ssh-bridge v3 — Releases
 
