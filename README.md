@@ -1,4 +1,4 @@
-# ssh-bridge v3
+﻿# ssh-bridge v3
 
 原生 Win32 单进程终端工作台：串口 / SSH / SFTP / 继电器 / 板控按钮 / 文件服务，
 界面直读同一份环形日志；附带只监听 `127.0.0.1` 的 AI 控件桥。
@@ -124,7 +124,7 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 - 步骤 2：**已完成并验收**。SSH 出站链路（libssh 静态链接）：PTY+shell、非阻塞读、保活、指数退避重连、双链路隔离；`tests\step2_check.ps1` 11 项全 PASS（自带 paramiko 测试服务器）。
 - 步骤 3：**已完成并验收**。原生窗口壳（菜单/工具栏/通道树/状态栏）、托盘（X=隐藏、双击恢复、菜单退出）、单实例、退出序列停通道并释放串口；`tests\step3_check.ps1` 14 项全 PASS。
 - 步骤 5：**已完成并验收（AI 可控桥接）**。`agent.enable=true` 时监听 `127.0.0.1:18086`，暴露 `/capabilities /ui-tree /control /state /action /logs`；41 个控件/动作全部可读可写（含菜单、托盘、关于窗、终端输入/搜索/绝对回滚/分屏），`tests\ui_bridge_check.ps1` 41 项全 PASS；关掉开关则一个端口都不监听。
-- 设计文档 §9 / S8：**已完成并验收（入站 SSH 共享网关）**。`inbound_ssh.enable=true` 时单口监听 `0.0.0.0:2222`，用户名=通道名，密码按三级规则解析，空密码允许 none；入站会话读写该通道同一份 ring/cmdq，支持多会话、配置重载启停和 `/state.services.inbound`。详见 `docs\S8-入站SSH验收报告.md`。
+- 设计文档 §9 / S8：**已完成并验收（入站 SSH 共享网关）**。`inbound_ssh.enable=true` 时单口监听 `0.0.0.0:2222`，用户名=通道名，密码按三级规则解析，空密码允许 none；入站会话读写该通道同一份 ring/cmdq，支持多会话、配置重载启停和 `/state.services.inbound`；16 项自动化矩阵覆盖 none、默认密码继承、SSH 通道自身密码、错误/未知用户、双会话和热关闭重开。详见 `docs\S8-入站SSH验收报告.md`。
 - 设计文档 §10 / S9：**已完成并验收（Web 控制台）**。`web.enable=true` 时单端口同时提供 HTTP + WS；10 个页面、REST、`/ws/log` BINARY、token 鉴权、静态 304、配置页两 Tab 表单保存后热重载。板控动作走单后台队列，`MG_EV_WAKEUP` 回写完成状态，避免并发抢串口；页面资产已拆到 `web_pages.cpp`。TCP 转发/隧道页面已由 S12 接上真实状态。详见 `docs\S9-Web控制台验收报告.md`。
 - 设计文档 §13 / S12：**已完成并验收（TCP 转发 / 隧道 / UDP 发现）**。`tcp_forward.enable` 按 `port_base + 板 IP 末段` 一次绑定 256 个监听口，`WSAPoll(500ms)` 统一 accept，双向 relay 不阻塞 UI；`tunnel.enable` 拉起 `eadk-tunnel.exe -c runtime.json`，HTTP 映射 18xxx、入站 SSH 映射 28xxx，进程退出自动重启；`discovery.enable` 在 UDP 18071 应答 `EADK1 q`，只返回 `enable && discoverable` 的通道。配置保存后热重载即时生效，Web `/api/tcp-forward`、`/api/tunnel`、`/api/discovery` 与 `/state.services` 同步暴露状态。详见 `docs\S12-TCP隧道发现验收报告.md`。
 - 设计文档 §14 / S13：**已完成并验收（自更新 / 打包 / 全量回归）**。`scripts\package.ps1` 生成 `output\dist\ssh-bridge-v3-3.0-s13-r13-win64.zip`（含 exe、脱敏配置、README、`tools\smoke.ps1`、`tools\update.ps1`、`tools\ui_probe.py`）；`update.ps1` 校验 zip 与 exe SHA-256、白名单替换、失败回滚、更新后自动重启，安装目录只停自身实例。r12 → r13 在线升级、坏包拒绝、TFTP/共享/NFS 三开关、独立包冒烟、S0–S12 回归均已通过。详见 `docs\S13-自更新打包全量回归验收报告.md`。

@@ -43,8 +43,34 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 2222 loop1@127.0.0.
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -p 2222 wireless@127.0.0.1
 ```
 
+## 自动化完整矩阵（r13，2026-11-22）
+
+`tests\s8_matrix_check.ps1` 会启动隔离应用并运行 `tests\s8_matrix.py`，覆盖：
+
+- [x] S8M-1 显式空密码通道 none 认证
+- [x] S8M-2 继承默认密码的通道拒绝 none
+- [x] S8M-3 默认密码 `defpw` 成功
+- [x] S8M-4 默认密码通道拒绝错误密码
+- [x] S8M-5 SSH 出站通道使用自身密码
+- [x] S8M-6 SSH 出站通道拒绝默认密码
+- [x] S8M-7 未知用户名被拒
+- [x] S8M-8/9 同通道双会话互相看到 A/B
+- [x] S8M-10 活动会话计数为 2
+- [x] S8M-11 保存配置关闭入站后端口释放
+- [x] S8M-12 关闭后 `on=false / sessions=0`
+- [x] S8M-13 活动会话收到断开
+- [x] S8M-14 重新开启后端口恢复
+- [x] S8M-15 重新开启后仍可回显
+- [x] S8M-16 全部关闭后会话清零
+
+复现：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests\s8_matrix_check.ps1 -SkipBuild
+```
+
 ## 备注
 
 - 入站会话只接受 `shell`，带远端命令的 `exec` 会失败。
 - 空密码通道允许 `none` 认证，局域网内可被同网段访问；生产使用应显式设置密码。
-- 本轮未重新打 r11 包，发布资产仍是旧构建。
+- r13 发布包已包含本功能；旧 r11 资产保留为历史版本。

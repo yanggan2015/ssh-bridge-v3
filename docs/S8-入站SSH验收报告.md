@@ -2,7 +2,8 @@
 
 日期：2026-11-22  
 设计位置：`docs/详细设计.md` §9「S8 SSH 入站共享网关 :2222」  
-实现状态：已完成，未提交、未重新打包
+实现状态：已完成并验收，r13 发布包已包含  
+自动化矩阵：`tests\s8_matrix_check.ps1` + `tests\s8_matrix.py`
 
 ## 1. 实现内容
 
@@ -38,6 +39,41 @@
 | 启动时开关关闭 | 不 bind，`on=false`，端口 2222 无监听 |
 | 停止/重载稳定性 | 首次实现发现停止时 ntdll 堆损坏 `0xc0000374`，修正 hostkey 所有权后连续启停无崩溃 |
 
+### 2.1 自动化完整矩阵（2026-11-22，r13）
+
+环境：`output\s8matrix`，监听 2223，Web 18091；配置同时提供三类用户：
+
+- `nonech`：板卡显式 `password=""`，免密；
+- `inherit`：省略 `password` 字段，继承 `default.password=defpw`；
+- `sshin`：SSH 出站通道，自身密码 `sshpw`，与 `default.password` 不同。
+
+| # | 项目 | 结果 |
+|---|---|---|
+| S8M-1 | 空密码通道 none 认证 | PASS |
+| S8M-2 | 默认密码通道拒绝 none | PASS |
+| S8M-3 | 默认密码继承 `defpw` | PASS |
+| S8M-4 | 默认密码拒绝错误密码 | PASS |
+| S8M-5 | SSH 出站通道使用自身密码 | PASS |
+| S8M-6 | SSH 出站通道拒绝默认密码 | PASS |
+| S8M-7 | 未知用户名被拒 | PASS |
+| S8M-8 | 同通道双会话共享客户端 A 输入 | PASS |
+| S8M-9 | 同通道双会话共享客户端 B 输入 | PASS |
+| S8M-10 | 活动会话计数为 2 | PASS |
+| S8M-11 | 保存配置关闭入站后 2223 释放 | PASS |
+| S8M-12 | 关闭后 `on=false / sessions=0` | PASS |
+| S8M-13 | 活动会话收到断开 | PASS |
+| S8M-14 | 重新开启后端口恢复 | PASS |
+| S8M-15 | 重新开启后仍可回显 | PASS |
+| S8M-16 | 全部关闭后会话清零 | PASS |
+
+结果：`RESULT: ALL PASS`；退出后进程 0、端口无监听（`S8M-CLEAN PASS`）。
+
+复现：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests\s8_matrix_check.ps1 -SkipBuild
+```
+
 ## 3. 已知边界
 
 - 只开 IPv4 `0.0.0.0`，未做 IPv6 双栈。
@@ -45,7 +81,8 @@
 - 没有入站空闲超时和速率限制；慢客户端由自身会话写失败/关闭处理，不阻塞其它会话。
 - hostkey 为持久化 RSA 2048；密码仍按现有配置明文保存，未额外加密。
 - config 开关是主要入口，暂无独立服务面板开关。
-- 当前发布包 r11 不包含本功能；需要重新打包后才对外可用。
+- 当前 r13 发布包已包含本功能与 S12/S13；`ssh -p 2222 <通道名>@<主机>` 可用。
+- 自动化矩阵覆盖本文件第 2 节的主要认证、多会话和重载路径；S11 继电器硬件项仍按硬件环境单独验收。
 
 ## 4. 设计进度
 
