@@ -1,5 +1,5 @@
 // serial_bridge.cpp — Win32 串口通道实现。
-// 读泵：WaitCommEvent(EV_RXCHAR) + overlapped ReadFile；写：cmdq + writer 线程。
+// 读泵：持续 overlapped ReadFile；写：cmdq + writer 线程。
 
 #include "core/bridge/serial/serial_bridge.h"
 
@@ -16,7 +16,6 @@ namespace sb3 {
 namespace {
 
 constexpr DWORD kEventWaitMs = 150;
-constexpr DWORD kReadWaitMs  = 30;
 constexpr DWORD kBufMax      = 4096;
 
 BYTE parity_of(const std::string& p) {
@@ -132,7 +131,6 @@ bool SerialBridge::open_port() {
     to.ReadTotalTimeoutMultiplier = 0;
     to.ReadTotalTimeoutConstant = 100;
     SetCommTimeouts(port_, &to);
-    SetCommMask(port_, EV_RXCHAR);
     PurgeComm(port_, PURGE_RXCLEAR | PURGE_TXCLEAR);
     return true;
 }
@@ -212,6 +210,10 @@ void SerialBridge::apply_config(const BoardConfig& cfg) {
 }
 
 void SerialBridge::rx_loop() {
+    // 持续挂一个 overlapped ReadFile，数据到达后交给 ring，再立刻重挂。
+    // 不能把 WaitCommEvent 和 ReadFile 共用事件并在超时后取消：CH340 / CP210x
+    // 在“先等到 EV_RXCHAR，再 ResetEvent 读”这条路径上会丢掉本次读完成，
+    // 表现为端口已打开、tx 正常，但 rx 永远为 0。
     OVERLAPPED ov{};
     ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!ov.hEvent) {
@@ -221,37 +223,59 @@ void SerialBridge::rx_loop() {
     char buf[kBufMax];
     while (!stop_.load()) {
         ResetEvent(ov.hEvent);
-        DWORD mask = 0;
-        if (!WaitCommEvent(port_, &mask, &ov)) {
-            if (GetLastError() != ERROR_IO_PENDING) break;
-            DWORD w = WaitForSingleObject(ov.hEvent, kEventWaitMs);
-            if (w != WAIT_OBJECT_0) {
+        DWORD got = 0;
+        BOOL ok = ReadFile(port_, buf, kBufMax, &got, &ov);
+        if (!ok) {
+            if (GetLastError() != ERROR_IO_PENDING) {
+                if (!stop_.load()) {
+                    char msg[96];
+                    std::snprintf(msg, sizeof(msg), "ReadFile failed: error %lu",
+                                  static_cast<unsigned long>(GetLastError()));
+                    set_error(msg);
+                }
+                break;
+            }
+            DWORD w = WAIT_OBJECT_0;
+            for (;;) {
+                w = WaitForSingleObject(ov.hEvent, kEventWaitMs);
+                if (w == WAIT_OBJECT_0) break;
+                if (w == WAIT_TIMEOUT) {
+                    if (stop_.load()) {
+                        CancelIoEx(port_, &ov);
+                        DWORD n = 0;
+                        GetOverlappedResult(port_, &ov, &n, TRUE);
+                        break;
+                    }
+                    core_.log().flush_cr_hold();
+                    continue;
+                }
                 CancelIoEx(port_, &ov);
                 DWORD n = 0;
                 GetOverlappedResult(port_, &ov, &n, TRUE);
-                core_.log().flush_cr_hold();
-                continue;
+                break;
+            }
+            if (w != WAIT_OBJECT_0) break;
+            if (!GetOverlappedResult(port_, &ov, &got, FALSE)) {
+                if (!stop_.load()) {
+                    char msg[96];
+                    std::snprintf(msg, sizeof(msg), "ReadFile overlapped failed: error %lu",
+                                  static_cast<unsigned long>(GetLastError()));
+                    set_error(msg);
+                    continue;
+                }
+                break;
             }
         }
-        for (;;) {
-            OVERLAPPED rd{};
-            rd.hEvent = ov.hEvent;
-            ResetEvent(rd.hEvent);
-            DWORD got = 0;
-            BOOL ok = ReadFile(port_, buf, kBufMax, &got, &rd);
-            if (!ok) {
-                if (GetLastError() != ERROR_IO_PENDING) break;
-                if (!wait_io(port_, &rd, kReadWaitMs, &got)) break;
-            }
-            if (got == 0) break;
-            std::string chunk(buf, got);
-            if (util::lower(cfg_.encoding) == "gbk") {
-                chunk = util::gbk_to_utf8(chunk);
-            }
-            rx_bytes_.fetch_add(got);
-            core_.on_rx(chunk.data(), chunk.size());
-            if (got < kBufMax) break;
+        if (got == 0) {
+            Sleep(1);
+            continue;
         }
+        std::string chunk(buf, got);
+        if (util::lower(cfg_.encoding) == "gbk") {
+            chunk = util::gbk_to_utf8(chunk);
+        }
+        rx_bytes_.fetch_add(got);
+        core_.on_rx(chunk.data(), chunk.size());
     }
     CloseHandle(ov.hEvent);
 }
