@@ -366,6 +366,22 @@ std::string build_state_json() {
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(GetTickCount()));
     add_terminal_block(root);
+    {
+        cJSON* quick = cJSON_AddObjectToObject(root, "quick");
+        const std::string channel = g_view ? g_view->active_channel() : std::string();
+        cJSON_AddStringToObject(quick, "channel", channel.c_str());
+        cJSON* arr = cJSON_AddArrayToObject(quick, "buttons");
+        if (g_core && !channel.empty()) {
+            if (const auto* cmds = g_core->quick_commands_of(channel)) {
+                for (const QuickCommandConfig& q : *cmds) {
+                    cJSON* b = cJSON_CreateObject();
+                    cJSON_AddStringToObject(b, "label", q.label.c_str());
+                    cJSON_AddStringToObject(b, "command", q.command.c_str());
+                    cJSON_AddItemToArray(arr, b);
+                }
+            }
+        }
+    }
 
     WCHAR w[128] = L"";
     if (HWND edit = g_main ? GetDlgItem(g_main, kIdSearch) : nullptr)
@@ -861,6 +877,13 @@ void register_board_button(HWND btn, const std::string& action_id) {
     // ui_bridge_set_id 只保存字符串指针，不复制；动态 id 必须活得比按钮久。
     static std::deque<std::string> keep;
     keep.push_back("board.btn." + action_id);
+    ui_bridge_set_id(btn, keep.back().c_str());
+}
+
+void register_quick_button(HWND btn, std::size_t index) {
+    if (!btn) return;
+    static std::deque<std::string> keep;
+    keep.push_back("quick.btn." + std::to_string(index));
     ui_bridge_set_id(btn, keep.back().c_str());
 }
 

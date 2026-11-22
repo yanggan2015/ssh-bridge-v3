@@ -15,6 +15,7 @@
 #include "services/service_manager.h"
 #include "ui/services/file_service_panel.h"
 #include "ui/services/relay_panel.h"
+#include "ui/dialogs/quick_dialog.h"
 #include "ui/ui_messages.h"
 #include "ui/aibridge/bridge_host.h"
 #include "third_party/win_ui_bridge.h"
@@ -65,6 +66,13 @@ constexpr int kIdcSearch      = 1013;
 constexpr int kIdcSearchLabel = 1015;
 constexpr int kIdcKeyHint     = 1016;
 constexpr int kIdcBoardScope  = 1021;
+constexpr int kIdcQuickAdd     = 1023;
+constexpr int kIdcQuickLabel   = 1024;
+constexpr int kIdcQuickSep     = 1025;
+constexpr int kIdcQuickBase    = 5400;   // 避开板控按钮 5100–5299 的 id 区间
+constexpr int kIdmQuickEditBase   = 40120;
+constexpr int kIdmQuickDeleteBase = 40300;
+constexpr UINT kMsgQuickOpen = WM_APP + 61;
 constexpr int kIdcLeftTabs    = 1019;
 
 constexpr int kIdcBtnRefresh   = 1010;
@@ -395,6 +403,30 @@ void Shell::build_children() {
     SendMessageW(board_scope_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     ui_bridge_set_id(board_scope_, "label.board.scope");
     ShowWindow(board_scope_, SW_HIDE);
+
+    quick_sep_ = CreateWindowExW(0, L"STATIC", L"",
+                                 WS_CHILD | SS_ETCHEDHORZ, 0, 0, 0, 0, hwnd_,
+                                 reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcQuickSep)),
+                                 inst_, nullptr);
+    ui_bridge_set_id(quick_sep_, "sep.quick");
+    quick_label_ = CreateWindowExW(0, L"STATIC", L"快捷指令",
+                                   WS_CHILD | SS_LEFTNOWORDWRAP | SS_CENTERIMAGE |
+                                       SS_ENDELLIPSIS | SS_NOPREFIX,
+                                   0, 0, 0, 0, hwnd_,
+                                   reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcQuickLabel)),
+                                   inst_, nullptr);
+    SendMessageW(quick_label_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    ui_bridge_set_id(quick_label_, "label.quick.channel");
+    quick_add_ = CreateWindowExW(0, L"BUTTON", L"＋ 添加",
+                                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                 0, 0, 0, 0, hwnd_,
+                                 reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcQuickAdd)),
+                                 inst_, nullptr);
+    SendMessageW(quick_add_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    ui_bridge_set_id(quick_add_, "btn.quick.add");
+    ShowWindow(quick_label_, SW_HIDE);
+    ShowWindow(quick_add_, SW_HIDE);
+    ShowWindow(quick_sep_, SW_HIDE);
     search_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, hwnd_,
                               reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcSearch)), inst_, nullptr);
@@ -741,10 +773,13 @@ void Shell::layout() {
     int term_w = rc.right - term_x - gap;
     if (term_w < MulDiv(200, dpi_, 96)) term_w = MulDiv(200, dpi_, 96);
     board_strip_h_ = layout_board_buttons(term_x, top, term_w);
+    int quick_h = layout_quick_buttons(term_x, 0, term_w, false);
     int term_y = top + board_strip_h_;
-    int term_h = body_h - board_strip_h_;
+    int term_h = body_h - board_strip_h_ - quick_h;
     if (term_h < 0) term_h = 0;
     MoveWindow(view_.hwnd(), term_x, term_y, term_w, term_h, TRUE);
+    if (quick_h > 0)
+        layout_quick_buttons(term_x, top + body_h - quick_h, term_w, true);
     view_.invalidate();
 }
 
@@ -805,8 +840,148 @@ int Shell::layout_board_buttons(int x, int y, int avail_w) {
     return total;
 }
 
-void Shell::refresh_board_buttons() {
-    for (HWND h : board_buttons_) {
+int Shell::layout_quick_buttons(int x, int y, int avail_w, bool place) {
+    if (quick_channel_.empty() || !quick_label_ || !quick_add_) {
+        if (place) {
+            ShowWindow(quick_label_, SW_HIDE);
+            ShowWindow(quick_add_, SW_HIDE);
+            ShowWindow(quick_sep_, SW_HIDE);
+            for (HWND h : quick_buttons_) ShowWindow(h, SW_HIDE);
+        }
+        quick_rows_ = 0;
+        quick_height_ = 0;
+        return 0;
+    }
+
+    int pad = MulDiv(4, dpi_, 96);
+    int gap = MulDiv(4, dpi_, 96);
+    int row_h = MulDiv(30, dpi_, 96);
+    int label_w = MulDiv(132, dpi_, 96);
+    int add_w = MulDiv(86, dpi_, 96);
+    if (avail_w < MulDiv(400, dpi_, 96)) {
+        label_w = 0;
+        add_w = MulDiv(76, dpi_, 96);
+    }
+    int add_x = x + avail_w - add_w;
+    int btn_x = x + (label_w > 0 ? label_w + gap : 0);
+    int btn_right = add_x - gap;
+    int btn_w_max = 0;
+    if (btn_right > btn_x) btn_w_max = btn_right - btn_x;
+
+    int text_w = 0;
+    int len = GetWindowTextLengthW(quick_label_);
+    if (len > 0 && label_w > 0) {
+        std::wstring text(static_cast<std::size_t>(len) + 1, L'\0');
+        GetWindowTextW(quick_label_, text.data(), len + 1);
+        text.resize(static_cast<std::size_t>(len));
+        HDC dc = GetDC(hwnd_);
+        if (dc) {
+            HFONT old = static_cast<HFONT>(SelectObject(dc, font_));
+            SIZE sz{};
+            if (GetTextExtentPoint32W(dc, text.c_str(), len, &sz)) text_w = sz.cx;
+            SelectObject(dc, old);
+            ReleaseDC(hwnd_, dc);
+        }
+    }
+    if (label_w > 0) {
+        label_w = text_w + MulDiv(16, dpi_, 96);
+        if (label_w < MulDiv(110, dpi_, 96)) label_w = MulDiv(110, dpi_, 96);
+        if (label_w > MulDiv(180, dpi_, 96)) label_w = MulDiv(180, dpi_, 96);
+        add_x = x + avail_w - add_w;
+        btn_x = x + label_w + gap;
+        btn_right = add_x - gap;
+        btn_w_max = btn_right > btn_x ? btn_right - btn_x : 0;
+    }
+
+    int row = 0;
+    int used = 0;
+    int n = static_cast<int>(quick_commands_.size());
+    std::vector<int> widths(static_cast<std::size_t>(n), 0);
+    for (int i = 0; i < n; ++i) {
+        int tw = 0;
+        HDC dc = GetDC(hwnd_);
+        if (dc) {
+            std::wstring text = widen(quick_commands_[static_cast<std::size_t>(i)].label);
+            HFONT old = static_cast<HFONT>(SelectObject(dc, font_));
+            SIZE sz{};
+            if (GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &sz))
+                tw = sz.cx;
+            SelectObject(dc, old);
+            ReleaseDC(hwnd_, dc);
+        }
+        int w = tw + MulDiv(20, dpi_, 96);
+        if (w < MulDiv(64, dpi_, 96)) w = MulDiv(64, dpi_, 96);
+        if (w > MulDiv(190, dpi_, 96)) w = MulDiv(190, dpi_, 96);
+        if (btn_w_max > 0 && w > btn_w_max) w = btn_w_max;
+        widths[static_cast<std::size_t>(i)] = w;
+    }
+    for (int i = 0; i < n; ++i) {
+        int w = widths[static_cast<std::size_t>(i)];
+        if (used > 0 && used + w > btn_w_max) {
+            ++row;
+            used = 0;
+        }
+        if (place) {
+            MoveWindow(quick_buttons_[static_cast<std::size_t>(i)],
+                       btn_x + used, y + pad + row * row_h, w, row_h, TRUE);
+            ShowWindow(quick_buttons_[static_cast<std::size_t>(i)], SW_SHOWNA);
+        }
+        used += w + gap;
+    }
+    quick_rows_ = row + 1;
+    quick_height_ = pad * 2 + quick_rows_ * row_h;
+    if (place) {
+        MoveWindow(quick_sep_, x, y, avail_w, MulDiv(2, dpi_, 96), TRUE);
+        ShowWindow(quick_sep_, SW_SHOWNA);
+        if (label_w > 0) {
+            MoveWindow(quick_label_, x, y + pad, label_w, row_h, TRUE);
+            ShowWindow(quick_label_, SW_SHOWNA);
+        } else {
+            ShowWindow(quick_label_, SW_HIDE);
+        }
+        MoveWindow(quick_add_, add_x, y + pad, add_w, row_h, TRUE);
+        ShowWindow(quick_add_, SW_SHOWNA);
+    }
+    return quick_height_;
+}
+
+void Shell::refresh_quick_buttons() {
+    for (HWND h : quick_buttons_) {
+        if (h && IsWindow(h)) DestroyWindow(h);
+    }
+    quick_buttons_.clear();
+    quick_commands_.clear();
+    quick_channel_ = view_.active_channel();
+
+    if (quick_channel_.empty()) {
+        if (quick_label_) ShowWindow(quick_label_, SW_HIDE);
+        if (quick_add_) ShowWindow(quick_add_, SW_HIDE);
+        if (quick_sep_) ShowWindow(quick_sep_, SW_HIDE);
+        return;
+    }
+
+    if (const auto* cmds = core_->quick_commands_of(quick_channel_))
+        quick_commands_ = *cmds;
+    std::wstring label = L"快捷指令 · " + widen(quick_channel_);
+    SetWindowTextW(quick_label_, label.c_str());
+    ShowWindow(quick_label_, SW_SHOWNA);
+    ShowWindow(quick_add_, SW_SHOWNA);
+
+    for (std::size_t i = 0; i < quick_commands_.size(); ++i) {
+        const QuickCommandConfig& q = quick_commands_[i];
+        HWND h = CreateWindowExW(0, L"BUTTON", widen(q.label).c_str(),
+                                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                 0, 0, 0, 0, hwnd_,
+                                 reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcQuickBase + i)),
+                                 inst_, nullptr);
+        SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+        SetWindowSubclass(h, QuickBtnProc, 2, static_cast<DWORD_PTR>(i + 1));
+        aibridge::register_quick_button(h, i);
+        quick_buttons_.push_back(h);
+    }
+}
+
+void Shell::refresh_board_buttons() {    for (HWND h : board_buttons_) {
         if (h && IsWindow(h)) DestroyWindow(h);
     }
     board_buttons_.clear();
@@ -843,6 +1018,7 @@ void Shell::refresh_board_buttons() {
             SetWindowTextW(board_scope_, L"");
         }
     }
+    refresh_quick_buttons();
     layout();
 }
 
@@ -870,6 +1046,120 @@ void Shell::on_board_button(std::size_t index) {
     };
     run_board_action_async(core->config(), sel, action, bridge, in_use, hwnd_,
                            kMsgBoardActionResult, kMsgBoardActionProgress);
+}
+
+void Shell::on_quick_button(std::size_t index) {
+    const std::string channel = view_.active_channel();
+    if (channel.empty()) {
+        note_status(L"当前画框没有绑定通道，无法发送快捷指令");
+        return;
+    }
+    if (channel != quick_channel_ || index >= quick_commands_.size()) {
+        refresh_quick_buttons();
+        layout();
+        return;
+    }
+    IBridge* bridge = core_->find(channel);
+    if (!bridge || !bridge->running()) {
+        note_status(L"通道未连接，快捷指令未发送：" + widen(channel));
+        return;
+    }
+    const QuickCommandConfig cmd = quick_commands_[index];
+    active_script_line_.clear();
+    if (!view_.type_text(cmd.command, true)) {
+        note_status(L"快捷指令发送失败：" + widen(cmd.label));
+        return;
+    }
+    note_status(L"已发送快捷指令：" + widen(cmd.label));
+}
+
+void Shell::show_quick_dialog(std::size_t edit_index, bool editing) {
+    // 模态编辑框不能在桥接 /action 的 SendMessage 栈里直接打开，
+    // 否则 /action 会等对话框关闭而超时；先投递回主循环再弹。
+    PostMessageW(hwnd_, kMsgQuickOpen, editing ? 1 : 0, static_cast<LPARAM>(edit_index));
+}
+
+void Shell::open_quick_dialog(std::size_t edit_index, bool editing) {
+    const std::string channel = view_.active_channel();
+    if (channel.empty()) {
+        note_status(L"当前画框没有绑定通道，无法添加快捷指令");
+        return;
+    }
+    const std::vector<QuickCommandConfig>* src = core_->quick_commands_of(channel);
+    if (!src) {
+        note_status(L"当前通道不在配置中，无法添加快捷指令");
+        return;
+    }
+    if (editing && edit_index >= src->size()) return;
+
+    QuickCommandConfig value;
+    if (editing) value = (*src)[edit_index];
+    std::wstring title = editing ? L"编辑快捷指令" : L"添加快捷指令";
+    if (!quick_dlg::show(inst_, hwnd_, font_, dpi_, title, &value)) return;
+
+    std::vector<QuickCommandConfig> next = *src;
+    if (editing) next[edit_index] = value;
+    else next.push_back(value);
+    std::string err;
+    if (!core_->set_quick_commands(channel, next, &err)) {
+        note_status(L"快捷指令保存失败：" + widen(err));
+        return;
+    }
+    refresh_quick_buttons();
+    layout();
+    note_status((editing ? L"已更新快捷指令：" : L"已添加快捷指令：") + widen(value.label));
+}
+
+void Shell::delete_quick_button(std::size_t index) {
+    const std::string channel = view_.active_channel();
+    if (channel.empty() || channel != quick_channel_ || index >= quick_commands_.size()) return;
+    std::vector<QuickCommandConfig> next = quick_commands_;
+    std::wstring label = widen(next[index].label);
+    next.erase(next.begin() + static_cast<std::ptrdiff_t>(index));
+    std::string err;
+    if (!core_->set_quick_commands(channel, next, &err)) {
+        note_status(L"快捷指令删除失败：" + widen(err));
+        return;
+    }
+    refresh_quick_buttons();
+    layout();
+    note_status(L"已删除快捷指令：" + label);
+}
+
+LRESULT CALLBACK Shell::QuickBtnProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                     UINT_PTR id, DWORD_PTR ref) {
+    (void)wp;
+    (void)id;
+    if (msg == WM_RBUTTONUP || msg == WM_CONTEXTMENU) {
+        const std::size_t index = static_cast<std::size_t>(ref) - 1;
+        HMENU menu = CreatePopupMenu();
+        if (menu) {
+            AppendMenuW(menu, MF_STRING, kIdmQuickEditBase + static_cast<int>(index), L"编辑此按钮…");
+            AppendMenuW(menu, MF_STRING, kIdmQuickDeleteBase + static_cast<int>(index), L"删除此按钮");
+            POINT pt{};
+            if (msg == WM_CONTEXTMENU && lp != 0 &&
+                GET_X_LPARAM(lp) != -1 && GET_Y_LPARAM(lp) != -1) {
+                pt.x = GET_X_LPARAM(lp);
+                pt.y = GET_Y_LPARAM(lp);
+            } else {
+                GetCursorPos(&pt);
+                RECT br{};
+                if (GetWindowRect(hwnd, &br)) {
+                    pt.x = br.left + (br.right - br.left) / 2;
+                    pt.y = br.bottom;
+                }
+            }
+            HWND owner = GetParent(hwnd);
+            SetForegroundWindow(owner);
+            int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                                     pt.x, pt.y, 0, owner, nullptr);
+            DestroyMenu(menu);
+            if (cmd) PostMessageW(owner, WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
+        }
+        return 0;
+    }
+    if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, QuickBtnProc, id);
+    return DefSubclassProc(hwnd, msg, wp, lp);
 }
 
 void Shell::on_left_tab_change() {
@@ -1202,7 +1492,22 @@ void Shell::dump_state() {
 }
 
 void Shell::on_command(int id) {
+    if (id >= kIdcQuickBase && id < kIdcQuickBase + 1000) {
+        on_quick_button(static_cast<std::size_t>(id - kIdcQuickBase));
+        return;
+    }
+    if (id >= kIdmQuickEditBase && id < kIdmQuickDeleteBase) {
+        show_quick_dialog(static_cast<std::size_t>(id - kIdmQuickEditBase), true);
+        return;
+    }
+    if (id >= kIdmQuickDeleteBase && id < kIdmQuickDeleteBase + 1000) {
+        delete_quick_button(static_cast<std::size_t>(id - kIdmQuickDeleteBase));
+        return;
+    }
     switch (id) {
+    case kIdcQuickAdd:
+        show_quick_dialog(0, false);
+        break;
     case kIdmHide:
         hide_self();
         break;
@@ -1635,6 +1940,10 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case kMsgTermData:
         view_.pull_visible();
         if (core_) core_->clear_pending(static_cast<std::size_t>(wp));
+        return 0;
+
+    case kMsgQuickOpen:
+        open_quick_dialog(static_cast<std::size_t>(lp), wp != 0);
         return 0;
 
     case WM_CLOSE:

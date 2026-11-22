@@ -486,8 +486,40 @@ bool AppCore::set_buttons(const std::string& name,
     return true;
 }
 
-IBridge* AppCore::find(const std::string& name) {
-    for (Entry& e : entries_) {
+const std::vector<QuickCommandConfig>* AppCore::quick_commands_of(const std::string& name) const {
+    if (const BoardConfig* b = board_of(name)) return &b->quick_commands;
+    if (const SSHLinkConfig* s = link_of(name)) return &s->quick_commands;
+    return nullptr;
+}
+
+bool AppCore::set_quick_commands(const std::string& name,
+                                 const std::vector<QuickCommandConfig>& commands,
+                                 std::string* err) {
+    AppConfig next = cfg_;
+    bool found = false;
+    for (BoardConfig& b : next.boards) {
+        if (b.name == name) { b.quick_commands = commands; found = true; break; }
+    }
+    if (!found) {
+        for (SSHLinkConfig& s : next.links) {
+            if (s.name == name) { s.quick_commands = commands; found = true; break; }
+        }
+    }
+    if (!found) {
+        if (err) *err = "通道不存在：" + name;
+        return false;
+    }
+    if (next.abs_path.empty())
+        next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
+    if (!config_save(next)) {
+        if (err) *err = "配置落盘失败：" + next.abs_path;
+        return false;
+    }
+    cfg_ = next;
+    return true;
+}
+
+IBridge* AppCore::find(const std::string& name) {    for (Entry& e : entries_) {
         if (e.name == name) return e.bridge.get();
     }
     return nullptr;

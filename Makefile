@@ -37,6 +37,7 @@ SOURCES := \
   src/ui/shell/shell.cpp \
   src/ui/shell/file_browser.cpp \
   src/ui/dialogs/channel_dialog.cpp \
+  src/ui/dialogs/quick_dialog.cpp \
   src/ui/sftp/sftp_window.cpp \
   src/ui/services/relay_panel.cpp \
   src/ui/services/file_service_panel.cpp \

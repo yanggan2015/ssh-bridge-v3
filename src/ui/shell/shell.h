@@ -11,6 +11,7 @@
 #include "app/app_core.h"
 #include "core/config/config.h"
 #include "ui/dialogs/channel_dialog.h"
+#include "ui/dialogs/quick_dialog.h"
 #include "ui/shell/file_browser.h"
 #include "ui/sftp/sftp_window.h"
 #include "ui/terminal/view.h"
@@ -33,6 +34,8 @@ private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     static LRESULT CALLBACK SearchEditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                            UINT_PTR id, DWORD_PTR ref);
+    static LRESULT CALLBACK QuickBtnProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                         UINT_PTR id, DWORD_PTR ref);
     LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 
     void build_menu();
@@ -73,6 +76,14 @@ private:
     void toggle_left_panel();
     int layout_board_buttons(int x, int y, int avail_w);
     void on_board_button(std::size_t index);
+
+    // S13 底部快捷指令条：按画框通道显示，多按钮自动换行
+    void refresh_quick_buttons();
+    int  layout_quick_buttons(int x, int y, int avail_w, bool place);
+    void on_quick_button(std::size_t index);
+    void show_quick_dialog(std::size_t edit_index, bool editing);
+    void open_quick_dialog(std::size_t edit_index, bool editing);
+    void delete_quick_button(std::size_t index);
 
     AppCore*  core_    = nullptr;
     HINSTANCE inst_    = nullptr;
@@ -120,6 +131,14 @@ private:
     std::vector<HTREEITEM> channel_items_;
     std::vector<BoardActionConfig> board_actions_;
     std::vector<HWND> board_buttons_;
+    HWND quick_label_ = nullptr;
+    HWND quick_add_   = nullptr;
+    HWND quick_sep_   = nullptr;
+    std::vector<HWND> quick_buttons_;
+    std::vector<QuickCommandConfig> quick_commands_;
+    std::string quick_channel_;
+    int quick_rows_ = 1;
+    int quick_height_ = 0;
 };
 
 // 把窗口矩形存进 output\ui_prefs.ini（异常配置时回落默认尺寸）

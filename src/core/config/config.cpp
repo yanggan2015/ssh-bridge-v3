@@ -157,8 +157,7 @@ void load_button_obj(const cJSON* o, BoardActionConfig* b) {
     if (b->label.empty()) b->label = b->id;
 }
 
-void load_buttons(const cJSON* o, std::vector<BoardActionConfig>* out) {
-    const cJSON* buttons = cJSON_GetObjectItemCaseSensitive(o, "buttons");
+void load_buttons(const cJSON* o, std::vector<BoardActionConfig>* out) {    const cJSON* buttons = cJSON_GetObjectItemCaseSensitive(o, "buttons");
     if (cJSON_IsArray(buttons)) {
         const cJSON* it = nullptr;
         cJSON_ArrayForEach(it, buttons) {
@@ -191,6 +190,33 @@ void load_buttons(const cJSON* o, std::vector<BoardActionConfig>* out) {
             if (!b.id.empty()) out->push_back(b);
         }
     }
+}
+
+void load_quick_commands(const cJSON* o, std::vector<QuickCommandConfig>* out) {
+    const cJSON* arr = cJSON_GetObjectItemCaseSensitive(o, "quick_commands");
+    if (!cJSON_IsArray(arr)) arr = cJSON_GetObjectItemCaseSensitive(o, "quick_buttons");
+    if (!cJSON_IsArray(arr)) return;
+    const cJSON* it = nullptr;
+    cJSON_ArrayForEach(it, arr) {
+        if (!cJSON_IsObject(it)) continue;
+        QuickCommandConfig q;
+        q.label = jstr(it, "label", jstr(it, "name", ""));
+        q.command = jstr(it, "command", jstr(it, "cmd", ""));
+        if (q.command.empty()) continue;
+        if (q.label.empty()) q.label = q.command;
+        out->push_back(q);
+    }
+}
+
+cJSON* quick_commands_to_json(const std::vector<QuickCommandConfig>& items) {
+    cJSON* arr = cJSON_CreateArray();
+    for (const QuickCommandConfig& q : items) {
+        cJSON* o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "label", q.label.c_str());
+        cJSON_AddStringToObject(o, "command", q.command.c_str());
+        cJSON_AddItemToArray(arr, o);
+    }
+    return arr;
 }
 
 cJSON* button_to_json(const BoardActionConfig& b) {
@@ -268,6 +294,7 @@ void load_board(const cJSON* o, const char* fallback_name, BoardConfig* b) {
     b->password = jstr(o, "password", "");
     b->username = jstr(o, "username", "root");
     load_buttons(o, &b->buttons);
+    load_quick_commands(o, &b->quick_commands);
 }
 
 void load_ssh(const cJSON* o, SSHLinkConfig* s) {
@@ -286,6 +313,7 @@ void load_ssh(const cJSON* o, SSHLinkConfig* s) {
     s->log_enabled = jbool(o, "log_enabled", true);
     s->log_dir = jstr(o, "log_dir", "");
     load_buttons(o, &s->buttons);
+    load_quick_commands(o, &s->quick_commands);
 }
 
 void load_root(const cJSON* root, AppConfig* out) {
@@ -437,6 +465,7 @@ cJSON* board_to_json(const BoardConfig& b) {
     cJSON_AddStringToObject(o, "username", b.username.c_str());
     cJSON* btns = cJSON_AddArrayToObject(o, "buttons");
     for (const BoardActionConfig& a : b.buttons) cJSON_AddItemToArray(btns, button_to_json(a));
+    cJSON_AddItemToObject(o, "quick_commands", quick_commands_to_json(b.quick_commands));
     return o;
 }
 
@@ -457,6 +486,7 @@ cJSON* ssh_to_json(const SSHLinkConfig& s) {
     cJSON_AddStringToObject(o, "log_dir", s.log_dir.c_str());
     cJSON* btns = cJSON_AddArrayToObject(o, "buttons");
     for (const BoardActionConfig& a : s.buttons) cJSON_AddItemToArray(btns, button_to_json(a));
+    cJSON_AddItemToObject(o, "quick_commands", quick_commands_to_json(s.quick_commands));
     return o;
 }
 

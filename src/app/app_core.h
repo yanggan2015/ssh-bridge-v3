@@ -77,6 +77,11 @@ public:
     bool set_buttons(const std::string& name, const std::vector<BoardActionConfig>& buttons,
                      std::string* err);
 
+    // S13 底部快捷指令：按通道保存，不重建通道
+    const std::vector<QuickCommandConfig>* quick_commands_of(const std::string& name) const;
+    bool set_quick_commands(const std::string& name,
+                            const std::vector<QuickCommandConfig>& commands, std::string* err);
+
     // 该通道配置的行尾（none/cr/lf/crlf）；找不到返回 crlf
     std::string line_ending_for(const std::string& name) const;
 

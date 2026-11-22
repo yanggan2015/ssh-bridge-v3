@@ -18,6 +18,13 @@ struct DefaultConfig {
     std::string   log_dir;                   // 空 = work/logs
 };
 
+// 底部快捷指令（S13）：点一下即向该通道发送一条命令并回车。
+// 与 board buttons 的区别：不跑 Lua、不操作继电器，只做最简单的通道下行。
+struct QuickCommandConfig {
+    std::string label;      // 按钮文字
+    std::string command;    // 原样发到通道，末尾由终端补回车
+};
+
 // 板卡/SSH 通道专属按钮（S12）。同一通道内 id 唯一。
 struct BoardActionConfig {
     std::string id;
@@ -56,6 +63,7 @@ struct BoardConfig {
     bool        password_present = false;  // true 表示配置里显式写了 password（含空串）
     std::string username = "root";
     std::vector<BoardActionConfig> buttons;  // S12 板卡专属按钮
+    std::vector<QuickCommandConfig> quick_commands;  // S13 底部快捷指令
 };
 
 struct SSHLinkConfig {
@@ -74,6 +82,7 @@ struct SSHLinkConfig {
     bool          log_enabled = true;
     std::string   log_dir;
     std::vector<BoardActionConfig> buttons;  // S12 通道专属按钮
+    std::vector<QuickCommandConfig> quick_commands;  // S13 底部快捷指令
 };
 
 struct InboundConfig {          // S8

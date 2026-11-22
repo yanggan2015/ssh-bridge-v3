@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <string>
 
 namespace sb3 {
@@ -62,6 +63,9 @@ void register_file_service_panel(HWND wnd);
 
 // 主窗口板卡按钮条：每个按钮按配置里的按钮 id 登记成 board.btn.<id>。
 void register_board_button(HWND btn, const std::string& action_id);
+
+// S13 底部快捷指令：按序号登记 quick.btn.<n>，供桥接真实点击。
+void register_quick_button(HWND btn, std::size_t index);
 
 // 终端内容变了：把回看滑条的 max 同步到真实上限（必须在 UI 线程调用）
 void notify_term_changed();
