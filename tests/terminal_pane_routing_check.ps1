@@ -51,11 +51,13 @@ function Find-TermView([IntPtr]$parent) {
 }
 
 $proc = $null
+$started = $false
 try {
     if (-not $SkipStart) {
         $existing = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
         if ($existing.Count -gt 0) { throw "端口 $port 已被占用" }
         $proc = Start-Process -FilePath $exe -WorkingDirectory $runDir -PassThru
+        $started = $true
     } else {
         $proc = Get-Process -Name ssh_bridge3 -ErrorAction SilentlyContinue | Select-Object -First 1
     }
@@ -127,7 +129,7 @@ try {
 } catch {
     Check 'PANE-error' '执行异常' $false $_.Exception.Message
 } finally {
-    if (-not $SkipStart) {
+    if ($started) {
         Get-Process -Name ssh_bridge3 -ErrorAction SilentlyContinue | Stop-Process -Force
     }
 }

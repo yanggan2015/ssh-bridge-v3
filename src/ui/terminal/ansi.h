@@ -38,6 +38,9 @@ public:
     int cursor_col() const { return cur_col_; }
     bool cursor_visible() const { return cur_show_; }
     bool bracketed_paste() const { return bracketed_paste_; }
+    // 0=关闭，1=按键按下/抬起，2=按键拖动，3=任意移动
+    int  mouse_mode() const { return mouse_mode_; }
+    bool mouse_sgr() const { return mouse_sgr_; }
 
     const std::string& title() const { return title_; }
     void clear_title() { title_.clear(); }
@@ -71,6 +74,8 @@ private:
     bool cur_show_ = true;
     bool autowrap_ = true;
     bool bracketed_paste_ = false;
+    bool mouse_sgr_ = false;
+    int  mouse_mode_ = 0;
 
     int  scroll_top_ = 0;
     int  scroll_bottom_ = 23;

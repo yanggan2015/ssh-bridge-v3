@@ -2,6 +2,8 @@
 
 #include "ui/terminal/input.h"
 
+#include <cstdio>
+
 namespace sb3 {
 namespace term {
 namespace {
@@ -174,6 +176,21 @@ std::string encode_paste(const std::string& utf8, bool bracketed) {
     }
     if (bracketed) return std::string("\x1b[200~") + out + "\x1b[201~";
     return out;
+}
+
+std::string encode_mouse(int button, int col, int row, bool release, bool sgr) {
+    col = col < 1 ? 1 : (col > 223 ? 223 : col);
+    row = row < 1 ? 1 : (row > 223 ? 223 : row);
+    if (sgr) {
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "\x1b[<%d;%d;%d%c", button, col, row,
+                      release ? 'm' : 'M');
+        return std::string(buf);
+    }
+    int code = release ? 3 : button;
+    char seq[6] = {'\x1b', '[', 'M', static_cast<char>(32 + code),
+                   static_cast<char>(33 + col), static_cast<char>(33 + row)};
+    return std::string(seq, seq + 6);
 }
 
 std::string utf16_to_utf8(const std::wstring& text) {

@@ -385,6 +385,8 @@ std::string TerminalView::state_json() const {
             cJSON_AddNumberToObject(o, "cursor_row", p.screen().cursor_row());
             cJSON_AddNumberToObject(o, "cursor_col", p.screen().cursor_col());
             cJSON_AddStringToObject(o, "title", p.screen().title().c_str());
+            cJSON_AddNumberToObject(o, "mouse_mode", p.screen().mouse_mode());
+            cJSON_AddBoolToObject(o, "mouse_sgr", p.screen().mouse_sgr());
             cJSON_AddNumberToObject(o, "bytes", static_cast<double>(p.rx_bytes()));
             cJSON_AddBoolToObject(o, "search_hit", p.has_search());
             if (p.has_search()) {
@@ -476,6 +478,73 @@ void TerminalView::extend_selection(POINT pt) {
     RECT body{rc.left + 1, rc.top + header_h_, rc.right - 1, rc.bottom - 1};
     sel_.cur = cell_row_at(*s.pane, pt.y, body);
     sel_.cur_col = cell_col_at(*s.pane, pt.x, body);
+}
+
+// 把鼠标事件编码为 xterm 鼠标报告字节。返回 true 表示已发给远端，
+// 调用方不要再走本地选择/滚动逻辑。
+bool TerminalView::report_mouse(int slot, POINT pt, int button, bool release,
+                                bool motion, WPARAM keys) {
+    if (slot < 0) return false;
+    Slot& s = slots_[static_cast<std::size_t>(slot)];
+    if (!s.pane || s.channel.empty()) return false;
+    term::AnsiScreen& scr = s.pane->screen();
+    if (scr.mouse_mode() <= 0) return false;
+    if (motion && scr.mouse_mode() == 1) return false;
+
+    RECT client{};
+    GetClientRect(hwnd_, &client);
+    RECT rc = slot_rect(slot, client);
+    RECT body{rc.left + 1, rc.top + header_h_, rc.right - 1, rc.bottom - 1};
+    if (pt.x < body.left || pt.x >= body.right || pt.y < body.top || pt.y >= body.bottom)
+        return false;
+    int col = (pt.x - body.left) / std::max(1, cell_w_) + 1;
+    int row = (pt.y - body.top) / std::max(1, cell_h_) + 1;
+    if (col < 1) col = 1;
+    if (col > scr.cols()) col = scr.cols();
+    if (row < 1) row = 1;
+    if (row > scr.rows()) row = scr.rows();
+
+    int mods = 0;
+    if (keys & MK_SHIFT) mods |= 4;
+    if (GetKeyState(VK_MENU) & 0x8000) mods |= 8;
+    if (keys & MK_CONTROL) mods |= 16;
+
+    int b = button;
+    if (motion) {
+        int held = 3;
+        if (keys & MK_LBUTTON) held = 0;
+        else if (keys & MK_MBUTTON) held = 1;
+        else if (keys & MK_RBUTTON) held = 2;
+        b = held;
+    }
+    return mouse_event_slot(slot, col, row, b, release, motion, static_cast<unsigned>(mods));
+}
+
+bool TerminalView::mouse_event(int col, int row, int button, bool release, bool motion,
+                               unsigned mods) {
+    return mouse_event_slot(active_, col, row, button, release, motion, mods);
+}
+
+bool TerminalView::mouse_event_slot(int slot, int col, int row, int button, bool release,
+                                    bool motion, unsigned mods) {
+    if (slot < 0 || slot >= static_cast<int>(slots_.size())) return false;
+    Slot& s = slots_[static_cast<std::size_t>(slot)];
+    if (!s.pane || s.channel.empty()) return false;
+    term::AnsiScreen& scr = s.pane->screen();
+    if (scr.mouse_mode() <= 0) return false;
+    if (motion && scr.mouse_mode() == 1) return false;
+    if (col < 1) col = 1;
+    if (col > scr.cols()) col = scr.cols();
+    if (row < 1) row = 1;
+    if (row > scr.rows()) row = scr.rows();
+
+    int b = motion ? (button + 32) : button;
+    b |= static_cast<int>(mods);
+    std::string out = term::encode_mouse(b, col, row, release, scr.mouse_sgr());
+    IBridge* br = core_ ? core_->find(s.channel) : nullptr;
+    if (!br) return false;
+    br->write(out.data(), out.size());
+    return true;
 }
 
 namespace {
@@ -1035,6 +1104,14 @@ LRESULT TerminalView::handle(UINT msg, WPARAM wp, LPARAM lp) {
         if (slot >= 0) {
             set_active(slot);
             SetFocus(hwnd_);
+            if (!(wp & MK_SHIFT) && report_mouse(slot, pt, 0, false, false, wp)) {
+                sel_.has = false;
+                mouse_reporting_ = true;
+                mouse_button_ = 0;
+                SetCapture(hwnd_);
+                invalidate();
+                return 0;
+            }
             begin_selection(slot, pt);
             SetCapture(hwnd_);
             invalidate();
@@ -1042,20 +1119,95 @@ LRESULT TerminalView::handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-    case WM_MOUSEMOVE:
-        if (GetCapture() == hwnd_ && sel_.has) {
-            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            extend_selection(pt);
-            invalidate();
+    case WM_MBUTTONDOWN: {
+        POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        int slot = slot_at(pt);
+        if (slot >= 0) {
+            set_active(slot);
+            SetFocus(hwnd_);
+            if (!(wp & MK_SHIFT) && report_mouse(slot, pt, 1, false, false, wp)) {
+                sel_.has = false;
+                mouse_reporting_ = true;
+                mouse_button_ = 1;
+                SetCapture(hwnd_);
+                invalidate();
+            }
         }
         return 0;
+    }
+
+    case WM_RBUTTONDOWN: {
+        POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        int slot = slot_at(pt);
+        if (slot >= 0) {
+            set_active(slot);
+            SetFocus(hwnd_);
+            if (!(wp & MK_SHIFT) && report_mouse(slot, pt, 2, false, false, wp)) {
+                sel_.has = false;
+                mouse_reporting_ = true;
+                mouse_button_ = 2;
+                SetCapture(hwnd_);
+                invalidate();
+            }
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE: {
+        POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        if (mouse_reporting_ && GetCapture() == hwnd_) {
+            if (report_mouse(active_, pt, mouse_button_, false, true, wp)) return 0;
+        }
+        if (GetCapture() == hwnd_ && sel_.has) {
+            extend_selection(pt);
+            invalidate();
+            return 0;
+        }
+        if (!mouse_reporting_) {
+            int slot = slot_at(pt);
+            if (slot >= 0 && slots_[static_cast<std::size_t>(slot)].pane) {
+                Slot& s = slots_[static_cast<std::size_t>(slot)];
+                if (s.pane->screen().mouse_mode() == 3 &&
+                    report_mouse(slot, pt, 3, false, true, wp)) return 0;
+            }
+        }
+        return 0;
+    }
 
     case WM_LBUTTONUP:
+        if (mouse_reporting_ && GetCapture() == hwnd_) {
+            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            report_mouse(active_, pt, mouse_button_, true, false, wp);
+            mouse_reporting_ = false;
+            mouse_button_ = -1;
+        }
         if (GetCapture() == hwnd_) ReleaseCapture();
+        return 0;
+
+    case WM_MBUTTONUP:
+        if (mouse_reporting_ && mouse_button_ == 1) {
+            POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            report_mouse(active_, pt, 1, true, false, wp);
+            mouse_reporting_ = false;
+            mouse_button_ = -1;
+        }
+        if (GetCapture() == hwnd_) ReleaseCapture();
+        return 0;
+
+    case WM_CAPTURECHANGED:
+        mouse_reporting_ = false;
+        mouse_button_ = -1;
         return 0;
 
     case WM_RBUTTONUP: {
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        if (mouse_reporting_ && mouse_button_ == 2) {
+            report_mouse(active_, pt, 2, true, false, wp);
+            mouse_reporting_ = false;
+            mouse_button_ = -1;
+            if (GetCapture() == hwnd_) ReleaseCapture();
+            return 0;
+        }
         int slot = slot_at(pt);
         if (slot >= 0) set_active(slot);
         ClientToScreen(hwnd_, &pt);
@@ -1067,6 +1219,18 @@ LRESULT TerminalView::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_MOUSEWHEEL: {
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         ScreenToClient(hwnd_, &pt);
+        int slot = slot_at(pt);
+        if (slot >= 0 && !(GET_KEYSTATE_WPARAM(wp) & MK_SHIFT)) {
+            Slot& s = slots_[static_cast<std::size_t>(slot)];
+            if (s.pane && s.pane->screen().mouse_mode() > 0) {
+                int delta = GET_WHEEL_DELTA_WPARAM(wp);
+                int button = delta > 0 ? 64 : 65;
+                int n = std::max(1, std::abs(delta) / WHEEL_DELTA);
+                for (int i = 0; i < n; ++i)
+                    report_mouse(slot, pt, button, false, false, GET_KEYSTATE_WPARAM(wp));
+                return 0;
+            }
+        }
         on_wheel(pt, GET_WHEEL_DELTA_WPARAM(wp));
         return 0;
     }

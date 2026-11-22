@@ -412,6 +412,10 @@ void AnsiScreen::csi_dispatch(char final_byte) {
                 if (mode == 25) cur_show_ = on;
                 else if (mode == 7) autowrap_ = on;
                 else if (mode == 2004) bracketed_paste_ = on;
+                else if (mode == 1000) mouse_mode_ = on ? 1 : 0;
+                else if (mode == 1002) mouse_mode_ = on ? 2 : 0;
+                else if (mode == 1003) mouse_mode_ = on ? 3 : 0;
+                else if (mode == 1006) mouse_sgr_ = on;
                 else if (mode == 1049 || mode == 47 || mode == 1047) {
                     if (on) reset_screen();
                 }
