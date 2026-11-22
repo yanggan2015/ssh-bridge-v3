@@ -163,6 +163,25 @@ void term_paste_text_action(const char* action, const char* text, int, char* res
     std::snprintf(result, static_cast<std::size_t>(cap), "{\"pasted\":0}");
 }
 
+void term_mouse_action(const char* action, const char* text, int, char* result, int cap,
+                       void*) {
+    if (!g_view || std::strcmp(action, "set_text") != 0) {
+        std::snprintf(result, static_cast<std::size_t>(cap), "{\"sent\":0}");
+        return;
+    }
+    int col = 0, row = 0, button = 0, release = 0, motion = 0;
+    unsigned mods = 0;
+    int n = std::sscanf(text ? text : "", "%d,%d,%d,%d,%d,%u", &col, &row, &button,
+                        &release, &motion, &mods);
+    if (n < 3) {
+        std::snprintf(result, static_cast<std::size_t>(cap),
+                      "{\"sent\":0,\"error\":\"格式 col,row,button[,release[,motion[,mods]]]\"}");
+        return;
+    }
+    bool ok = g_view->mouse_event(col, row, button, release != 0, motion != 0, mods);
+    std::snprintf(result, static_cast<std::size_t>(cap), "{\"sent\":%d}", ok ? 1 : 0);
+}
+
 void term_search_action(const char* action, const char* text, int, char* result, int cap,
                         void*) {
     if (!g_view) return;
@@ -213,6 +232,9 @@ void add_term_virtuals() {
                              nullptr, term_send_action, nullptr);
     ui_bridge_add_virtual_ex("term.paste_text", "textbox", "向活动窗格粘贴文本（bracketed 自动包装）",
                              rc, TRUE, "", nullptr, term_paste_text_action, nullptr);
+    ui_bridge_add_virtual_ex("term.mouse", "textbox",
+                             "鼠标事件：列,行,按键[,释放[,移动[,修饰]]]（应用开启上报时生效）",
+                             rc, TRUE, "", nullptr, term_mouse_action, nullptr);
     ui_bridge_add_virtual_ex("term.search", "textbox", "在回看里搜索", rc, TRUE, "",
                              nullptr, term_search_action, nullptr);
     ui_bridge_add_virtual_ex("term.scroll", "slider", "回看滚动（值=距底部行数）", rc, TRUE, "",
@@ -351,6 +373,9 @@ void add_terminal_block(cJSON* root) {
         if (cJSON_IsString(hint)) cJSON_AddStringToObject(o, "empty_hint", hint->valuestring);
         cJSON_AddNumberToObject(o, "cols", num_of(p, "cols", 0));
         cJSON_AddNumberToObject(o, "rows", num_of(p, "rows", 0));
+        cJSON_AddNumberToObject(o, "mouse_mode", num_of(p, "mouse_mode", 0));
+        const cJSON* msgr = cJSON_GetObjectItemCaseSensitive(p, "mouse_sgr");
+        cJSON_AddBoolToObject(o, "mouse_sgr", cJSON_IsTrue(msgr) ? 1 : 0);
         cJSON_AddNumberToObject(o, "total", num_of(p, "total", 0));
         cJSON_AddNumberToObject(o, "offset", num_of(p, "offset", 0));
         cJSON_AddNumberToObject(o, "bytes", num_of(p, "bytes", 0));
