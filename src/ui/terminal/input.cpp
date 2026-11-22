@@ -115,6 +115,31 @@ std::string encode_key(UINT vk, bool ctrl, bool alt, bool shift) {
     }
 }
 
+std::string encode_codepoint(unsigned int cp) {
+    if (cp == '\r') return "\r";
+    if (cp == '\n') return "\n";
+    if (cp == '\t') return "\t";
+    if (cp == 0x08) return "\x7f";
+    if (cp < 0x20 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return std::string();
+    if (cp < 0x80) return std::string(1, static_cast<char>(cp));
+    if (cp < 0x800) {
+        char out[2] = {static_cast<char>(0xC0 | (cp >> 6)),
+                       static_cast<char>(0x80 | (cp & 0x3F))};
+        return std::string(out, 2);
+    }
+    if (cp < 0x10000) {
+        char out[3] = {static_cast<char>(0xE0 | (cp >> 12)),
+                       static_cast<char>(0x80 | ((cp >> 6) & 0x3F)),
+                       static_cast<char>(0x80 | (cp & 0x3F))};
+        return std::string(out, 3);
+    }
+    char out[4] = {static_cast<char>(0xF0 | (cp >> 18)),
+                   static_cast<char>(0x80 | ((cp >> 12) & 0x3F)),
+                   static_cast<char>(0x80 | ((cp >> 6) & 0x3F)),
+                   static_cast<char>(0x80 | (cp & 0x3F))};
+    return std::string(out, 4);
+}
+
 std::string encode_char(unsigned int ch, bool ctrl, bool alt) {
     if (ch == '\r') return "\r";
     if (ch == '\n') return "\n";
@@ -130,8 +155,7 @@ std::string encode_char(unsigned int ch, bool ctrl, bool alt) {
         if (ch == '^' || ch == '6') return std::string(1, static_cast<char>(0x1e));
         if (ch == '_' || ch == '-') return std::string(1, static_cast<char>(0x1f));
     }
-    if (ch < 0x20) return std::string();
-    return utf16_to_utf8(std::wstring(1, static_cast<wchar_t>(ch)));
+    return encode_codepoint(ch);
 }
 
 std::string encode_paste(const std::string& utf8) {

@@ -161,6 +161,17 @@ void test_scrollback() {
     report("T4U-7b", "搜索无命中有确定返回", misses);
 }
 
+void test_autowrap() {
+    term::AnsiScreen s;
+    s.init(10, 3);
+    s.feed("0123456789ABCDEF");
+    bool ok = row_text(s, 0) == "0123456789" && row_text(s, 1) == "ABCDEF" &&
+              s.cursor_row() == 1 && s.cursor_col() == 6;
+    report("T4U-11", "满最后一列后延迟换行不覆盖", ok,
+           "r0='" + row_text(s, 0) + "' r1='" + row_text(s, 1) + "' cursor=" +
+               std::to_string(s.cursor_row()) + ":" + std::to_string(s.cursor_col()));
+}
+
 void test_osc_and_control() {
     term::AnsiScreen s;
     s.init(20, 3);
@@ -190,6 +201,7 @@ int term_selftest_main(const std::vector<std::string>& args) {
     test_erase_and_cursor();
     test_utf8();
     test_scrollback();
+    test_autowrap();
     test_osc_and_control();
     std::printf("RESULT: %s\n", g_fail == 0 ? "ALL PASS" : "FAIL");
     return g_fail == 0 ? 0 : 1;

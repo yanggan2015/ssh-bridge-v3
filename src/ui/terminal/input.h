@@ -17,6 +17,9 @@ bool is_special_key(UINT vk);
 // shift 参与时对方向键发 CSI 1;2X（与 xterm 一致）
 std::string encode_key(UINT vk, bool ctrl, bool alt, bool shift);
 
+// 把 Unicode 码点直接编码为 UTF-8；供桥接文本输入保留 BMP 外字符（emoji 等）
+std::string encode_codepoint(unsigned int cp);
+
 // WM_CHAR 走这里：可见字符 → UTF-8；Ctrl+字母 → 控制字节；Enter → CR
 std::string encode_char(unsigned int ch, bool ctrl, bool alt);
 

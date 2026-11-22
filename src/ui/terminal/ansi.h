@@ -66,6 +66,7 @@ private:
 
     int  cur_row_ = 0;
     int  cur_col_ = 0;
+    bool wrap_pending_ = false;   // 已写满最后一列，下一个字符才换行（xterm 延迟换行）
     bool cur_show_ = true;
     bool autowrap_ = true;
 

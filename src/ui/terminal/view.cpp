@@ -603,7 +603,7 @@ bool TerminalView::type_text(const std::string& utf8, bool submit) {
         for (std::size_t k = 1; k < len && i + k < utf8.size(); ++k)
             cp = (cp << 6) | (static_cast<unsigned char>(utf8[i + k]) & 0x3F);
         i += len;
-        bytes += term::encode_char(cp, false, false);
+        bytes += term::encode_codepoint(cp);
     }
     if (submit) bytes += line_ending_bytes();
     if (bytes.empty()) return false;

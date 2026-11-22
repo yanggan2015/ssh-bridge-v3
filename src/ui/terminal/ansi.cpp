@@ -26,6 +26,7 @@ void AnsiScreen::init(int cols, int rows) {
     }
     cur_row_ = 0;
     cur_col_ = 0;
+    wrap_pending_ = false;
     scroll_top_ = 0;
     scroll_bottom_ = rows_ - 1;
 }
@@ -68,6 +69,7 @@ void AnsiScreen::reset_screen() {
     for (int r = 0; r < rows_; ++r) blank_row(r);
     cur_row_ = 0;
     cur_col_ = 0;
+    wrap_pending_ = false;
     scroll_top_ = 0;
     scroll_bottom_ = rows_ - 1;
     fg_ = kDefaultColor;
@@ -85,9 +87,11 @@ void AnsiScreen::reset_screen() {
 void AnsiScreen::clamp_cursor() {
     cur_row_ = std::max(0, std::min(cur_row_, rows_ - 1));
     cur_col_ = std::max(0, std::min(cur_col_, cols_ - 1));
+    wrap_pending_ = false;
 }
 
 void AnsiScreen::newline() {
+    wrap_pending_ = false;
     if (cur_row_ == scroll_bottom_) {
         scroll_up(1);
     } else if (cur_row_ < rows_ - 1) {
@@ -95,7 +99,10 @@ void AnsiScreen::newline() {
     }
 }
 
-void AnsiScreen::carriage_return() { cur_col_ = 0; }
+void AnsiScreen::carriage_return() {
+    cur_col_ = 0;
+    wrap_pending_ = false;
+}
 
 void AnsiScreen::scroll_up(int n) {
     if (n <= 0) return;
@@ -123,11 +130,18 @@ void AnsiScreen::scroll_down(int n) {
 
 void AnsiScreen::put_cp(char32_t cp) {
     if (cp == U'\t') {
+        wrap_pending_ = false;
         int next = (cur_col_ / 8 + 1) * 8;
         cur_col_ = std::min(next, cols_ - 1);
         return;
     }
     if (cp < 0x20) return;
+    if (autowrap_ && wrap_pending_) {
+        row_at(cur_row_).wrapped = true;
+        cur_col_ = 0;
+        newline();
+    }
+    wrap_pending_ = false;
     int width = codepoint_wide(cp) ? 2 : 1;
     if (cur_col_ + width > cols_) {
         if (autowrap_) {
@@ -154,7 +168,13 @@ void AnsiScreen::put_cp(char32_t cp) {
         cont.wide_cont = true;
         line.cells[static_cast<std::size_t>(cur_col_ + 1)] = cont;
     }
-    cur_col_ = std::min(cur_col_ + width, cols_ - 1);
+    int next_col = cur_col_ + width;
+    if (next_col >= cols_) {
+        cur_col_ = cols_ - 1;
+        wrap_pending_ = autowrap_;
+    } else {
+        cur_col_ = next_col;
+    }
 }
 
 void AnsiScreen::utf8_feed(unsigned char b) {
@@ -203,6 +223,7 @@ void AnsiScreen::feed(const std::string& bytes) {
             } else if (b == '\t') {
                 put_cp(U'\t');
             } else if (b == '\b') {
+                wrap_pending_ = false;
                 if (cur_col_ > 0) --cur_col_;
             } else if (b == 0x07) {
                 // 响铃：模型层忽略
