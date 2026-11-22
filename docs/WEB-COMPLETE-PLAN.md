@@ -270,3 +270,65 @@ Phase 0–6 已全部完成：
 - 测试配置已恢复基线。
 
 详细实现与证据见 `docs/WEB-COMPLETE-REPORT.md`。
+
+## 9. 第二轮功能列表（参考仓对齐 + 本应用独有）
+
+审计明细见 `docs/WEB-AGENT-AUDIT.md`。第二轮追加：
+
+| ID | 功能 | 优先级 | 实现方式 | 验收 |
+| --- | --- | --- | --- | --- |
+| F10 | Web 通道管理 | P1 | `GET/POST /api/channels`、`POST /api/channels/delete`；串口/SSH 表单；重名/名称校验；删除清理画框引用 | 新增、编辑、改名、删除、重名 409、非法名 400；删除后 reload 不崩 |
+| F11 | 终端工具箱 | P1 | `/log/download`、`/log/clear`；复制、查找、字号、全屏、清空缓冲 | 下载内容与 ring 一致；清空后 `chars=0`；查找命中；字号/全屏可用 |
+| F12 | 服务配置 | P1 | TFTP/NFS/Share 配置读写接口 + 页面表单 | 端口/根/别名/UID/GID/写权限保存回读；非法端口 400 |
+| F13 | Agent 接口页 | P1 | `/api/agent/status`；页面直连 18096；capabilities/tree/state/logs 自检 | 4 个只读探针全通过；token 错误有提示 |
+| F14 | 机器可读帮助 | P1 | `GET /api/help` JSON operations；`/help` 补充入口 | operations 覆盖所有公开路由；无 tunnel 泄漏到 Agent 文档策略保持 |
+| F15 | Lua/DSL 速查 | P2 | 板控页内嵌速查卡、最小示例、时限/沙箱说明 | 示例与 `docs/脚本参考-S12.md` 一致 |
+| F16 | Agent 接口回归 | P1 | `agent-smoke.js` 覆盖 K1–K7 与 400/401/404/405/409/413 | 全通过；`ok:true` 后均读 `/state`/`/control` |
+| F17 | Web 全页回归 | P1 | `web-v3-audit.js` 覆盖 12 页、桌面/移动端、错误态 | 零 JS 错误、零 404/5xx、无横向溢出 |
+
+## 10. 第二轮实施阶段
+
+### Phase 7：先测后改（Agent）
+
+- 写 `output/webtest/agent-smoke.js`。
+- 先跑基线，记录实际失败；不凭文档猜行为。
+- 修复 Agent 桥错误码、方法、token、state 一致性。
+
+### Phase 8：通道管理
+
+- 后端：通道 CRUD + 配置 JSON 校验 + UI 线程 reload。
+- 前端：通道页、串口/SSH 表单、删除确认、密码掩码。
+- 测试：API 全路径 + 桌面/移动端。
+
+### Phase 9：终端工具箱
+
+- 后端：日志下载、清空。
+- 前端：查找、复制、字号、全屏、清空缓冲；WS 断线提示。
+- 测试：下载/清空/查找/字号/全屏 + WS 非法通道。
+
+### Phase 10：服务配置与 Agent 页面
+
+- TFTP/NFS/Share 配置表单； `/api/help`；Agent 页；Lua 速查。
+- 测试：配置回读、非法值、Agent 自检、机器帮助。
+
+### Phase 11：全量回归
+
+- 12 页桌面/移动端；Agent 正常/错误/token 场景。
+- 截图、报告、提交；测试数据清理；配置恢复。
+
+每阶段闸门：编译成功 + 对应测试全通过 + 无新增 JS 错误，才进入下一阶段。
+
+## 11. Phase 7–11 完成记录（2026-11-23）
+
+| 阶段 | 结果 | 证据 |
+| --- | --- | --- |
+| Phase 7 Agent 先测后改 | 完成；修复 `focus_id`、只读端点 405 | `agent-smoke.js` 63/63；带 token 64/64 |
+| Phase 8 通道管理 | 完成；发现并修复 `json_text` 双删堆损坏 | `api-v3-smoke.js` 43/43；通道 UI 新建/删除 5→6→5 |
+| Phase 9 终端工具箱 | 完成；查找/字号/下载/复制/清空均验证 | `web-v3-audit.js` 首轮 119/119，修复标题后 120/120 |
+| Phase 10 服务配置与 Agent 页 | 完成；修复 `__TITLE__` 未替换 | TFTP 69/root 回读；Agent 自检树 72、通道 5 |
+| Phase 11 全量回归 | 完成；移动端 12 页无横向溢出 | `web-v3-audit.js` 120/120，零 JS/请求错误 |
+| 构建 | 成功 | `mingw32-make -j4 OUTDIR=output/wc-build` |
+
+后续 P1–P7 缺口见 `docs/WEB-AGENT-AUDIT.md` §9 与 `docs/功能清单.md` P 段。
+
+
