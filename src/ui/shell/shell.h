@@ -11,6 +11,7 @@
 #include "app/app_core.h"
 #include "core/config/config.h"
 #include "ui/dialogs/channel_dialog.h"
+#include "ui/shell/file_browser.h"
 #include "ui/sftp/sftp_window.h"
 #include "ui/terminal/view.h"
 #include "ui/tray/tray.h"
@@ -78,12 +79,12 @@ private:
     HWND      about_   = nullptr;
     HWND      tree_    = nullptr;
     HWND      left_tabs_ = nullptr;
-    HWND      left_file_hint_ = nullptr;
     HWND      status_  = nullptr;
     HWND      buttons_[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     HFONT     font_    = nullptr;
     TrayIcon       tray_;
     TerminalView   view_;
+    FileBrowser    file_browser_;
     ChannelDialog  dialog_;
     SftpWindow     sftp_;
     RelayPanel*    relay_panel_ = nullptr;

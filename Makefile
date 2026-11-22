@@ -35,6 +35,7 @@ SOURCES := \
   src/app/app_core.cpp \
   src/app/lifecycle.cpp \
   src/ui/shell/shell.cpp \
+  src/ui/shell/file_browser.cpp \
   src/ui/dialogs/channel_dialog.cpp \
   src/ui/sftp/sftp_window.cpp \
   src/ui/services/relay_panel.cpp \

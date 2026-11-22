@@ -66,7 +66,6 @@ constexpr int kIdcSearchLabel = 1015;
 constexpr int kIdcKeyHint     = 1016;
 constexpr int kIdcBoardScope  = 1021;
 constexpr int kIdcLeftTabs    = 1019;
-constexpr int kIdcLeftHint    = 1020;
 
 constexpr int kIdcBtnRefresh   = 1010;
 constexpr int kIdcBtnReconnect = 1011;
@@ -353,6 +352,8 @@ void Shell::build_children() {
         }
     }
 
+    ui_bridge_set_id(left_tabs_, "tab.left");
+
     tree_ = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASLINES |
                                 TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS |
@@ -361,18 +362,9 @@ void Shell::build_children() {
                             reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcTree)), inst_, nullptr);
     SendMessageW(tree_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
 
-    left_file_hint_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"STATIC",
-        L"文件视图\r\n\r\n"
-        L"SSH：显示目标主机的文件系统（类 MobaXterm 的 SFTP 侧栏）\r\n"
-        L"串口：显示本机 share 共享目录\r\n"
-        L"PowerShell：显示 PowerShell 当前执行目录，并随 cd 跟随\r\n"
-        L"Telnet：目标端文件列表，待协议能力确定后接入\r\n\r\n"
-        L"本阶段先完成工作台结构与通道分类，文件内容在下一阶段接入。",
-        WS_CHILD | SS_LEFT | SS_NOPREFIX,
-        0, 0, 0, 0, hwnd_,
-        reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcLeftHint)), inst_, nullptr);
-    SendMessageW(left_file_hint_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
-    ShowWindow(left_file_hint_, SW_HIDE);
+    if (!file_browser_.create(inst_, hwnd_, core_, font_, dpi_,
+                              [this]() { PostMessageW(hwnd_, WM_COMMAND, kIdmSftp, 0); }))
+        return;
 
     // 终端工具底部不需要拖拽手柄（SBARS_SIZEGRIP 会占用第 4 段并触发额外重绘）
     status_ = CreateWindowExW(0, STATUSCLASSNAMEW, L"",
@@ -662,7 +654,7 @@ void Shell::layout() {
     if (left_collapsed_) {
         ShowWindow(left_tabs_, SW_HIDE);
         ShowWindow(tree_, SW_HIDE);
-        ShowWindow(left_file_hint_, SW_HIDE);
+        if (file_browser_.hwnd()) ShowWindow(file_browser_.hwnd(), SW_HIDE);
     } else {
         ShowWindow(left_tabs_, SW_SHOWNA);
         MoveWindow(left_tabs_, gap, top, left_w, body_h, TRUE);
@@ -678,13 +670,13 @@ void Shell::layout() {
         int content_h = body_h - header - MulDiv(4, dpi_, 96);
         if (content_h < 0) content_h = 0;
         MoveWindow(tree_, content_x, content_y, content_w, content_h, TRUE);
-        MoveWindow(left_file_hint_, content_x, content_y, content_w, content_h, TRUE);
+        file_browser_.layout(content_x, content_y, content_w, content_h);
         if (left_page_ == 0) {
             ShowWindow(tree_, SW_SHOWNA);
-            ShowWindow(left_file_hint_, SW_HIDE);
+            ShowWindow(file_browser_.hwnd(), SW_HIDE);
         } else {
             ShowWindow(tree_, SW_HIDE);
-            ShowWindow(left_file_hint_, SW_SHOWNA);
+            ShowWindow(file_browser_.hwnd(), SW_SHOWNA);
         }
     }
 
@@ -835,6 +827,7 @@ void Shell::on_board_button(std::size_t index) {
 void Shell::on_left_tab_change() {
     left_page_ = static_cast<int>(SendMessageW(left_tabs_, TCM_GETCURSEL, 0, 0));
     if (left_page_ < 0) left_page_ = 0;
+    if (left_page_ == 1) file_browser_.set_channel(current_channel());
     layout();
 }
 
@@ -1053,6 +1046,7 @@ void Shell::refresh_channels(const std::string& prefer) {
         }
     }
     update_status();
+    if (file_browser_.hwnd()) file_browser_.set_channel(current_channel());
     save_layout_state();
 }
 
@@ -1179,6 +1173,7 @@ void Shell::on_command(int id) {
     case kIdmRefresh:
     case kIdcBtnRefresh:
         view_.pull_visible();
+        if (left_page_ == 1 && file_browser_.hwnd()) file_browser_.refresh();
         note_status(L"已刷新");
         break;
     case kIdmFocusSearch:
@@ -1328,6 +1323,7 @@ void Shell::on_active_pane_changed() {
     }
     refresh_board_buttons();
     update_status();
+    if (file_browser_.hwnd()) file_browser_.set_channel(name);
     save_layout_state();
 }
 
@@ -1340,6 +1336,7 @@ void Shell::on_tree_change() {
     if (!name.empty()) view_.set_channel(name);
     refresh_board_buttons();
     update_status();
+    if (file_browser_.hwnd()) file_browser_.set_channel(name);
     save_layout_state();
 }
 

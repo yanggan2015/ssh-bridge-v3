@@ -5,13 +5,13 @@
 # GitHub Release：v<Version>，资产为 zip + 本地 UPDATE.json + zip.sha256
 #
 # 用法：
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r9
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r9 -SkipPush
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r10
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r10 -SkipPush
 #
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r9',
+    [string]$Version = '3.0-s13-r10',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
@@ -213,6 +213,7 @@ if (-not $SkipPush) {
 Write-Output "release manifest: https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json"
 Write-Output "release page: https://github.com/$Repo/releases/tag/$tag"
 Write-Output "zip sha256: $($m.sha256)"
+
 
 
 

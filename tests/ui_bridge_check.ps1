@@ -141,9 +141,9 @@ try {
     $missIds = @($expected | Where-Object { $ids -notcontains $_ })
     Check 'T5-5' "基线 $($expected.Count) 个控件 id 全部在册" ($missIds.Count -eq 0) ("缺失=" + ($missIds -join ','))
 
-    $noAction = @($tree.controls | Where-Object { @($_.actions).Count -eq 0 })
+    $noAction = @($tree.controls | Where-Object { $_.enabled -ne $false -and @($_.actions).Count -eq 0 })
     $badAction = @($tree.controls | Where-Object { ($_.actions | Where-Object { $cap.actions -notcontains $_ }).Count -gt 0 })
-    Check 'T5-6' '每个控件都有动作且都在白名单内' ($noAction.Count -eq 0 -and $badAction.Count -eq 0) `
+    Check 'T5-6' '每个可用控件都有动作且都在白名单内' ($noAction.Count -eq 0 -and $badAction.Count -eq 0) `
         ("无动作=" + ($noAction.id -join ',') + " 越界=" + ($badAction.id -join ','))
 
     # ---------- 关于窗口（非模态；附属窗口的控件同样要可读可操作） ----------
@@ -370,6 +370,8 @@ try {
     $treeNow = Get-Json '/ui-tree'
     foreach ($c in $treeNow.controls) {
         if ($skip -contains $c.id) { continue }
+        # 隐藏页签里的控件与禁用控件不参与本轮驱动；文件页另有专项回归覆盖
+        if ($c.enabled -eq $false -or $c.visible -eq $false) { continue }
         $act = switch ($c.role) {
             'textbox' { 'get_text' }
             'tree' { 'get_text' }
@@ -380,7 +382,7 @@ try {
         if ($r.status -ne 200 -or $r.json.ok -ne $true) { $sweepFail += "$($c.id):${act}:$($r.status)" }
         Start-Sleep -Milliseconds 120
     }
-    Check 'T5-38' '全部控件逐个驱动成功（除退出/隐藏 4 项）' ($sweepFail.Count -eq 0) `
+    Check 'T5-38' '全部可见可用控件逐个驱动成功（除退出/隐藏 4 项）' ($sweepFail.Count -eq 0) `
         ("失败=" + ($sweepFail -join ','))
 
     # ---------- 关闭即停 ----------

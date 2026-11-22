@@ -435,7 +435,7 @@ bool start(HWND main, AppCore* core, TerminalView* view, const Options& opt) {
         {1018, "btn.disconnect"},
         {kIdSearch, "edit.search"}, {kIdBtnNew, "btn.newChannel"},
         {1015, "label.searchHint"}, {1016, "label.keyHint"},
-        {1019, "left.tabs"}, {1020, "left.fileHint"},
+        {1019, "tab.left"},
     };
     for (const Pair& p : pairs) {
         HWND h = GetDlgItem(main, p.id);

@@ -526,6 +526,10 @@ typedef struct {
 static BOOL CALLBACK ub_enum_cb(HWND h, LPARAM lp)
 {
     UB_WALK *w = (UB_WALK *) lp;
+    char cls[128];
+    ub_class_name(h, cls, sizeof(cls));
+    // ListView 的列头是内部子窗口，不属于可操作控件，避免产出 auto/ 兜底 id
+    if (strcmp(cls, "SysHeader32") == 0) return TRUE;
     cJSON_AddItemToArray(w->arr, ub_node_json(h, w->root, w->order++, w->max_items));
     return TRUE;
 }
