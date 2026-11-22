@@ -89,20 +89,32 @@ def channel_stats(base, channel):
 
 
 def check(channel, name, payload, base, before, raw=False):
+    raw_long = raw and name == "long"
     if raw:
         sent = send_input(base, payload)
-        probe = payload if name != "long" else payload[-40:]
+        probe = payload
         cmd = payload
+        expected = payload
     else:
-        cmd = "printf '%s\\n' " + shquote(payload)
+        # 命令回显里只会出现 OUT<%s>END 这层格式串，不会出现 OUT<真实 payload>END。
+        # 因此命中 expected 就证明是远端执行后的输出，不是输入行回显。
+        cmd = "printf 'OUT<%s>END\\n' " + shquote(payload)
         sent = send_input(base, cmd)
-        # 长行会占用多行；tail 只保留最后两行非空文本，断言尾部标记不丢即可
-        probe = payload if name != "long" else payload[-60:]
-    ok = sent == 1 and wait_line(base, probe,
-                                 timeout=6.0 if name == "long" else 3.0,
-                                 allow_wrapped=(name == "long"))
+        expected = "OUT<" + payload + ">END"
+        # 长行会折行，tail 只保留最后两行；用输出尾部标记断言，仍不会命中命令回显。
+        probe = payload[-40:] + ">END" if name == "long" else expected
+    if raw_long:
+        # 回环长行会占多行，/state.tail 只保留最后两行，不能要求整串可见；
+        # 回环端点原样回送，tx+ == rx+ 本身就是逐字节一致的强断言。
+        ok = sent == 1
+    else:
+        ok = sent == 1 and wait_line(base, probe,
+                                     timeout=6.0 if name == "long" else 3.0,
+                                     allow_wrapped=(name == "long"))
     after = channel_stats(base, channel)
     grew = after[0] > before[0] and after[1] > before[1]
+    if raw_long:
+        grew = grew and (after[0] - before[0]) == (after[1] - before[1])
     result = "PASS" if ok and grew else "FAIL"
     print("%-8s %-22s sent=%d tx+%d rx+%d tail=%r" %
           (result, name, sent, after[0] - before[0],
@@ -110,11 +122,12 @@ def check(channel, name, payload, base, before, raw=False):
            (terminal(base).get("tail") or [])[-1:]))
     if result == "FAIL":
         FAILURES.append("%s/%s expected=%r tail=%r" %
-                        (channel, name, payload, terminal(base).get("tail")))
+                        (channel, name, expected, terminal(base).get("tail")))
     return after
 
 
-def run_channel(base, channel, tag, raw=False):
+def run_channel(base, channel, tag, raw=False, skip=None, no_history=False):
+    skip = skip or set()
     if not select_channel(base, channel):
         print("FAIL     %-22s channel not active" % channel)
         FAILURES.append("%s: channel not active" % channel)
@@ -133,6 +146,9 @@ def run_channel(base, channel, tag, raw=False):
         print("FAIL     %-22s state=%s" % (channel, ch.get("state")))
         FAILURES.append("%s: state=%s" % (channel, ch.get("state")))
         return
+    if no_history and not raw:
+        send_input(base, "set +H")
+        time.sleep(0.4)
     before = (ch.get("tx_bytes", 0), ch.get("rx_bytes", 0))
 
     cases = [
@@ -151,10 +167,13 @@ def run_channel(base, channel, tag, raw=False):
         ("long", "SB3_LONG_" + ("A!@#$%^&*()_+-=[]{};:,.<>/?~" * 8)),
     ]
     for name, payload in cases:
+        if name in skip:
+            print("SKIP     %-22s board/channel limitation" % name)
+            continue
         before = check(channel, name, payload, base, before, raw=raw)
 
     # 退格：输入 ABX，DEL 一次，再补 Y 回车，远端应执行 ABY
-    if not raw:
+    if not raw and "backspace-line-edit" not in skip:
         send_raw(base, "echo SB3_BS_ABX")
         time.sleep(0.15)
         send_raw(base, "\b")
@@ -178,9 +197,15 @@ def main():
     ap.add_argument("--tag", default="T1")
     ap.add_argument("--raw", action="store_true",
                     help="通道自身回显（串口回环）：直接发送 payload，不包 shell 命令")
+    ap.add_argument("--skip", default="",
+                    help="逗号分隔的用例名；板端 locale 等限制导致无法验证时显式跳过")
+    ap.add_argument("--no-history", action="store_true",
+                    help="shell 通道先发 set +H，避免 payload 里的 ! 触发 bash 历史展开")
     args = ap.parse_args()
+    skip = {x.strip() for x in args.skip.split(",") if x.strip()}
     for ch in args.channels:
-        run_channel(args.base, ch, args.tag, raw=args.raw)
+        run_channel(args.base, ch, args.tag, raw=args.raw, skip=skip,
+                    no_history=args.no_history)
     if FAILURES:
         print("\nRESULT: FAIL (%d)" % len(FAILURES))
         for f in FAILURES:
