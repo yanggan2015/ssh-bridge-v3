@@ -25,6 +25,9 @@ python tests\terminal_key_matrix.py --base http://127.0.0.1:18096 --skip-loop --
 
 # 物理键盘消息分发（向 SB3_TermView 投递 WM_KEYDOWN，断言回环字节）
 pwsh -NoProfile -File tests\terminal_physical_key_check.ps1
+
+# 分屏按键路由（loop-chars + ssh-demo1，断言只增活动窗格通道）
+pwsh -NoProfile -File tests\terminal_pane_routing_check.ps1
 ```
 
 每台必须 5/5，且结果为 `RESULT: ALL PASS`：
@@ -35,6 +38,7 @@ pwsh -NoProfile -File tests\terminal_physical_key_check.ps1
 - [ ] 上方向键召回上一条 `printf 'HIST_<tag>_ONE\n'`
 - [ ] 多打 `Z` 后 DEL 再补 `K`，输出 `BACK_<tag>_K`
 - [ ] 物理消息路径：`terminal_physical_key_check.ps1` 报 `PHY-backspace`、`PHY-up` 均 PASS（1 B / 3 B）
+- [ ] 分屏路由：`terminal_pane_routing_check.ps1` 6 项 PASS，`term.send` 与 `WM_KEYDOWN` 只增活动窗格通道
 
 ## 配套门禁
 
@@ -45,5 +49,5 @@ pwsh -NoProfile -File tests\terminal_physical_key_check.ps1
 
 ## 最近一次结果
 
-- 回环 11/11、`ssh-demo1` 5/5、`ssh-demo2` 5/5、`ztl-com3` 5/5、`ok3568-com5` 5/5；物理消息路径 `PHY-backspace` / `PHY-up` PASS
+- 回环 11/11、`ssh-demo1` 5/5、`ssh-demo2` 5/5、`ztl-com3` 5/5、`ok3568-com5` 5/5；物理消息路径 `PHY-backspace` / `PHY-up` PASS；分屏路由 6/6 PASS
 - 产品代码与 r15 一致；本轮仅测试脚本与文档变化，未重发安装包
