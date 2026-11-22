@@ -158,20 +158,21 @@ std::string encode_char(unsigned int ch, bool ctrl, bool alt) {
     return encode_codepoint(ch);
 }
 
-std::string encode_paste(const std::string& utf8) {
+std::string encode_paste(const std::string& utf8, bool bracketed) {
     std::string out;
     out.reserve(utf8.size() + 8);
     for (std::size_t i = 0; i < utf8.size(); ++i) {
         char c = utf8[i];
         if (c == '\r') {
-            out.push_back('\r');
+            out.push_back(bracketed ? '\n' : '\r');
             if (i + 1 < utf8.size() && utf8[i + 1] == '\n') ++i;
         } else if (c == '\n') {
-            out.push_back('\r');
+            out.push_back(bracketed ? '\n' : '\r');
         } else if (c == '\t' || c >= 0x20) {
             out.push_back(c);
         }
     }
+    if (bracketed) return std::string("\x1b[200~") + out + "\x1b[201~";
     return out;
 }
 

@@ -37,6 +37,7 @@ public:
     int cursor_row() const { return cur_row_; }
     int cursor_col() const { return cur_col_; }
     bool cursor_visible() const { return cur_show_; }
+    bool bracketed_paste() const { return bracketed_paste_; }
 
     const std::string& title() const { return title_; }
     void clear_title() { title_.clear(); }
@@ -69,6 +70,7 @@ private:
     bool wrap_pending_ = false;   // 已写满最后一列，下一个字符才换行（xterm 延迟换行）
     bool cur_show_ = true;
     bool autowrap_ = true;
+    bool bracketed_paste_ = false;
 
     int  scroll_top_ = 0;
     int  scroll_bottom_ = 23;

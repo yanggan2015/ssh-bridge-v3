@@ -213,6 +213,18 @@ void test_keys() {
            "up/ctrl/shift/alt/tab/back/esc/delete/F1");
 }
 
+void test_bracketed_paste() {
+    term::AnsiScreen n;
+    n.init(8, 2);
+    n.feed("\x1b[?2004h");
+    bool on = n.bracketed_paste();
+    n.feed("\x1b[?2004l");
+    bool off = n.bracketed_paste();
+    bool normal = term::encode_paste("a\r\nb\n") == "a\rb\r";
+    bool wrapped = term::encode_paste("a\r\nb\n", true) == "\x1b[200~a\nb\n\x1b[201~";
+    report("T4U-13", "bracketed paste 状态与包裹", on && !off && normal && wrapped);
+}
+
 }  // namespace
 
 int term_selftest_main(const std::vector<std::string>& args) {
@@ -225,6 +237,7 @@ int term_selftest_main(const std::vector<std::string>& args) {
     test_autowrap();
     test_osc_and_control();
     test_keys();
+    test_bracketed_paste();
     std::printf("RESULT: %s\n", g_fail == 0 ? "ALL PASS" : "FAIL");
     return g_fail == 0 ? 0 : 1;
 }

@@ -23,8 +23,8 @@ std::string encode_codepoint(unsigned int cp);
 // WM_CHAR 走这里：可见字符 → UTF-8；Ctrl+字母 → 控制字节；Enter → CR
 std::string encode_char(unsigned int ch, bool ctrl, bool alt);
 
-// 粘贴：原样写（换行统一成 CR），不做命令行补行尾
-std::string encode_paste(const std::string& utf8);
+// 粘贴：普通模式换行统一成 CR；bracketed 模式保留 LF，并用 ESC[200~/201~ 包裹
+std::string encode_paste(const std::string& utf8, bool bracketed = false);
 
 // UTF-16 → UTF-8（代理对合并）
 std::string utf16_to_utf8(const std::wstring& text);

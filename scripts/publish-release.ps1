@@ -1,17 +1,17 @@
-﻿# publish-release.ps1 — 把 ssh-bridge v3 安装包发布到独立 release 仓库
+# publish-release.ps1 — 把 ssh-bridge v3 安装包发布到独立 release 仓库
 #
 # 发布仓库：yanggan2015/ssh-bridge-v3-releases（只放二进制，不放源码）
 # 分支：windows_x86_64，分支根 UPDATE.json 供应用内升级读取
 # GitHub Release：v<Version>，资产为 zip + 本地 UPDATE.json + zip.sha256
 #
 # 用法：
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r15
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r15 -SkipPush
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r16
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r16 -SkipPush
 #
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r15',
+    [string]$Version = '3.0-s13-r16',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush

@@ -28,6 +28,9 @@ pwsh -NoProfile -File tests\terminal_physical_key_check.ps1
 
 # 分屏按键路由（loop-chars + ssh-demo1，断言只增活动窗格通道）
 pwsh -NoProfile -File tests\terminal_pane_routing_check.ps1
+
+# bracketed paste（真实 SSH，Enter 前不执行）
+python tests\terminal_bracketed_paste.py --base http://127.0.0.1:18096 --channel ssh-demo1 --tag BP1
 ```
 
 每台必须 5/5，且结果为 `RESULT: ALL PASS`：
@@ -39,6 +42,7 @@ pwsh -NoProfile -File tests\terminal_pane_routing_check.ps1
 - [ ] 多打 `Z` 后 DEL 再补 `K`，输出 `BACK_<tag>_K`
 - [ ] 物理消息路径：`terminal_physical_key_check.ps1` 报 `PHY-backspace`、`PHY-up` 均 PASS（1 B / 3 B）
 - [ ] 分屏路由：`terminal_pane_routing_check.ps1` 6 项 PASS，`term.send` 与 `WM_KEYDOWN` 只增活动窗格通道
+- [ ] bracketed paste：`terminal_bracketed_paste.py` 的 hold / submit 均 PASS；`--selftest term` 含 `T4U-13`
 
 ## 配套门禁
 

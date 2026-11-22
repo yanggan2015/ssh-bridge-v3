@@ -577,7 +577,8 @@ bool TerminalView::paste_clipboard() {
     const Slot& slot = slots_[static_cast<std::size_t>(active_)];
     if (slot.channel.empty()) return false;
     if (!core_ || !core_->find(slot.channel)) return false;
-    send_active(term::encode_paste(utf8));
+    const bool bracketed = slot.pane && slot.pane->screen().bracketed_paste();
+    send_active(term::encode_paste(utf8, bracketed));
     return true;
 }
 
