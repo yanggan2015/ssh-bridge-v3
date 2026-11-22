@@ -49,6 +49,8 @@ public:
     void clear_search();
     // AI 桥接：向活动窗格写按键（submit=true 末尾补回车）；滚动/取窗口句柄
     bool type_text(const std::string& utf8, bool submit);
+    // AI 桥接：原样写字节，不做 UTF-8 重编码，用于 Ctrl/ESC/Tab 等 C0 与功能键序列
+    bool send_raw(const std::string& bytes);
     void scroll_active(int lines);
     void scroll_active_to(int offset);   // 绝对回看位置（AI 滑条）
     int  active_offset() const;

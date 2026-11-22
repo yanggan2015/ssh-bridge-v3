@@ -612,6 +612,13 @@ bool TerminalView::type_text(const std::string& utf8, bool submit) {
     return true;
 }
 
+bool TerminalView::send_raw(const std::string& bytes) {
+    if (slots_.empty() || bytes.empty()) return false;
+    send_active(bytes);
+    invalidate();
+    return true;
+}
+
 std::string TerminalView::line_ending_bytes() const {
     std::string mode = "crlf";
     std::string channel;

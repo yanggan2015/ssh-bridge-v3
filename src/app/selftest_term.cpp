@@ -8,6 +8,7 @@
 #include <string>
 
 #include "ui/terminal/ansi.h"
+#include "ui/terminal/input.h"
 #include "ui/terminal/scrollback.h"
 #include "ui/terminal/term_types.h"
 
@@ -192,6 +193,26 @@ void test_osc_and_control() {
     report("T4U-10", "光标显隐 CSI ?25", hide_ok);
 }
 
+void test_keys() {
+    using term::encode_key;
+    bool ok = encode_key(VK_UP, false, false, false) == "\x1b[A" &&
+              encode_key(VK_UP, true, false, false) == "\x1b[1;5A" &&
+              encode_key(VK_UP, false, true, false) == "\x1b[1;3A" &&
+              encode_key(VK_UP, false, false, true) == "\x1b[1;2A" &&
+              encode_key(VK_TAB, false, false, false) == "\t" &&
+              encode_key(VK_TAB, false, false, true) == "\x1b[Z" &&
+              encode_key(VK_BACK, false, false, false) == "\x7f" &&
+              encode_key(VK_ESCAPE, false, false, false) == "\x1b" &&
+              encode_key(VK_DELETE, false, false, false) == "\x1b[3~" &&
+              encode_key(VK_DELETE, true, false, false) == "\x1b[3;5~" &&
+              encode_key(VK_F1, false, false, false) == "\x1b[11~" &&
+              encode_key(VK_F1, false, false, true) == "\x1b[11;2~" &&
+              term::encode_char('c', true, false) == "\x03" &&
+              term::encode_char('[', true, false) == "\x1b";
+    report("T4U-12", "控制键/方向键/功能键序列", ok,
+           "up/ctrl/shift/alt/tab/back/esc/delete/F1");
+}
+
 }  // namespace
 
 int term_selftest_main(const std::vector<std::string>& args) {
@@ -203,6 +224,7 @@ int term_selftest_main(const std::vector<std::string>& args) {
     test_scrollback();
     test_autowrap();
     test_osc_and_control();
+    test_keys();
     std::printf("RESULT: %s\n", g_fail == 0 ? "ALL PASS" : "FAIL");
     return g_fail == 0 ? 0 : 1;
 }

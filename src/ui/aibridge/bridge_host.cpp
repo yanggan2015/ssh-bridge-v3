@@ -137,7 +137,20 @@ void term_input_action(const char* action, const char* text, int, char* result, 
 
 void term_send_action(const char* action, const char* text, int, char* result, int cap,
                       void*) {
-    term_input_common(action, text, result, cap, false);
+    if (!g_view) {
+        std::snprintf(result, static_cast<std::size_t>(cap), "{\"sent\":0}");
+        return;
+    }
+    if (std::strcmp(action, "set_text") == 0) {
+        bool ok = g_view->send_raw(text ? text : "");
+        std::snprintf(result, static_cast<std::size_t>(cap), "{\"sent\":%d}", ok ? 1 : 0);
+        return;
+    }
+    if (std::strcmp(action, "clear") == 0) {
+        std::snprintf(result, static_cast<std::size_t>(cap), "{\"sent\":0}");
+        return;
+    }
+    std::snprintf(result, static_cast<std::size_t>(cap), "{\"text\":\"\"}");
 }
 
 void term_search_action(const char* action, const char* text, int, char* result, int cap,
