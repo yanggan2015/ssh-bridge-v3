@@ -93,6 +93,22 @@ def has_exact_line(text, marker):
     return any(line.strip() == marker for line in text.splitlines())
 
 
+def last_line(client):
+    """`/state` 的 tail 是最新行在前（bridge_host 从末尾倒序取 2 行）。"""
+    lines = client.tail().splitlines()
+    return lines[0] if lines else ""
+
+
+def wait_prompt(client, timeout=1.5):
+    return wait_until(lambda: last_line(client).rstrip().endswith(("#", "$", ">")), timeout)
+
+
+def settle_prompt(client, timeout=3.0):
+    """空回车把上一行强制提交/清空；低波特率板端靠这个拿到干净提示符。"""
+    client.input("")
+    return wait_prompt(client, timeout)
+
+
 def loop_control_keys(client, channel):
     client.select(channel)
     cases = [
@@ -126,9 +142,31 @@ def ssh_readline_keys(client, channel, tag):
     for _ in range(3):
         client.send("\x03")
         time.sleep(0.12)
-    client.input("set +H")
-    client.input("")
-    time.sleep(0.25)
+    client.send("\n")
+    if not wait_prompt(client, 4.0):
+        client.send("\n")
+        wait_prompt(client, 4.0)
+    time.sleep(0.8)
+
+    # Tab 补全先做：干净提示符下最稳定；部分板端补全不加尾部空格，这里显式补一个
+    client.send("ech")
+    typed = wait_until(lambda: last_line(client).strip().endswith("ech"), 3.0)
+    tab_marker = "TAB_%s_OK" % tag
+    if typed:
+        client.send("\t")
+        expanded = wait_until(lambda: last_line(client).strip().endswith("echo"), 2.5)
+    else:
+        expanded = False
+    check("SSH-KEY-tab-expand", expanded, "last=%r" % (last_line(client)))
+    if expanded:
+        client.send(" ")
+        client.send(tab_marker)
+        client.input("")
+        ok = wait_until(lambda: has_exact_line(client.tail(), tab_marker), 3.0)
+    else:
+        ok = False
+    check("SSH-KEY-tab-complete", ok, "marker=%s" % tab_marker)
+    wait_prompt(client, 4.0)
 
     # Ctrl+C 必须打断正在运行的 sleep，而不是等它自然结束
     client.input("sleep 5")
@@ -138,27 +176,20 @@ def ssh_readline_keys(client, channel, tag):
     client.input("printf '%s\\n'" % ctrl_marker)
     ok = wait_until(lambda: has_exact_line(client.tail(), ctrl_marker), 2.2)
     check("SSH-KEY-ctrl-c", ok, "marker=%s" % ctrl_marker)
+    wait_prompt(client, 4.0)
 
     # 上方向键召回上一条命令；只检查命令行，不执行
     hist_marker = "HIST_%s_ONE" % tag
     client.input("printf '%s\\n'" % hist_marker)
     wait_until(lambda: has_exact_line(client.tail(), hist_marker), 2.5)
     client.send("\x1b[A")
-    ok = wait_until(lambda: hist_marker in client.tail().splitlines()[-1], 1.2)
-    check("SSH-KEY-up-history", ok, "last=%r" % (client.tail().splitlines()[-1:]))
+    ok = wait_until(lambda: hist_marker in last_line(client), 1.5)
+    check("SSH-KEY-up-history", ok, "last=%r" % (last_line(client)))
     client.send("\x03")
-    time.sleep(0.15)
-
-    # Tab 补全：输入 ech 后补成 echo，再执行唯一标记
-    client.send("ech")
-    time.sleep(0.2)
-    client.send("\t")
-    time.sleep(0.25)
-    tab_marker = "TAB_%s_OK" % tag
-    client.send(tab_marker)
-    client.input("")
-    ok = wait_until(lambda: has_exact_line(client.tail(), tab_marker), 2.5)
-    check("SSH-KEY-tab-complete", ok, "marker=%s" % tab_marker)
+    client.send("\n")
+    if not wait_prompt(client, 4.0):
+        client.input("")
+        wait_prompt(client, 4.0)
 
     # Backspace：先多打一个 Z，DEL 后补 K；只有退格生效才会输出精确标记行
     back_marker = "BACK_%s_K" % tag
