@@ -350,6 +350,12 @@ std::string TerminalView::state_json() const {
         cJSON* o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "channel", slot.channel.c_str());
         cJSON_AddBoolToObject(o, "active", static_cast<int>(i) == active_);
+        const bool has_channels = core_ && !core_->entries().empty();
+        if (slot.channel.empty()) {
+            cJSON_AddStringToObject(o, "empty_hint",
+                                    has_channels ? "在左侧通道树选择一条通道"
+                                                 : "没有通道，点“新建”创建一条");
+        }
         if (slot.pane) {
             const term::Pane& p = *slot.pane;
             cJSON_AddNumberToObject(o, "cols", p.screen().cols());
@@ -723,6 +729,8 @@ void TerminalView::draw_slot(HDC dc, int idx, RECT rc, bool active) {
     SelectObject(dc, font_);
 
     std::wstring title = L"（空）";
+    const bool has_channels = core_ && !core_->entries().empty();
+    if (!has_channels) title = L"（无通道）";
     if (!slot.channel.empty()) {
         std::string info = slot.channel;
         if (slot.pane) {
@@ -744,7 +752,8 @@ void TerminalView::draw_slot(HDC dc, int idx, RECT rc, bool active) {
 
     if (!slot.pane) {
         SetTextColor(dc, RGB(0x6A, 0x6A, 0x6A));
-        std::wstring hint = L"在左侧通道树选择一条通道";
+        std::wstring hint = has_channels ? L"在左侧通道树选择一条通道"
+                                         : L"没有通道，点工具栏“新建”创建一条";
         DrawTextW(dc, hint.c_str(), -1, &body, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return;
     }

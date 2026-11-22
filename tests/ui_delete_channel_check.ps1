@@ -120,8 +120,34 @@ try {
     Check 'D7 删除最后一个通道' `
         ((@($st.channels).Count -eq 0) -and @($cfg.boards).Count -eq 0 -and @($cfg.ssh).Count -eq 0) `
         "channels=$(@($st.channels).Count) config=空"
+    # 产品语义：终端工作区始终至少保留一个画框；通道删空后该画框为空，
+    # 配置只保存一个空槽位，不伪造通道。
+    $panes = @($st.terminal.panes)
+    $paneCfg = @($cfg.ui.pane_channels | Where-Object { $_ })
+    Check 'D7b 删空后保留一个空画框' `
+        ($st.terminal.split -eq 1 -and $panes.Count -eq 1 -and
+         [string]$panes[0].channel -eq '' -and $paneCfg.Count -eq 0) `
+        "split=$($st.terminal.split) panes=$($panes.Count) pane=$([string]$panes[0].channel) paneCfg=$($paneCfg.Count)"
     Check 'D8 删空后进程仍存活' `
         ((Invoke-RestMethod "$base/ping" -TimeoutSec 3).ok -eq $true) 'ping=ok'
+    Check 'D8b 删空后空画框提示新建通道' `
+        ([string]$st.terminal.panes[0].empty_hint -eq '没有通道，点“新建”创建一条') `
+        "hint=$([string]$st.terminal.panes[0].empty_hint)"
+
+    # 删空不是终点：新建通道后必须能重新绑定到当前空画框。
+    Act 'menu.file.newSerial' 'click' | Out-Null
+    if (-not (Wait-Until { (FindControl 'dlg.channel.save') } 4000)) { throw '新建通道对话框未出现' }
+    Act 'dlg.channel.name' 'set_text' 'reborn' | Out-Null
+    Act 'dlg.channel.device' 'set_text' 'loop:ai' | Out-Null
+    Act 'dlg.channel.save' 'click' | Out-Null
+    if (-not (Wait-Until { -not (State).ui.channel_dialog_open } 10000)) { throw '新建通道对话框未关闭' }
+    $st = State
+    $cfg = Get-Content -LiteralPath (Join-Path $WorkDir 'ssh_bridge_config.json') -Raw | ConvertFrom-Json
+    Check 'D9 删空后新建通道恢复终端' `
+        ((@($st.channels).name -join ',') -eq 'reborn' -and
+         $st.terminal.panes[0].channel -eq 'reborn' -and $st.terminal.panes[0].active -and
+         (@($cfg.boards).name -join ',') -eq 'reborn') `
+        "channels=$(@($st.channels).name -join ',') pane=$($st.terminal.panes[0].channel) configBoards=$(@($cfg.boards).name -join ',')"
 }
 catch {
     Check 'EXCEPTION' $false $_.Exception.Message

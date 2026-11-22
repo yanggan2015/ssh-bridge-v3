@@ -1,12 +1,12 @@
 # package.ps1 — 打包可分发的 ssh-bridge v3 Windows 构建（独立发布仓库 + 独立更新器）
-# 用法： powershell -NoProfile -File scripts\package.ps1 [-Version 3.0-s13-r8] [-SkipBuild]
+# 用法： powershell -NoProfile -File scripts\package.ps1 [-Version 3.0-s13-r9] [-SkipBuild]
 # 产物： output\dist\ssh-bridge-v3-<Version>-win64.zip 与同名 .sha256
 #
 # 包内： ssh_bridge3.exe、脱敏示例配置、README.md、tools\ui_probe.py、tools\smoke.ps1、tools\update.ps1
 # 说明： exe 走静态链接（libssh / mongoose / cJSON / Lua 全在体内），目标机不需要装 MSYS2。
 
 param(
-    [string]$Version = '3.0-s13-r8',
+    [string]$Version = '3.0-s13-r9',
     [switch]$SkipBuild
 )
 

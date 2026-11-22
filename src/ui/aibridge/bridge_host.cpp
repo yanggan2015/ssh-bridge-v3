@@ -320,6 +320,8 @@ void add_terminal_block(cJSON* root) {
         cJSON* o = cJSON_CreateObject();
         const cJSON* name = cJSON_GetObjectItemCaseSensitive(p, "channel");
         cJSON_AddStringToObject(o, "channel", cJSON_IsString(name) ? name->valuestring : "");
+        const cJSON* hint = cJSON_GetObjectItemCaseSensitive(p, "empty_hint");
+        if (cJSON_IsString(hint)) cJSON_AddStringToObject(o, "empty_hint", hint->valuestring);
         cJSON_AddNumberToObject(o, "cols", num_of(p, "cols", 0));
         cJSON_AddNumberToObject(o, "rows", num_of(p, "rows", 0));
         cJSON_AddNumberToObject(o, "total", num_of(p, "total", 0));
