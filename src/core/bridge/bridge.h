@@ -39,6 +39,17 @@ public:
     // epoch 变化表示 ring 被清空或回绕，调用方应丢弃旧画面重画。
     virtual std::string read_since(std::uint64_t* epoch, std::uint64_t* seen) = 0;
 
+    // C3：带回 dropped 的增量读；未覆盖的实现默认 dropped=false。
+    virtual std::string read_since_ex(std::uint64_t* epoch, std::uint64_t* seen, bool* dropped) {
+        if (dropped) *dropped = false;
+        return read_since(epoch, seen);
+    }
+
+    // 日志游标与容量快照；供 /log 响应头与 Agent 增量游标使用。
+    virtual std::uint64_t log_epoch() const { return 0; }
+    virtual std::uint64_t log_total() const { return 0; }
+    virtual std::uint64_t log_capacity() const { return 0; }
+
     // 全量读：拿 ring 里现存的全部上行字节（用于"加载历史会话"重放）。
     // 只读、不改任何读者游标；内容可能从行中间开始。
     virtual std::string read_all(std::uint64_t* epoch, std::uint64_t* seen) = 0;
@@ -49,6 +60,8 @@ public:
     // 日志控制
     virtual void clear() = 0;
     virtual void set_disk_log(bool enabled) = 0;
+    virtual bool disk_log_enabled() const { return false; }
+    virtual std::string disk_log_error() const { return std::string(); }
 
     // 状态快照（JSON 文本），供状态栏 / 网页 / Agent 共用
     virtual std::string status_json() const = 0;

@@ -43,11 +43,11 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A3-1 | `/log` 游标 | `since/epoch/chars`；`read_since`；dropped | `agent_routes.cpp`、`logbuf` | 两次读不重复；游标递增 | 计划 |
-| A3-2 | 响应头 | `X-Log-Epoch/X-Log-Total/X-Log-Dropped` | `agent_routes.cpp` | 头与 JSON 一致 | 计划 |
-| A3-3 | reset 语义 | epoch 不匹配返回 `reset:true` + 尾部 | `agent_routes.cpp` | 清空/重建 ring 后旧游标被重置 | 计划 |
-| A3-4 | `/log/disk` | 开关落盘；256MB 上限；失败可读 | `agent_routes.cpp`、`logbuf` | 开关后文件增长；关闭后停止 | 计划 |
-| A3-5 | 清空不伤读者 | `/log/clear` 只动 base，不改他人 epoch | `logbuf` | 清空后 Web 终端重取尾部；Agent 收到 reset | 计划 |
+| A3-1 | `/log` 游标 | `since/epoch/chars`；`read_since_ex`；dropped | `web_console.cpp`、`logbuf` | 两次读不重复；游标递增 | 已完成 |
+| A3-2 | 响应头 | `X-Log-Epoch/X-Log-Total/X-Log-Dropped` | `web_console.cpp` | 头与 JSON 一致 | 已完成 |
+| A3-3 | reset 语义 | epoch 不匹配返回 `reset:true` + 尾部 | `web_console.cpp` | 清空/重建 ring 后旧游标被重置 | 已完成 |
+| A3-4 | `/log/disk` | 开关落盘；256MB 上限；失败可读 | `web_console.cpp`、`logbuf` | 开关后文件增长；关闭后停止 | 已完成 |
+| A3-5 | 清空不伤读者 | `/log/clear` 递增 epoch，读者收到 reset | `logbuf` | 清空后 Web 终端重取尾部；Agent 收到 reset | 已完成 |
 
 ## 4. P0-D：命令与动作
 
@@ -190,3 +190,17 @@ C1 完成前不写 C2；C4 完成前不做 C5；A10-7（关闭 18096）必须在
 - 隔离验证：`agent.enable=false` 时 18081 的 health/help/status 均报告 `ui_bridge.enabled:false`，18096 端口关闭，且 `/agent/scan` 仍返回 5 通道，5/5；证据 `output/ux-audit/agent-context-ui-disabled.json`。
 - 结果与脚本：`output/webtest/agent-context-smoke.js`、`output/ux-audit/agent-context-result.json`；构建日志 `output/wc-build.log`。
 - 测试后已恢复基线配置 `output/ux-audit/config-before-web.json`，SHA-256 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`；当前运行仅 18096，18081 关闭。
+
+## 15. C3 完成记录（2026-11-23）
+
+- `/log` 支持尾部与增量两种模式：无 `since` 返回尾部，`next_since=total`；有 `since` 必须同时给 `epoch`，返回新字节、`next_since`、`dropped/dropped_bytes`、`reset/reset_reason`、`truncated`。
+- 响应头 `X-Log-Epoch/X-Log-Total/X-Log-Dropped` 与 JSON 同源；增量按 `chars` 从最旧未读字节分页，游标连续、不跳字节。
+- epoch 不匹配、游标超前、并发清空都返回 `reset:true` + 当前尾部；`/log/clear` 响应新增新 `epoch/total`，旧读者下一次必收 reset。
+- `POST /log/disk` 运行时开关落盘（不改配置）；SSH/串口状态都改读 `LogBuffer::disk_enabled()`。打开失败返回 500 结构化错误。
+- `LogBuffer` 单文件 256MB 上限：已达上限拒绝打开；写入越界时停止落盘、关闭文件并置 `last_error`，读取与 ring 不受影响。
+- `/api/help` 已实现操作增至 50，`log.get` 增加 `since/epoch` 与游标返回字段，新增 `log.disk.post`。
+- `/features.incremental_log` 与新增 `/features.log_disk` 均为 true；`/agent/state.buffer.disk` 反映实际落盘状态。
+- 验证：C3 `agent-log-smoke` 59/59；C2 `agent-context-smoke` 73/73；C1 82/82；`api-smoke` 58/58；`api-v3-smoke` 43/43；`agent-smoke` 63/63；`web-v3-audit` 120/120。
+- 隔离验证：18096 关闭时 18081 的 health/help/status/scan/log 全部可用，6/6；证据 `output/ux-audit/agent-log-ui-disabled.json`。
+- 脚本/结果：`output/webtest/agent-log-smoke.js`、`output/ux-audit/agent-log-result.json`；构建日志 `output/wc-build.log`。
+- 测试后已恢复基线配置，SHA-256 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`；当前运行仅 18096，18081 关闭。

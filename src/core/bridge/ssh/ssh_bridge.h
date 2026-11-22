@@ -41,11 +41,17 @@ public:
     std::uint64_t tx_bytes() const override { return core_.tx_bytes(); }
     std::uint64_t rx_bytes() const override { return core_.rx_bytes(); }
     std::string read_since(std::uint64_t* epoch, std::uint64_t* seen) override;
+    std::string read_since_ex(std::uint64_t* epoch, std::uint64_t* seen, bool* dropped) override;
+    std::uint64_t log_epoch() const override { return core_.log().epoch(); }
+    std::uint64_t log_total() const override { return core_.log().total(); }
+    std::uint64_t log_capacity() const override { return core_.log().capacity(); }
     std::string read_all(std::uint64_t* epoch, std::uint64_t* seen) override;
     std::uint64_t notify_seq() const override { return core_.log().notify_seq(); }
 
     void clear() override;
     void set_disk_log(bool enabled) override;
+    bool disk_log_enabled() const override { return core_.log().disk_enabled(); }
+    std::string disk_log_error() const override { return core_.log().last_error(); }
     std::string status_json() const override;
 
     void set_kick(std::function<void()> fn) { core_.set_kick(std::move(fn)); }

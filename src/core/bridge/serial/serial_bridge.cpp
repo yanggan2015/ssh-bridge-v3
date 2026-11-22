@@ -351,6 +351,10 @@ std::string SerialBridge::read_since(std::uint64_t* epoch, std::uint64_t* seen) 
     return core_.log().read_since(epoch, seen, nullptr);
 }
 
+std::string SerialBridge::read_since_ex(std::uint64_t* epoch, std::uint64_t* seen, bool* dropped) {
+    return core_.log().read_since(epoch, seen, dropped);
+}
+
 void SerialBridge::clear() {
     core_.log().clear();
 }

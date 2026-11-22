@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
@@ -23,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <regex>
@@ -418,6 +420,28 @@ void reply_json(mg_connection* c, int code, cJSON* root) {
 
 void reply_json_text(mg_connection* c, int code, const std::string& text) {
     reply_text(c, code, text, "application/json; charset=utf-8");
+}
+
+// C3：JSON 响应附加日志游标头；extra_headers 每行必须以 CRLF 结尾。
+void reply_json_headers(mg_connection* c, int code, cJSON* root, const std::string& extra_headers) {
+    std::string body = json_text(root);
+    std::string hdrs = "Content-Type: application/json; charset=utf-8\r\n"
+                       "Cache-Control: no-store\r\n"
+                       "Access-Control-Allow-Origin: *\r\n" + extra_headers;
+    mg_http_reply(c, code, hdrs.c_str(), "%s", body.c_str());
+}
+
+bool parse_u64(const std::string& s, std::uint64_t* out) {
+    if (s.empty() || out == nullptr) return false;
+    for (char ch : s) {
+        if (!std::isdigit(static_cast<unsigned char>(ch))) return false;
+    }
+    errno = 0;
+    char* end = nullptr;
+    unsigned long long v = std::strtoull(s.c_str(), &end, 10);
+    if (errno == ERANGE || end == s.c_str() || end == nullptr || *end != '\0') return false;
+    *out = static_cast<std::uint64_t>(v);
+    return true;
 }
 
 struct WsState {
@@ -879,21 +903,110 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         return;
     }
     if (path == "/log") {
-        std::string ch = query_var(hm, "channel");
-        int chars = std::max(1, std::min(65536, std::atoi(query_var(hm, "chars", "8192").c_str())));
-        auto b = bridge(ch);
-        if (!b) {
-            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
             return;
         }
-        uint64_t e = 0, s = 0;
-        std::string all = b->read_all(&e, &s);
-        if (static_cast<int>(all.size()) > chars) all = all.substr(all.size() - chars);
+        std::string ch = query_var(hm, "channel");
+        auto b = bridge(ch);
+        if (!b) {
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", new_request_id()));
+            return;
+        }
+        const std::string since_arg = query_var(hm, "since");
+        const std::string epoch_arg = query_var(hm, "epoch");
+        const bool incremental = !since_arg.empty();
+        int chars = incremental ? 65536 : 8192;
+        std::string chars_arg = query_var(hm, "chars");
+        if (!chars_arg.empty()) chars = std::max(1, std::min(65536, std::atoi(chars_arg.c_str())));
+
+        std::uint64_t epoch = 0, total = 0, next_since = 0;
+        std::uint64_t since = 0, req_epoch = 0, dropped_bytes = 0;
+        std::string text;
+        bool dropped = false, reset = false, truncated = false;
+        std::string reset_reason;
+
+        auto reset_to_tail = [&](const char* reason) {
+            reset = true;
+            reset_reason = reason ? reason : "";
+            text.clear();
+            epoch = 0;
+            total = 0;
+            text = b->read_all(&epoch, &total);
+            if (static_cast<int>(text.size()) > chars)
+                text = text.substr(text.size() - static_cast<std::size_t>(chars));
+            next_since = total;
+            dropped = false;
+            dropped_bytes = 0;
+            truncated = false;
+        };
+
+        if (!incremental) {
+            text = b->read_all(&epoch, &total);
+            if (static_cast<int>(text.size()) > chars)
+                text = text.substr(text.size() - static_cast<std::size_t>(chars));
+            next_since = total;
+        } else {
+            if (epoch_arg.empty()) {
+                reply_json_text(c, 400, agent::error_json("invalid_cursor", "epoch is required with since", new_request_id()));
+                return;
+            }
+            if (!parse_u64(since_arg, &since) || !parse_u64(epoch_arg, &req_epoch)) {
+                reply_json_text(c, 400, agent::error_json("invalid_cursor", "since/epoch must be unsigned integers", new_request_id()));
+                return;
+            }
+            epoch = req_epoch;
+            std::uint64_t cur_epoch = b->log_epoch();
+            std::uint64_t cur_total = b->log_total();
+            if (req_epoch != cur_epoch) {
+                reset_to_tail("epoch_mismatch");
+            } else if (since > cur_total) {
+                reset_to_tail("cursor_ahead");
+            } else {
+                std::uint64_t seen = since;
+                bool dropped_flag = false;
+                text = b->read_since_ex(&epoch, &seen, &dropped_flag);
+                std::uint64_t after_epoch = b->log_epoch();
+                std::uint64_t after_total = b->log_total();
+                if (epoch != req_epoch || after_epoch != epoch) {
+                    reset_to_tail("epoch_changed");
+                } else {
+                    dropped = dropped_flag;
+                    total = after_total;
+                    std::uint64_t start_cursor = since;
+                    if (dropped) {
+                        std::uint64_t cap = b->log_capacity();
+                        start_cursor = total > cap ? total - cap : 0;
+                        if (since < start_cursor) dropped_bytes = start_cursor - since;
+                    }
+                    if (static_cast<int>(text.size()) > chars) {
+                        text.resize(static_cast<std::size_t>(chars));
+                        truncated = true;
+                    }
+                    next_since = start_cursor + static_cast<std::uint64_t>(text.size());
+                }
+            }
+        }
+
         cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
         cJSON_AddStringToObject(root, "channel", ch.c_str());
-        cJSON_AddStringToObject(root, "text", all.c_str());
-        cJSON_AddNumberToObject(root, "chars", static_cast<double>(all.size()));
-        reply_json(c, 200, root);
+        cJSON_AddStringToObject(root, "mode", incremental ? "incremental" : "tail");
+        cJSON_AddStringToObject(root, "text", text.c_str());
+        cJSON_AddNumberToObject(root, "chars", static_cast<double>(text.size()));
+        cJSON_AddNumberToObject(root, "epoch", static_cast<double>(epoch));
+        cJSON_AddNumberToObject(root, "total", static_cast<double>(total));
+        cJSON_AddNumberToObject(root, "next_since", static_cast<double>(next_since));
+        cJSON_AddBoolToObject(root, "dropped", dropped);
+        cJSON_AddNumberToObject(root, "dropped_bytes", static_cast<double>(dropped_bytes));
+        cJSON_AddBoolToObject(root, "reset", reset);
+        cJSON_AddBoolToObject(root, "truncated", truncated);
+        if (incremental) cJSON_AddNumberToObject(root, "since", static_cast<double>(since));
+        if (!reset_reason.empty()) cJSON_AddStringToObject(root, "reset_reason", reset_reason.c_str());
+        std::string extra = "X-Log-Epoch: " + std::to_string(epoch) + "\r\n" +
+                            "X-Log-Total: " + std::to_string(total) + "\r\n" +
+                            "X-Log-Dropped: " + std::string(dropped ? "true" : "false") + "\r\n";
+        reply_json_headers(c, 200, root, extra);
         return;
     }
     if (path == "/log/download") {
@@ -929,7 +1042,78 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         b->clear();
-        reply_json_text(c, 200, "{\"ok\":true,\"channel\":\"" + ch + "\"}");
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "channel", ch.c_str());
+        cJSON_AddNumberToObject(root, "epoch", static_cast<double>(b->log_epoch()));
+        cJSON_AddNumberToObject(root, "total", static_cast<double>(b->log_total()));
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/log/disk") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", new_request_id()));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", new_request_id()));
+            return;
+        }
+        std::string raw = body_string(hm);
+        cJSON* body = raw.empty() ? nullptr : cJSON_Parse(raw.c_str());
+        if (!raw.empty() && !cJSON_IsObject(body)) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("invalid_json", "request body must be a JSON object", new_request_id()));
+            return;
+        }
+        std::string ch = cJSON_IsObject(body) ? json_str(body, "channel") : std::string();
+        if (ch.empty()) ch = query_var(hm, "channel");
+        bool enabled = false;
+        bool has_enabled = false;
+        const cJSON* ev = cJSON_IsObject(body) ? cJSON_GetObjectItemCaseSensitive(body, "enabled") : nullptr;
+        if (cJSON_IsBool(ev)) {
+            enabled = cJSON_IsTrue(ev);
+            has_enabled = true;
+        } else if (cJSON_IsNumber(ev)) {
+            enabled = ev->valuedouble != 0;
+            has_enabled = true;
+        }
+        if (!has_enabled) {
+            std::string q = query_var(hm, "enabled");
+            if (q == "true" || q == "1") { enabled = true; has_enabled = true; }
+            else if (q == "false" || q == "0") { enabled = false; has_enabled = true; }
+        }
+        cJSON_Delete(body);
+        if (!has_enabled) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "enabled must be a boolean", new_request_id()));
+            return;
+        }
+        auto b = bridge(ch);
+        if (!b) {
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", new_request_id()));
+            return;
+        }
+        b->set_disk_log(enabled);
+        bool actual = b->disk_log_enabled();
+        if (enabled && !actual) {
+            std::string err = b->disk_log_error();
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", false);
+            cJSON_AddStringToObject(root, "error", "log_disk_open_failed");
+            cJSON_AddStringToObject(root, "message", err.empty() ? "cannot open log file" : err.c_str());
+            cJSON_AddStringToObject(root, "channel", ch.c_str());
+            cJSON_AddStringToObject(root, "request_id", new_request_id().c_str());
+            reply_json(c, 500, root);
+            return;
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "channel", ch.c_str());
+        cJSON_AddBoolToObject(root, "enabled", enabled);
+        cJSON_AddBoolToObject(root, "disk_enabled", actual);
+        std::string err = b->disk_log_error();
+        if (!err.empty()) cJSON_AddStringToObject(root, "last_error", err.c_str());
+        reply_json(c, 200, root);
         return;
     }
     if (path == "/write") {

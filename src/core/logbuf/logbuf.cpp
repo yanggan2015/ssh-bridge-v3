@@ -15,6 +15,7 @@ namespace sb3 {
 namespace {
 
 constexpr std::size_t kMinCap = 4 * 1024;
+constexpr std::uint64_t kMaxDiskBytes = 256ull * 1024 * 1024;
 
 std::wstring to_wide(const std::string& s) {
     if (s.empty()) return std::wstring();
@@ -23,6 +24,15 @@ std::wstring to_wide(const std::string& s) {
     std::wstring w(static_cast<std::size_t>(n), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), w.data(), n);
     return w;
+}
+
+std::uint64_t file_size(const std::string& path) {
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (!GetFileAttributesExW(to_wide(path).c_str(), GetFileExInfoStandard, &fad)) return 0;
+    ULARGE_INTEGER n{};
+    n.LowPart = fad.nFileSizeLow;
+    n.HighPart = fad.nFileSizeHigh;
+    return n.QuadPart;
 }
 
 }  // namespace
@@ -227,9 +237,21 @@ bool LogBuffer::disk_open(const std::string& dir, const std::string& name) {
         last_error_ = "cannot open log file: " + file;
         return false;
     }
+    std::uint64_t size = file_size(file);
+    if (size >= kMaxDiskBytes) {
+        std::fclose(f);
+        std::lock_guard<std::mutex> lk(err_mu_);
+        last_error_ = "log file reached 256MB limit: " + file;
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(disk_mu_);
         disk_ = f;
+        disk_bytes_ = size;
+    }
+    {
+        std::lock_guard<std::mutex> lk(err_mu_);
+        last_error_.clear();
     }
     disk_flush_stop_.store(false);
     if (!flusher_.joinable()) {
@@ -238,13 +260,18 @@ bool LogBuffer::disk_open(const std::string& dir, const std::string& name) {
     return true;
 }
 
-void LogBuffer::disk_close() {
-    std::lock_guard<std::mutex> lock(disk_mu_);
+void LogBuffer::disk_close_locked() {
     if (disk_) {
         std::fflush(disk_);
         std::fclose(disk_);
         disk_ = nullptr;
+        disk_bytes_ = 0;
     }
+}
+
+void LogBuffer::disk_close() {
+    std::lock_guard<std::mutex> lock(disk_mu_);
+    disk_close_locked();
 }
 
 bool LogBuffer::set_disk(bool enabled, const std::string& dir, const std::string& name) {
@@ -261,7 +288,14 @@ void LogBuffer::disk_write(const char* data, std::size_t n) {
     if (n == 0) return;
     std::lock_guard<std::mutex> lock(disk_mu_);
     if (!disk_) return;
+    if (disk_bytes_ + static_cast<std::uint64_t>(n) > kMaxDiskBytes) {
+        disk_close_locked();
+        std::lock_guard<std::mutex> lk(err_mu_);
+        last_error_ = "log file reached 256MB limit; disk logging stopped";
+        return;
+    }
     std::fwrite(data, 1, n, disk_);
+    disk_bytes_ += static_cast<std::uint64_t>(n);
     dirty_.store(true, std::memory_order_release);
 }
 

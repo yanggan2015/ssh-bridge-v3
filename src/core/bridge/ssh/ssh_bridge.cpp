@@ -129,10 +129,16 @@ std::string SshBridge::read_since(std::uint64_t* epoch, std::uint64_t* seen) {
     return core_.log().read_since(epoch, seen, nullptr);
 }
 
+std::string SshBridge::read_since_ex(std::uint64_t* epoch, std::uint64_t* seen, bool* dropped) {
+    return core_.log().read_since(epoch, seen, dropped);
+}
+
 void SshBridge::clear() { core_.log().clear(); }
 
 void SshBridge::set_disk_log(bool enabled) {
-    core_.log().set_disk(enabled, cfg_.log_dir, cfg_.name);
+    std::string dir = cfg_.log_dir;
+    if (dir.empty()) dir = util::join_path(project_root_, "work\\logs");
+    core_.log().set_disk(enabled, dir, cfg_.name);
 }
 
 void SshBridge::set_error(const std::string& msg) {
@@ -276,7 +282,7 @@ std::string SshBridge::status_json() const {
     cJSON_AddNumberToObject(o, "buffer", static_cast<double>(core_.log().capacity()));
     cJSON_AddNumberToObject(o, "total", static_cast<double>(core_.log().total()));
     cJSON_AddNumberToObject(o, "epoch", static_cast<double>(core_.log().epoch()));
-    cJSON_AddBoolToObject(o, "log_enabled", cfg_.log_enabled);
+    cJSON_AddBoolToObject(o, "log_enabled", core_.log().disk_enabled());
     char* s = cJSON_PrintUnformatted(o);
     std::string out = s ? s : "{}";
     cJSON_free(s);

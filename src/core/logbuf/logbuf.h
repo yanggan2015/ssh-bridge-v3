@@ -60,6 +60,7 @@ private:
     void disk_write(const char* data, std::size_t n);
     bool disk_open(const std::string& dir, const std::string& name);
     void disk_close();
+    void disk_close_locked();
     void flush_loop();
 
     std::size_t cap_ = 0;
@@ -79,6 +80,7 @@ private:
     std::atomic<bool> disk_flush_stop_{false};
     std::atomic<bool> dirty_{false};
     std::FILE* disk_ = nullptr;
+    std::uint64_t disk_bytes_ = 0;          // 当前日志文件大小，disk_mu_ 保护
 
     mutable std::mutex ring_mu_;            // 保护 ring_/total_/epoch_ 与读取拷贝
     mutable std::mutex disk_mu_;
