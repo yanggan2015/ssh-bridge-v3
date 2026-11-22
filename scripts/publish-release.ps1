@@ -5,13 +5,13 @@
 # GitHub Release：v<Version>，资产为 zip + 本地 UPDATE.json + zip.sha256
 #
 # 用法：
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r6
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r6 -SkipPush
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r7
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r7 -SkipPush
 #
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r6',
+    [string]$Version = '3.0-s13-r7',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
@@ -106,6 +106,8 @@ $releaseManifest = [ordered]@{
 }
 $manifestText = $releaseManifest | ConvertTo-Json
 Set-Content -LiteralPath (Join-Path $ReleaseDir 'UPDATE.json') -Value $manifestText -Encoding utf8NoBOM
+# Release 同时挂一个固定名 UPDATE.json，供更新器在 raw 清单失败时按 latest 资产兜底。
+$stableManifestAsset = Join-Path $ReleaseDir 'UPDATE.json'
 Write-Output "release UPDATE.json: $Version -> $zipName"
 
 $branchReadme = @"
@@ -140,7 +142,7 @@ if (-not $SkipPush) {
 
     & gh release view $tag -R $Repo 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        & gh release upload $tag $zip $localManifest $sumFile -R $Repo --clobber
+        & gh release upload $tag $zip $localManifest $sumFile $stableManifestAsset -R $Repo --clobber
         if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败：$tag" }
     } else {
         $notes = Join-Path $env:TEMP "ssh-bridge-v3-$Version-notes.md"
@@ -157,7 +159,7 @@ Windows x64 便携安装包。
 
 源码：<https://github.com/yanggan2015/ssh-bridge-v3>
 "@ | Set-Content -LiteralPath $notes -Encoding utf8NoBOM
-        & gh release create $tag $zip $localManifest $sumFile -R $Repo --title "ssh-bridge v3 $Version" --notes-file $notes
+        & gh release create $tag $zip $localManifest $sumFile $stableManifestAsset -R $Repo --title "ssh-bridge v3 $Version" --notes-file $notes
         if ($LASTEXITCODE -ne 0) { throw "创建 GitHub Release 失败：$tag" }
     }
 }
