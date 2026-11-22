@@ -153,6 +153,16 @@ void term_send_action(const char* action, const char* text, int, char* result, i
     std::snprintf(result, static_cast<std::size_t>(cap), "{\"text\":\"\"}");
 }
 
+void term_paste_text_action(const char* action, const char* text, int, char* result, int cap,
+                            void*) {
+    if (g_view && std::strcmp(action, "set_text") == 0) {
+        bool ok = g_view->paste_text(text ? text : "");
+        std::snprintf(result, static_cast<std::size_t>(cap), "{\"pasted\":%d}", ok ? 1 : 0);
+        return;
+    }
+    std::snprintf(result, static_cast<std::size_t>(cap), "{\"pasted\":0}");
+}
+
 void term_search_action(const char* action, const char* text, int, char* result, int cap,
                         void*) {
     if (!g_view) return;
@@ -201,6 +211,8 @@ void add_term_virtuals() {
                              nullptr, term_input_action, nullptr);
     ui_bridge_add_virtual_ex("term.send", "textbox", "向活动窗格发送原始按键", rc, TRUE, "",
                              nullptr, term_send_action, nullptr);
+    ui_bridge_add_virtual_ex("term.paste_text", "textbox", "向活动窗格粘贴文本（bracketed 自动包装）",
+                             rc, TRUE, "", nullptr, term_paste_text_action, nullptr);
     ui_bridge_add_virtual_ex("term.search", "textbox", "在回看里搜索", rc, TRUE, "",
                              nullptr, term_search_action, nullptr);
     ui_bridge_add_virtual_ex("term.scroll", "slider", "回看滚动（值=距底部行数）", rc, TRUE, "",

@@ -67,6 +67,9 @@ class Client:
     def send(self, text):
         return self.action("term.send", "set_text", text=text)
 
+    def paste_text(self, text):
+        return self.action("term.paste_text", "set_text", text=text)
+
     def input(self, text, submit=True):
         return self.action("term.input", "set_text", text=text, value=1 if submit else 0)
 

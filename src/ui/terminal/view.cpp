@@ -573,6 +573,11 @@ bool TerminalView::paste_clipboard() {
         }
     }
     CloseClipboard();
+    if (utf8.empty()) return false;
+    return paste_text(utf8);
+}
+
+bool TerminalView::paste_text(const std::string& utf8) {
     if (utf8.empty() || slots_.empty()) return false;
     const Slot& slot = slots_[static_cast<std::size_t>(active_)];
     if (slot.channel.empty()) return false;

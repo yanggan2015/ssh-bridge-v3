@@ -39,8 +39,12 @@ def main():
         print("FAIL BRACKET-prompt : no prompt")
         return 1
 
-    seq = "\x1b[200~" + A + "\n" + B + "\x1b[201~"
-    c.send(seq)
+    c.send("\x03")
+    time.sleep(0.4)
+    pasted = c.paste_text(A + "\n" + B)
+    if not pasted.get("result", {}).get("pasted"):
+        print(f"FAIL BRACKET-paste : action rejected {pasted}")
+        return 1
     time.sleep(1.2)
     early = has_exact_line(c, MARK)
     if early:
