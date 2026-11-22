@@ -6,7 +6,7 @@
 # 说明： exe 走静态链接（libssh / mongoose / cJSON / Lua 全在体内），目标机不需要装 MSYS2。
 
 param(
-    [string]$Version = '3.0-s13-r17',
+    [string]$Version = '3.0-s13-r18',
     [switch]$SkipBuild
 )
 
@@ -82,6 +82,7 @@ Write-Host "zip    : $zip"
 Write-Host "size   : $size MB"
 Write-Host "sha256 : $sumFile"
 Write-Host "update : $manifestFile"
+
 
 
 

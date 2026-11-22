@@ -210,6 +210,18 @@ bool SshSession::write_all(const void* data, std::size_t n) {
     return true;
 }
 
+bool SshSession::resize_pty(int width, int height) {
+    std::lock_guard<std::mutex> lk(impl_->mu);
+    if (!impl_->ready || !impl_->channel) return false;
+    if (width < 2) width = 2;
+    if (height < 2) height = 2;
+    if (ssh_channel_change_pty_size(impl_->channel, width, height) != SSH_OK) {
+        impl_->error = err_of(impl_->session, "调整 PTY 尺寸失败");
+        return false;
+    }
+    return true;
+}
+
 bool SshSession::keepalive() {
     std::lock_guard<std::mutex> lk(impl_->mu);
     if (!impl_->ready || !impl_->session) return false;

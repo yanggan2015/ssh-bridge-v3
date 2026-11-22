@@ -29,6 +29,8 @@ public:
 
     // 最近一次“发送→首个回显”的时延（微秒）；无数据时返回 0
     virtual std::uint64_t echo_latency_us() const { return 0; }
+    // 终端窗格尺寸变化：SSH 通道需通知远端 PTY；串口等无 PTY 的通道返回 false
+    virtual bool resize_terminal(int /*cols*/, int /*rows*/) { return false; }
     virtual std::uint64_t echo_count() const { return 0; }
     virtual std::uint64_t tx_bytes() const { return 0; }
     virtual std::uint64_t rx_bytes() const { return 0; }

@@ -39,6 +39,12 @@ SshTarget SshBridge::target() const {
     t.term = cfg_.term;
     t.width = cfg_.width;
     t.height = cfg_.height;
+    int wc = want_cols_.load();
+    int wr = want_rows_.load();
+    if (wc > 1 && wr > 1) {
+        t.width = wc;
+        t.height = wr;
+    }
     t.connect_timeout_ms = cfg_.connect_timeout_ms;
     t.keepalive_s = cfg_.keepalive_s;
     return t;
@@ -101,6 +107,14 @@ std::size_t SshBridge::write(const void* data, std::size_t n) {
     if (!cmds_.push(data, n)) return 0;
     core_.mark_tx(n);
     return n;
+}
+
+bool SshBridge::resize_terminal(int cols, int rows) {
+    if (cols < 2 || rows < 2) return false;
+    want_cols_ = cols;
+    want_rows_ = rows;
+    if (stop_.load() || !connected_.load()) return true;   // 已记住，重连建 PTY 时生效
+    return sess_.resize_pty(cols, rows);
 }
 
 std::string SshBridge::read_all(std::uint64_t* epoch, std::uint64_t* seen) {

@@ -11,7 +11,7 @@
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r17',
+    [string]$Version = '3.0-s13-r18',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
@@ -231,6 +231,7 @@ if (-not $SkipPush) {
 Write-Output "release manifest: https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json"
 Write-Output "release page: https://github.com/$Repo/releases/tag/$tag"
 Write-Output "zip sha256: $($m.sha256)"
+
 
 
 

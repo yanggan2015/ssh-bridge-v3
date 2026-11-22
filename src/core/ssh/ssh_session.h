@@ -41,6 +41,8 @@ public:
     int read_some(void* buf, std::size_t cap);
     // 写：整段写完返回 true；断开返回 false
     bool write_all(const void* data, std::size_t n);
+    // 通知远端 PTY 新尺寸（窗口/分屏变化）；断开返回 false
+    bool resize_pty(int width, int height);
     // 保活：发一个 SSH ignore，返回 false 表示链路已断
     bool keepalive();
 
