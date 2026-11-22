@@ -30,6 +30,8 @@ public:
 
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+    static LRESULT CALLBACK SearchEditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                           UINT_PTR id, DWORD_PTR ref);
     LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 
     void build_menu();

@@ -5,13 +5,13 @@
 # GitHub Release：v<Version>，资产为 zip + 本地 UPDATE.json + zip.sha256
 #
 # 用法：
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r3
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r3 -SkipPush
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r4
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r4 -SkipPush
 #
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r3',
+    [string]$Version = '3.0-s13-r4',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
@@ -75,8 +75,8 @@ if ($hasBranch) {
 
 # 发布分支只保留运行所需的二进制与工具；zip 同时放进 packages/，
 # UPDATE.json 的 url 指向 raw 分支文件，避免依赖 github.com 页面跳转。
+# 历史包不清理，旧版本仍可直接从 packages/ 下载。
 Remove-Item -Recurse -Force (Join-Path $ReleaseDir 'ssh_bridge3') -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force (Join-Path $ReleaseDir 'packages') -ErrorAction SilentlyContinue
 Remove-Item -Force (Join-Path $ReleaseDir 'UPDATE.json') -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Join-Path $ReleaseDir 'ssh_bridge3\tools') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $ReleaseDir 'packages') | Out-Null
@@ -211,5 +211,6 @@ if (-not $SkipPush) {
 Write-Output "release manifest: https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json"
 Write-Output "release page: https://github.com/$Repo/releases/tag/$tag"
 Write-Output "zip sha256: $($m.sha256)"
+
 
 

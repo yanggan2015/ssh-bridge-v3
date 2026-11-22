@@ -405,6 +405,7 @@ void Shell::build_children() {
                               reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcSearch)), inst_, nullptr);
     SendMessageW(search_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     SendMessageW(search_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"回看关键词（Enter 定位，F3 下一个）"));
+    SetWindowSubclass(search_, SearchEditProc, 1, reinterpret_cast<DWORD_PTR>(this));
 
 
     TerminalView::Options opt;
@@ -1162,8 +1163,13 @@ void Shell::on_command(int id) {
         note_status(L"已切换 4 窗格");
         break;
     case kIdmCopy:
-        view_.copy_selection();
-        note_status(L"已复制选区");
+        if (!view_.has_selection()) {
+            note_status(L"请先用鼠标选择要复制的文本");
+        } else if (view_.copy_selection()) {
+            note_status(L"已复制选区");
+        } else {
+            note_status(L"复制失败：剪贴板暂不可用");
+        }
         break;
     case kIdmPaste:
         view_.paste_clipboard();
@@ -1321,6 +1327,18 @@ void Shell::on_tray_event(LPARAM lp) {
     default:
         break;
     }
+}
+
+LRESULT CALLBACK Shell::SearchEditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                       UINT_PTR id, DWORD_PTR ref) {
+    Shell* self = reinterpret_cast<Shell*>(ref);
+    if (msg == WM_KEYDOWN && wp == VK_RETURN) {
+        if (self) self->find_typed();
+        return 0;
+    }
+    if (msg == WM_CHAR && wp == L'\r') return 0;  // 回车已在 KEYDOWN 处理，避免提示音
+    if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, SearchEditProc, id);
+    return DefSubclassProc(hwnd, msg, wp, lp);
 }
 
 LRESULT CALLBACK Shell::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {

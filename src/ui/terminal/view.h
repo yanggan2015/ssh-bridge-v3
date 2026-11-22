@@ -42,7 +42,8 @@ public:
     bool pull_visible();                            // 只拉可见窗口的可见槽位
     void clear_active();
     void replay_active();
-    void copy_selection();
+    bool has_selection() const;
+    bool copy_selection();
     void paste_clipboard();
     bool find(const std::string& needle, bool forward, bool restart = false);
     void clear_search();
@@ -84,7 +85,7 @@ private:
     void begin_selection(int slot, POINT pt);
     void extend_selection(POINT pt);
     std::string selection_text() const;
-    void copy_to_clipboard(const std::string& utf8);
+    bool copy_to_clipboard(const std::string& utf8);
     void send_active(const std::string& bytes);
     std::string line_ending_bytes() const;   // 按当前通道配置生成回车字节
     void on_wheel(POINT pt, int delta);

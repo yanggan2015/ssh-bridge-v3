@@ -1,4 +1,4 @@
-# ssh-bridge v3 · 3.0-s13-r3（独立发布仓库 + 应用内升级 + 分屏布局持久化）
+# ssh-bridge v3 · 3.0-s13-r4（独立发布仓库 + 应用内升级 + 分屏布局持久化）
 
 原生 Win32 单进程桌面工具：串口 / SSH / 日志共用一个环形缓冲，界面直读内存；
 另带一条**只在本机**的 HTTP 桥，让 AI（或脚本）像操作 DOM 一样读写每一个控件。
@@ -263,4 +263,5 @@ Invoke-RestMethod "$b/action" -Method Post -ContentType 'application/json' `
 - 端口冲突会给中文原因；`全部停止` 一次释放全部服务端口。
 
 继电器窗口主要控件：`relay.dev.*`、`relay.bind.*`、`relay.script.*`、`relay.message/close`；文件服务窗口：`filesvc.root*`、`filesvc.tftp.*`、`filesvc.share.*`、`filesvc.nfs.*`、`filesvc.save/stopall/close/message`；主窗口按钮：`board.btn.<id>`。完整设计与验收见仓库 `docs/详细设计-S12-工作台重构.md`。
+
 

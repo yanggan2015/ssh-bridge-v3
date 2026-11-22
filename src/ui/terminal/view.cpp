@@ -523,29 +523,36 @@ std::string TerminalView::selection_text() const {
     return out;
 }
 
-void TerminalView::copy_to_clipboard(const std::string& utf8) {
-    if (utf8.empty()) return;
+bool TerminalView::copy_to_clipboard(const std::string& utf8) {
+    if (utf8.empty()) return false;
     std::wstring wide = term::utf8_to_utf16(utf8);
-    if (!OpenClipboard(hwnd_)) return;
+    if (!OpenClipboard(hwnd_)) return false;
     EmptyClipboard();
+    bool ok = false;
     HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, (wide.size() + 1) * sizeof(wchar_t));
     if (mem) {
         void* dst = GlobalLock(mem);
         if (dst) {
             std::memcpy(dst, wide.c_str(), (wide.size() + 1) * sizeof(wchar_t));
             GlobalUnlock(mem);
-            SetClipboardData(CF_UNICODETEXT, mem);
+            ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
+            if (!ok) GlobalFree(mem);
         } else {
             GlobalFree(mem);
         }
     }
     CloseClipboard();
+    return ok;
 }
 
-void TerminalView::copy_selection() {
+bool TerminalView::has_selection() const {
+    return !selection_text().empty();
+}
+
+bool TerminalView::copy_selection() {
     std::string text = selection_text();
-    if (text.empty()) return;
-    copy_to_clipboard(text);
+    if (text.empty()) return false;
+    return copy_to_clipboard(text);
 }
 
 void TerminalView::paste_clipboard() {
