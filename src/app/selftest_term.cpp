@@ -225,6 +225,44 @@ void test_bracketed_paste() {
     report("T4U-13", "bracketed paste 状态与包裹", on && !off && normal && wrapped);
 }
 
+void test_mouse() {
+    term::AnsiScreen n;
+    n.init(8, 3);
+    n.feed("\x1b[?1000h");
+    bool m1 = n.mouse_mode() == 1 && !n.mouse_sgr();
+    n.feed("\x1b[?1002h");
+    bool m2 = n.mouse_mode() == 2;
+    n.feed("\x1b[?1003h");
+    bool m3 = n.mouse_mode() == 3;
+    n.feed("\x1b[?1006h");
+    bool sgr = n.mouse_sgr();
+    n.feed("\x1b[?1003l\x1b[?1006l");
+    bool off = n.mouse_mode() == 0 && !n.mouse_sgr();
+    n.feed("\x1b[?1002h\x1b[?1006h");
+    n.feed("\x1b[?2J");   // 清屏不应清掉鼠标模式
+    bool survive = n.mouse_mode() == 2 && n.mouse_sgr();
+    n.feed("\x1b[?1049h");  // 进备用屏也不丢模式，等应用自己发 ?100xl
+    bool enter = n.mouse_mode() == 2 && n.mouse_sgr();
+    n.feed("\x1b[?1002l\x1b[?1006l");
+    bool clear = n.mouse_mode() == 0 && !n.mouse_sgr();
+
+    bool press = term::encode_mouse(0, 5, 3, false, true) == "\x1b[<0;5;3M";
+    bool rel = term::encode_mouse(0, 5, 3, true, true) == "\x1b[<0;5;3m";
+    bool drag = term::encode_mouse(32, 5, 3, false, true) == "\x1b[<32;5;3M";
+    bool shift = term::encode_mouse(4, 5, 3, false, true) == "\x1b[<4;5;3M";
+    bool wheel = term::encode_mouse(64, 5, 3, false, true) == "\x1b[<64;5;3M";
+    std::string legacy = term::encode_mouse(0, 5, 3, false, false);
+    bool x10 = legacy.size() == 6 && legacy[0] == '\x1b' && legacy[1] == '[' &&
+               legacy[2] == 'M' && legacy[3] == ' ' && legacy[4] == '&' && legacy[5] == '$';
+    std::string legacy_rel = term::encode_mouse(0, 5, 3, true, false);
+    bool x10_rel = legacy_rel.size() == 6 && legacy_rel[3] == '#';
+
+    report("T4U-14", "鼠标模式解析与 SGR/X10 编码",
+           m1 && m2 && m3 && sgr && off && survive && enter && clear && press && rel && drag && shift &&
+               wheel && x10 && x10_rel,
+           "mode=" + std::to_string(n.mouse_mode()) + " sgr=" + std::to_string(n.mouse_sgr()));
+}
+
 }  // namespace
 
 int term_selftest_main(const std::vector<std::string>& args) {
@@ -238,6 +276,7 @@ int term_selftest_main(const std::vector<std::string>& args) {
     test_osc_and_control();
     test_keys();
     test_bracketed_paste();
+    test_mouse();
     std::printf("RESULT: %s\n", g_fail == 0 ? "ALL PASS" : "FAIL");
     return g_fail == 0 ? 0 : 1;
 }

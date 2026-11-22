@@ -48,8 +48,12 @@ public:
     bool paste_text(const std::string& utf8);
     bool find(const std::string& needle, bool forward, bool restart = false);
     void clear_search();
-    // AI 桥接：向活动窗格写按键（submit=true 末尾补回车）；滚动/取窗口句柄
+    // AI 桥接：向活动窗格写按键（submit=true 末尾补回车）
     bool type_text(const std::string& utf8, bool submit);
+    // AI 桥接：向活动窗格发一次鼠标事件（列/行从 1 起，button 0/1/2 或滚轮 64/65，
+    // mods 位 4=Shift、8=Alt、16=Ctrl；只在远端应用开启鼠标上报时生效）
+    bool mouse_event(int col, int row, int button, bool release, bool motion,
+                     unsigned mods = 0);
     // AI 桥接：原样写字节，不做 UTF-8 重编码，用于 Ctrl/ESC/Tab 等 C0 与功能键序列
     bool send_raw(const std::string& bytes);
     void scroll_active(int lines);
@@ -90,6 +94,9 @@ private:
     std::uint64_t cell_row_at(const term::Pane& pane, int y, RECT body) const;
     void begin_selection(int slot, POINT pt);
     void extend_selection(POINT pt);
+    bool report_mouse(int slot, POINT pt, int button, bool release, bool motion, WPARAM keys);
+    bool mouse_event_slot(int slot, int col, int row, int button, bool release, bool motion,
+                          unsigned mods);
     std::string selection_text() const;
     bool copy_to_clipboard(const std::string& utf8);
     void send_active(const std::string& bytes);
@@ -127,6 +134,8 @@ private:
     } sel_;
 
     bool swallow_char_ = false;
+    bool mouse_reporting_ = false;
+    int  mouse_button_ = -1;
 };
 
 // 从 ui_prefs.ini 读/写终端字号（[terminal] font）

@@ -26,6 +26,10 @@ std::string encode_char(unsigned int ch, bool ctrl, bool alt);
 // 粘贴：普通模式换行统一成 CR；bracketed 模式保留 LF，并用 ESC[200~/201~ 包裹
 std::string encode_paste(const std::string& utf8, bool bracketed = false);
 
+// 鼠标上报：button 为 xterm 编码（0/1/2，+32 为拖动，+64/65 为滚轮，可叠加修饰位 4/8/16）。
+// 坐标从 1 开始。sgr=true 发 ESC[<b;x;yM/m；false 发 X10 兼容的 ESC[M + 三字节。
+std::string encode_mouse(int button, int col, int row, bool release, bool sgr);
+
 // UTF-16 → UTF-8（代理对合并）
 std::string utf16_to_utf8(const std::wstring& text);
 
