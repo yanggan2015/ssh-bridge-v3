@@ -86,6 +86,7 @@ static int               g_res_code;
 static char              g_res_msg[512];
 static char              g_res_result[UB_RESULT_LEN];
 static char              g_last_action[64];
+static char              g_focus_id[UB_ID_LEN];
 
 static UB_VIRTUAL        g_virtual[UB_VIRTUAL_MAX];
 static int               g_virtual_count;
@@ -778,6 +779,11 @@ static void ub_execute(const char *id, const char *action, const char *text,
     *code = 0;
     snprintf(msg, (size_t) cap, "ok");
     g_res_result[0] = '\0';
+    if (strcmp(action, "get_text") != 0) {
+        EnterCriticalSection(&g_lock);
+        ub_copy(g_focus_id, UB_ID_LEN, id);
+        LeaveCriticalSection(&g_lock);
+    }
 
     UB_VIRTUAL *v = ub_find_virtual(id);
     if (v) {
@@ -1158,14 +1164,9 @@ static char *ub_state_json(void)
     cJSON_AddStringToObject(o, "last_action", g_last_action);
     LeaveCriticalSection(&g_lock);
 
-    HWND focus = GetFocus();
-    if (focus) {
-        char fid[UB_ID_LEN];
-        ub_effective_id(focus, fid, sizeof(fid));
-        cJSON_AddStringToObject(o, "focus_id", fid);
-    } else {
-        cJSON_AddStringToObject(o, "focus_id", "");
-    }
+    EnterCriticalSection(&g_lock);
+    cJSON_AddStringToObject(o, "focus_id", g_focus_id);
+    LeaveCriticalSection(&g_lock);
 
     if (g_state_cb) {
         char buf[16384];
@@ -1362,6 +1363,15 @@ static void ub_http(struct mg_connection *c, int ev, void *ev_data)
         return;
     }
     if (!ub_token_ok(hm)) { ub_send_json(c, 401, NULL); return; }
+
+    /* 只读端点只接受 GET；写端点 /action 只接受 POST。 */
+    if (!ub_uri_is(&hm->method, "GET") &&
+        (ub_uri_is(&hm->uri, "/ui-tree") || ub_uri_is(&hm->uri, "/state") ||
+         ub_uri_is(&hm->uri, "/capabilities") || ub_uri_prefix(&hm->uri, "/control") ||
+         ub_uri_is(&hm->uri, "/logs") || ub_uri_is(&hm->uri, "/ping"))) {
+        ub_send_json(c, 405, NULL);
+        return;
+    }
 
     if (ub_uri_is(&hm->uri, "/ui-tree")) {
         ub_send_json(c, 200, ub_tree_json());
