@@ -29,20 +29,22 @@ std::string pick_local_ip() {
 
 std::string resolve_against(const std::string& root, const std::string& p) {
     if (p.empty()) return "";
-    std::filesystem::path fp(p);
-    if (fp.is_absolute()) return fp.lexically_normal().string();
-    return (std::filesystem::path(root) / fp).lexically_normal().string();
+    std::filesystem::path fp = std::filesystem::u8path(p);
+    if (fp.is_absolute()) return fp.lexically_normal().u8string();
+    return (std::filesystem::u8path(root) / fp).lexically_normal().u8string();
 }
 
 }  // namespace
 
 ServiceManager::ServiceManager(const std::string& project_root) : project_root_(project_root) {
-    share_root_ = (std::filesystem::path(project_root) / "work" / "share").string();
+    share_root_ = (std::filesystem::u8path(project_root) / "work" / "share").u8string();
     tftp_ = tftp_svc_create();
 }
 
 ServiceManager::~ServiceManager() {
     stop_all();
+    delete share_;
+    share_ = nullptr;
     if (tftp_) tftp_svc_destroy(tftp_);
     tftp_ = nullptr;
 }
@@ -50,8 +52,8 @@ ServiceManager::~ServiceManager() {
 void ServiceManager::apply_config(const AppConfig& cfg) {
     cfg_ = cfg;
     std::string root = cfg.tftp.root.empty() ? "" : resolve_against(project_root_, cfg.tftp.root);
-    if (root.empty()) root = (std::filesystem::path(project_root_) / "work" / "share").string();
-    share_root_ = (std::filesystem::path(root)).lexically_normal().string();
+    if (root.empty()) root = (std::filesystem::u8path(project_root_) / "work" / "share").u8string();
+    share_root_ = std::filesystem::u8path(root).lexically_normal().u8string();
 }
 
 const std::string& ServiceManager::share_root() { return share_root_; }
@@ -64,13 +66,13 @@ std::string ServiceManager::local_ip() const { return pick_local_ip(); }
 
 void ServiceManager::ensure_layout() {
     try {
-        std::filesystem::create_directories(std::filesystem::path(share_root_) / "common");
+        std::filesystem::create_directories(std::filesystem::u8path(share_root_) / "common");
         for (const BoardConfig& b : cfg_.boards) {
             if (b.name.empty()) continue;
             if (b.name.find('/') != std::string::npos || b.name.find('\\') != std::string::npos ||
                 b.name.find("..") != std::string::npos)
                 continue;
-            std::filesystem::create_directories(std::filesystem::path(share_root_) / b.name);
+            std::filesystem::create_directories(std::filesystem::u8path(share_root_) / std::filesystem::u8path(b.name));
         }
     } catch (...) {
     }
@@ -143,14 +145,147 @@ bool ServiceManager::start_nfs(const NfsConfig& cfg, std::string* err) {
 }
 
 void ServiceManager::stop_nfs() {
-    nfs_svc_stop();
-    nfs_on_ = false;
-    nfs_note_ = "已停止";
+    int rc = nfs_svc_stop();
+    if (rc == 0) {
+        nfs_on_ = false;
+        nfs_note_ = "已停止";
+    } else {
+        nfs_on_ = true;
+        nfs_note_ = "停止超时，NFS 可能仍在运行";
+    }
 }
 
 bool ServiceManager::nfs_running() const { return nfs_on_ && nfs_svc_running(); }
 
+void ServiceManager::set_inbound_resolver(InboundGateway::Resolver resolver) {
+    // 启动前装好；运行中替换只影响新认证，已有会话已持有通道 shared_ptr。
+    inbound_resolver_ = std::move(resolver);
+}
+
+bool ServiceManager::start_inbound(const InboundConfig& cfg, std::string* err) {
+    if (cfg.port <= 0 || cfg.port > 65535) {
+        if (err) *err = "入站 SSH 端口越界";
+        return false;
+    }
+    if (inbound_.running()) {
+        if (inbound_.port() == cfg.port) {
+            if (err) err->clear();
+            return true;
+        }
+        inbound_.stop();
+        inbound_on_ = false;
+    }
+    std::string key_path =
+        (std::filesystem::u8path(project_root_) / "work" / "keys" / "inbound_host_rsa").u8string();
+    std::string e;
+    if (!inbound_.start(cfg.port, key_path, inbound_resolver_, &e)) {
+        inbound_on_ = false;
+        inbound_note_ = e.empty() ? "入站 SSH 启动失败" : e;
+        if (err) *err = inbound_note_;
+        return false;
+    }
+    inbound_on_ = true;
+    inbound_note_ = "监听 0.0.0.0:" + std::to_string(cfg.port);
+    if (err) err->clear();
+    return true;
+}
+
+void ServiceManager::stop_inbound() {
+    inbound_.stop();
+    inbound_on_ = false;
+    inbound_note_ = "已停止";
+}
+
+bool ServiceManager::inbound_running() const {
+    return inbound_on_ && inbound_.running();
+}
+
+std::string ServiceManager::inbound_status() const {
+    if (!inbound_running()) return inbound_note_.empty() ? "未启动" : inbound_note_;
+    return "监听 0.0.0.0:" + std::to_string(inbound_.port()) + " · 会话 " +
+           std::to_string(inbound_.sessions());
+}
+
+bool ServiceManager::start_tcp_forward(const TcpForwardConfig& cfg, std::string* err) {
+    std::string e;
+    if (!tcp_fwd_.start(cfg, &e)) {
+        tcp_fwd_note_ = e;
+        set_error(err, e);
+        return false;
+    }
+    tcp_fwd_note_ = cfg.enable ? ("监听 " + std::to_string(tcp_fwd_.listen_count()) + " 个端口") : "未启用";
+    if (err) *err = e;
+    return true;
+}
+
+void ServiceManager::stop_tcp_forward() {
+    tcp_fwd_.stop();
+    tcp_fwd_note_ = "已停止";
+}
+
+bool ServiceManager::tcp_forward_running() const { return tcp_fwd_.running(); }
+
+std::string ServiceManager::tcp_forward_status() const {
+    if (!tcp_forward_running()) return tcp_fwd_note_.empty() ? "未启动" : tcp_fwd_note_;
+    return "监听 " + std::to_string(tcp_fwd_.listen_count()) + " 个端口 · 活动 " +
+           std::to_string(tcp_fwd_.active_connections());
+}
+
+bool ServiceManager::start_tunnel(const TunnelConfig& cfg, std::string* err) {
+    std::string e;
+    if (!tunnel_mgr_.start(cfg, project_root_, &e)) {
+        tunnel_note_ = e;
+        set_error(err, e);
+        return false;
+    }
+    tunnel_note_ = cfg.enable ? "HTTP/SSH 隧道已启动" : "未启用";
+    if (err) *err = e;
+    return true;
+}
+
+void ServiceManager::stop_tunnel() {
+    tunnel_mgr_.stop();
+    tunnel_note_ = "已停止";
+}
+
+bool ServiceManager::tunnel_running() const { return tunnel_mgr_.running(); }
+
+std::string ServiceManager::tunnel_status() const {
+    if (!tunnel_running()) return tunnel_note_.empty() ? "未启动" : tunnel_note_;
+    return "隧道进程运行中";
+}
+
+bool ServiceManager::start_discovery(const DiscoveryConfig& cfg, const AppConfig& app,
+                                     std::string* err) {
+    std::string e;
+    if (!discovery_.start(cfg, app, local_ip(), &e)) {
+        discovery_note_ = e;
+        set_error(err, e);
+        return false;
+    }
+    discovery_note_ = cfg.enable ? ("UDP " + std::to_string(cfg.port)) : "未启用";
+    if (err) *err = e;
+    return true;
+}
+
+void ServiceManager::stop_discovery() {
+    discovery_.stop();
+    discovery_note_ = "已停止";
+}
+
+bool ServiceManager::discovery_running() const { return discovery_.running(); }
+
+std::string ServiceManager::discovery_status() const {
+    if (!discovery_running()) return discovery_note_.empty() ? "未启动" : discovery_note_;
+    return "UDP " + std::to_string(discovery_.port()) + " · 应答 " +
+           std::to_string(discovery_.responses());
+}
+
 void ServiceManager::stop_all() {
+    stop_discovery();
+    stop_tunnel();
+    stop_tcp_forward();
+    stop_inbound();
     stop_relay_jobs();
     stop_tftp();
     stop_share();
@@ -230,6 +365,7 @@ bool ServiceManager::relay_run_mode_async(const RelayDeviceConfig& dev, int chan
                                           const std::string& mode, double hold_seconds,
                                           bool polarity_inverted) {
     if (mode != "hold_on" && mode != "hold_off" && mode != "pulse") return false;
+    if (channel < 1 || channel > dev.channels) return false;
     if (relay_busy_.load()) return false;
     if (relay_job_.joinable()) relay_job_.join();
     relay_busy_ = true;
@@ -400,6 +536,35 @@ std::string ServiceManager::state_json() const {
     cJSON* r = cJSON_Parse(relay_json().c_str());
     if (cJSON_IsArray(r)) cJSON_AddItemToObject(root, "relay_devices", r);
     else cJSON_Delete(r);
+
+    cJSON* in = cJSON_AddObjectToObject(root, "inbound");
+    cJSON_AddBoolToObject(in, "on", inbound_running());
+    cJSON_AddNumberToObject(in, "port", inbound_.port());
+    cJSON_AddNumberToObject(in, "sessions", inbound_.sessions());
+    cJSON_AddStringToObject(in, "note", inbound_status().c_str());
+
+    cJSON* tf = cJSON_Parse(tcp_fwd_.status_json().c_str());
+    if (cJSON_IsObject(tf)) {
+        cJSON_AddStringToObject(tf, "note", tcp_forward_status().c_str());
+        cJSON_AddItemToObject(root, "tcp_forward", tf);
+    } else {
+        cJSON_Delete(tf);
+    }
+    cJSON* tu = cJSON_Parse(tunnel_mgr_.status_json().c_str());
+    if (cJSON_IsObject(tu)) {
+        cJSON_AddStringToObject(tu, "note", tunnel_status().c_str());
+        cJSON_AddItemToObject(root, "tunnel", tu);
+    } else {
+        cJSON_Delete(tu);
+    }
+    cJSON* di = cJSON_Parse(discovery_.status_json().c_str());
+    if (cJSON_IsObject(di)) {
+        cJSON_AddStringToObject(di, "note", discovery_status().c_str());
+        cJSON_AddItemToObject(root, "discovery", di);
+    } else {
+        cJSON_Delete(di);
+    }
+
     cJSON_AddStringToObject(root, "local_ip", pick_local_ip().c_str());
     char* txt = cJSON_PrintUnformatted(root);
     std::string out = txt ? txt : "{}";

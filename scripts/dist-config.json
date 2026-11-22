@@ -15,7 +15,7 @@
     "font_size": 15,
     "split": 1,
     "active_pane": 0,
-    "pane_channels": []
+    "pane_channels": ["loop1"]
   },
   "default": {
     "username": "root",

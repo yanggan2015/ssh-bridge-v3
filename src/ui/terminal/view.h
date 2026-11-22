@@ -44,7 +44,7 @@ public:
     void replay_active();
     bool has_selection() const;
     bool copy_selection();
-    void paste_clipboard();
+    bool paste_clipboard();
     bool find(const std::string& needle, bool forward, bool restart = false);
     void clear_search();
     // AI 桥接：向活动窗格写按键（submit=true 末尾补回车）；滚动/取窗口句柄

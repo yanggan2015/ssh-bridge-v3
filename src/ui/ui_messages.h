@@ -20,5 +20,6 @@ constexpr UINT kMsgBoardActionResult   = WM_APP + 11;  // 板卡按钮后台执�
 constexpr UINT kMsgRelayActionResult   = WM_APP + 12;  // 继电器窗口测试完成（lParam=AsyncBoardResult*）
 constexpr UINT kMsgBoardActionProgress = WM_APP + 13;  // 板卡脚本实时输出（lParam=AsyncBoardProgress*）
 constexpr UINT kMsgActivePaneChanged   = WM_APP + 14;  // 终端激活画框变化（wParam=画框索引，0 起）
+constexpr UINT kMsgWebReload           = WM_APP + 15;  // S9 网页配置保存后请求 UI 线程重载
 
 }  // namespace sb3

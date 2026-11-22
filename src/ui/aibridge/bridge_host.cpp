@@ -26,6 +26,7 @@
 #include "ui/terminal/view.h"
 #include "ui/ui_messages.h"
 #include "services/service_manager.h"
+#include "services/web/web_console.h"
 
 namespace sb3 {
 namespace aibridge {
@@ -39,6 +40,7 @@ HWND                  g_dlg   = nullptr;
 HWND                  g_sftp_hwnd = nullptr;
 SftpWindow*           g_sftp  = nullptr;
 ServiceManager*       g_services = nullptr;
+WebConsole*           g_web = nullptr;
 
 // 本体控件 id（S3 定下的资源号，桥接不改它们）
 constexpr int kIdTree     = 1000;
@@ -348,7 +350,13 @@ void add_terminal_block(cJSON* root) {
 
 void state_provider(char* out, int cap, void*) {
     g_state_cache.clear();
-    if (g_main) SendMessageW(g_main, kMsgBridgeState, 0, 0);   // 同步取 UI 线程快照
+    if (g_main) {
+        // 不能用无限 SendMessage：关窗时 UI 线程正在 ui_bridge_stop 等 HTTP 线程退出，
+        // 两边互相等待会死锁。这里最多等 1 秒，超时返回空状态。
+        DWORD_PTR result = 0;
+        SendMessageTimeoutW(g_main, kMsgBridgeState, 0, 0,
+                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &result);
+    }
     std::snprintf(out, static_cast<std::size_t>(cap), "%s", g_state_cache.c_str());
 }
 
@@ -412,6 +420,11 @@ std::string build_state_json() {
         cJSON* svc = cJSON_Parse(g_services->state_json().c_str());
         if (cJSON_IsObject(svc)) cJSON_AddItemToObject(root, "services", svc);
         else cJSON_Delete(svc);
+    }
+    if (g_web) {
+        cJSON* web = cJSON_Parse(g_web->status_json().c_str());
+        if (cJSON_IsObject(web)) cJSON_AddItemToObject(root, "web", web);
+        else cJSON_Delete(web);
     }
 
     // 状态栏四段原文：验收要判断“动作有没有回执”，必须能从 /state 读到
@@ -653,6 +666,7 @@ void unregister_sftp_dialog(HWND wnd) {
 }
 
 void set_service_manager(ServiceManager* mgr) { g_services = mgr; }
+void set_web_console(WebConsole* web) { g_web = web; }
 
 void register_service_panel(HWND wnd) {
     if (!wnd) return;

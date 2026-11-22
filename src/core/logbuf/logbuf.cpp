@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 
@@ -14,6 +15,15 @@ namespace sb3 {
 namespace {
 
 constexpr std::size_t kMinCap = 4 * 1024;
+
+std::wstring to_wide(const std::string& s) {
+    if (s.empty()) return std::wstring();
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
+    if (n <= 0) return std::wstring();
+    std::wstring w(static_cast<std::size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
 
 }  // namespace
 
@@ -46,6 +56,7 @@ void LogBuffer::shutdown() {
     if (flusher_.joinable()) flusher_.join();
     flush_cr_hold();
     disk_close();
+    std::lock_guard<std::mutex> lock(ring_mu_);
     cap_ = 0;
     ring_.clear();
 }
@@ -117,6 +128,7 @@ void LogBuffer::write_ring(const char* data, std::size_t n) {
         data += (n - cap_);
         n = cap_;
     }
+    std::lock_guard<std::mutex> lock(ring_mu_);
     std::uint64_t start = total_.load(std::memory_order_relaxed);
     std::size_t off = util::ring_index(start, cap_);
     std::size_t first = std::min(n, cap_ - off);
@@ -133,8 +145,15 @@ std::string LogBuffer::read_since(std::uint64_t* epoch, std::uint64_t* seen, boo
     bool drop = false;
     std::string out;
     if (epoch == nullptr || seen == nullptr) return out;
+    std::lock_guard<std::mutex> lock(ring_mu_);
 
     std::uint64_t e = epoch_.load(std::memory_order_acquire);
+    if (cap_ == 0) {
+        *epoch = e;
+        *seen = 0;
+        if (dropped) *dropped = false;
+        return out;
+    }
     std::uint64_t t = total_.load(std::memory_order_acquire);
     if (*epoch != e) {                    // 首次读，或 ring 被清空
         *epoch = e;
@@ -164,6 +183,7 @@ std::string LogBuffer::read_since(std::uint64_t* epoch, std::uint64_t* seen, boo
 void LogBuffer::read_all(std::string* out) {
     if (out == nullptr) return;
     out->clear();
+    std::lock_guard<std::mutex> lock(ring_mu_);
     std::uint64_t t = total_.load(std::memory_order_acquire);
     if (t == 0 || cap_ == 0) return;
     std::size_t n = static_cast<std::size_t>(t < cap_ ? t : cap_);
@@ -176,25 +196,34 @@ void LogBuffer::read_all(std::string* out) {
 }
 
 void LogBuffer::clear() {
+    std::lock_guard<std::mutex> lock(ring_mu_);
     total_.store(0, std::memory_order_release);
     epoch_.fetch_add(1, std::memory_order_release);
     notify_.fetch_add(1, std::memory_order_release);
 }
 
 bool LogBuffer::disk_enabled() const {
+    std::lock_guard<std::mutex> lock(disk_mu_);
     return disk_ != nullptr;
+}
+
+std::string LogBuffer::last_error() const {
+    std::lock_guard<std::mutex> lock(err_mu_);
+    return last_error_;
 }
 
 bool LogBuffer::disk_open(const std::string& dir, const std::string& name) {
     disk_close();                    // 自带锁，必须在取锁之前调用，避免自锁
     std::string d = dir.empty() ? std::string(".") : dir;
     if (!util::ensure_dir(d)) {
+        std::lock_guard<std::mutex> lk(err_mu_);
         last_error_ = "cannot create log dir: " + d;
         return false;
     }
     std::string file = util::join_path(d, name + ".log");
-    std::FILE* f = std::fopen(file.c_str(), "ab");
+    std::FILE* f = _wfopen(to_wide(file).c_str(), L"ab");
     if (!f) {
+        std::lock_guard<std::mutex> lk(err_mu_);
         last_error_ = "cannot open log file: " + file;
         return false;
     }
@@ -229,7 +258,7 @@ bool LogBuffer::set_disk(bool enabled, const std::string& dir, const std::string
 }
 
 void LogBuffer::disk_write(const char* data, std::size_t n) {
-    if (!disk_ || n == 0) return;
+    if (n == 0) return;
     std::lock_guard<std::mutex> lock(disk_mu_);
     if (!disk_) return;
     std::fwrite(data, 1, n, disk_);

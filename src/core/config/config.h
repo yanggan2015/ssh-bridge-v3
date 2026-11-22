@@ -62,6 +62,7 @@ struct BoardConfig {
     std::string password;
     bool        password_present = false;  // true 表示配置里显式写了 password（含空串）
     std::string username = "root";
+    bool        discoverable = false;  // S12：是否应答 UDP 发现（默认关闭）
     std::vector<BoardActionConfig> buttons;  // S12 板卡专属按钮
     std::vector<QuickCommandConfig> quick_commands;  // S13 底部快捷指令
 };
@@ -81,6 +82,7 @@ struct SSHLinkConfig {
     std::uint32_t buffer_size = 0;          // 0 = 用 default.buffer_size
     bool          log_enabled = true;
     std::string   log_dir;
+    bool          discoverable = false;  // S12：是否应答 UDP 发现（默认关闭）
     std::vector<BoardActionConfig> buttons;  // S12 通道专属按钮
     std::vector<QuickCommandConfig> quick_commands;  // S13 底部快捷指令
 };
@@ -93,6 +95,7 @@ struct InboundConfig {          // S8
 struct WebConfig {              // S9
     bool enabled = false;
     int  port    = 18081;
+    std::string token;          // 空 = 只读；非空 = 写接口要求 Bearer
 };
 
 struct AgentConfig {            // S10
@@ -135,6 +138,33 @@ struct NfsConfig {              // S11 NFSv3
     std::string root;           // 空 = 同 TFTP root
 };
 
+struct TcpForwardConfig {       // S12：板 IP 末字节 → 本地端口
+    bool        enable = false;
+    std::string listen_ip = "0.0.0.0";
+    int         port_base = 22000;
+    int         target_port = 22;
+    std::string board_cidr = "192.168.1.0/24";
+};
+
+struct TunnelConfig {           // S12：外部 eadk-tunnel / frpc 子进程
+    bool        enable = false;
+    bool        http_enable = true;
+    bool        ssh_enable = false;
+    std::string exe_path;       // 空 = 程序目录 / tools / output/build 自动查找
+    std::string server_addr;
+    int         server_port = 7000;
+    std::string token;
+    int         http_local_port = 18081;
+    int         http_remote_port = 0;   // 0 = 18xxx 自动分配
+    int         ssh_local_port = 2222;
+    int         ssh_remote_port = 0;    // 0 = 28xxx 自动分配
+};
+
+struct DiscoveryConfig {        // S12：UDP 18071 应答 EADK1
+    bool        enable = false;
+    int         port = 18071;
+};
+
 struct UiConfig {               // S3 / S4 / S12
     bool close_to_tray   = true;
     bool start_minimized = false;
@@ -157,6 +187,9 @@ struct AppConfig {
     TftpConfig                 tftp;
     ShareConfig                share;
     NfsConfig                  nfs;
+    TcpForwardConfig           tcp_fwd;
+    TunnelConfig               tunnel;
+    DiscoveryConfig            discovery;
 
     std::string abs_path;        // 实际加载到的文件绝对路径
     std::string project_root;    // 运行目录（work/keys/logs 的父目录）
@@ -168,6 +201,11 @@ bool config_load(AppConfig& out, const std::string& explicit_path = std::string(
 
 // 写回 out.abs_path（为空则报错）
 bool config_save(const AppConfig& cfg);
+
+// 把当前已知配置导出为 JSON 文本（网页只读预览/备份用；保留已知字段全集）
+std::string config_export_json(const AppConfig& cfg);
+// 把网页表单回传的 JSON 解析成 AppConfig（不落盘；落盘由 AppCore::save_config_json 做）。
+bool config_parse_json(const std::string& text, AppConfig* out, std::string* err);
 
 // 手术式修改：只改指定通道，其它字段原样保留
 bool config_patch_board(const std::string& path, const std::string& name,

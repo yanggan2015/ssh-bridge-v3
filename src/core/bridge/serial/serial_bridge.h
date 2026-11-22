@@ -53,7 +53,10 @@ public:
     // 唤醒读者（UI PostMessage / HTTP kick / 入站队列）
     void set_kick(std::function<void()> fn) { core_.set_kick(std::move(fn)); }
 
-    const std::string& last_error() const { return last_error_; }
+    std::string last_error() const {
+        std::lock_guard<std::mutex> lk(err_mu_);
+        return last_error_;
+    }
 
 private:
     bool open_port();
@@ -79,6 +82,7 @@ private:
     std::deque<std::string> loop_in_;
     std::atomic<std::uint64_t> rx_bytes_{0};
     std::atomic<std::uint64_t> tx_bytes_{0};
+    mutable std::mutex err_mu_;
     std::string last_error_;
 };
 

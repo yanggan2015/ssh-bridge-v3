@@ -157,8 +157,8 @@ int relay_ctrl_set(const char *port, int baudrate, int channel, int logical_on,
 #else
     int fd;
 #endif
-    if (channel < 1) {
-        snprintf(err, errcap, "channel must be >= 1");
+    if (channel < 1 || channel > 255) {
+        if (err) snprintf(err, errcap, "channel must be 1..255");
         return -1;
     }
     wire = logical_to_wire(logical_on ? 1 : 0, io_inverted);
@@ -195,6 +195,7 @@ int relay_ctrl_pulse(const char *port, int baudrate, int channel, double hold_se
     int pulse = polarity_inverted ? 1 : 0;
     unsigned hold_ms;
     if (hold_seconds <= 0) hold_seconds = 1.0;
+    if (hold_seconds > 3600.0) hold_seconds = 3600.0;
     hold_ms = (unsigned)(hold_seconds * 1000.0);
     if (relay_ctrl_set(port, baudrate, channel, pulse, io_inverted, post_write_delay_ms, err,
                        errcap) != 0)

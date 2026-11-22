@@ -643,7 +643,9 @@ void tftp_svc_destroy(TftpSvc *t) {
 int tftp_svc_start_ex(TftpSvc *t, const char *root, const char *bind_ip, int port,
                       int allow_write, char *err, size_t errcap) {
     struct sockaddr_in addr;
+#ifndef _WIN32
     int yes = 1;
+#endif
     if (!t || !root || !root[0]) {
         if (err && errcap) snprintf(err, errcap, "bad args");
         return -1;
@@ -652,6 +654,11 @@ int tftp_svc_start_ex(TftpSvc *t, const char *root, const char *bind_ip, int por
     ensure_dir(root);
     snprintf(t->root, sizeof(t->root), "%s", root);
     t->port = port > 0 ? port : 69;
+    if (t->port > 65535) {
+        if (err && errcap) snprintf(err, errcap, "端口超出 1-65535");
+        t->port = 69;
+        return -1;
+    }
     t->allow_write = allow_write ? 1 : 0;
     t->sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (t->sock == TFTP_INVALID) {

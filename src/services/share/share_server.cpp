@@ -50,6 +50,22 @@ std::string html_escape(const std::string& s) {
     return out;
 }
 
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        switch (ch) {
+        case '\\': out += "\\\\"; break;
+        case '"': out += "\\\""; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
 std::string url_encode(const std::string& s) {
     char buf[2048];
     size_t n = mg_url_encode(s.c_str(), s.size(), buf, sizeof(buf));
@@ -80,17 +96,19 @@ ShareServer::~ShareServer() { stop(); }
 bool ShareServer::start(const std::string& root, int port, std::string* err) {
     stop();
     if (err) err->clear();
+    // 重复启动时先彻底停止旧实例，避免旧 mgr/线程泄漏并持有 this
+    if (mgr_ || thread_.joinable()) stop();
     if (root.empty()) {
         if (err) *err = "共享目录为空";
         return false;
     }
     try {
-        fs::create_directories(fs::path(root));
+        fs::create_directories(fs::u8path(root));
     } catch (...) {
         if (err) *err = "无法创建共享目录：" + root;
         return false;
     }
-    root_ = fs::absolute(fs::path(root)).lexically_normal().string();
+    root_ = fs::absolute(fs::u8path(root)).lexically_normal().u8string();
     port_ = port > 0 ? port : 18082;
     mgr_ = new mg_mgr();
     mg_mgr_init(mgr_);
@@ -138,10 +156,10 @@ bool ShareServer::safe_join(const std::string& rel, std::string* abs) const {
     while (!clean.empty() && clean.front() == '/') clean.erase(clean.begin());
     if (clean.find("..") != std::string::npos) return false;
     if (clean.size() > 1 && clean[1] == ':') return false;
-    fs::path p = fs::path(root_);
-    if (!clean.empty()) p /= fs::path(clean);
-    std::string norm = p.lexically_normal().string();
-    std::string rootnorm = fs::path(root_).lexically_normal().string();
+    fs::path p = fs::u8path(root_);
+    if (!clean.empty()) p /= fs::u8path(clean);
+    std::string norm = p.lexically_normal().u8string();
+    std::string rootnorm = fs::u8path(root_).lexically_normal().u8string();
     if (norm.size() < rootnorm.size()) return false;
     if (_strnicmp(norm.c_str(), rootnorm.c_str(), rootnorm.size()) != 0) return false;
     if (norm.size() > rootnorm.size()) {
@@ -157,16 +175,18 @@ std::string ShareServer::list_page(const std::string& rel, const std::string& no
     if (!safe_join(rel, &abs)) return "<html><body>非法路径</body></html>";
     std::vector<fs::directory_entry> entries;
     try {
-        for (const auto& e : fs::directory_iterator(abs)) entries.push_back(e);
+        for (const auto& e : fs::directory_iterator(fs::u8path(abs))) entries.push_back(e);
     } catch (...) {
         return "<html><body>目录不可读：" + html_escape(rel) + "</body></html>";
     }
     std::sort(entries.begin(), entries.end(), [](const fs::directory_entry& a,
                                                  const fs::directory_entry& b) {
-        bool da = a.is_directory(), db = b.is_directory();
+        std::error_code ea, eb;
+        bool da = a.is_directory(ea);
+        bool db = b.is_directory(eb);
         if (da != db) return da > db;
-        return _stricmp(a.path().filename().string().c_str(),
-                        b.path().filename().string().c_str()) < 0;
+        return _stricmp(a.path().filename().u8string().c_str(),
+                        b.path().filename().u8string().c_str()) < 0;
     });
 
     std::ostringstream html;
@@ -208,9 +228,10 @@ std::string ShareServer::list_page(const std::string& rel, const std::string& no
              << "'>返回上级</a></td><td>—</td><td>—</td><td>—</td></tr>";
     }
     for (const auto& e : entries) {
-        std::string name = e.path().filename().string();
+        std::string name = e.path().filename().u8string();
         std::string child = rel.empty() ? name : rel + "/" + name;
-        bool isdir = e.is_directory();
+        std::error_code dec;
+        bool isdir = e.is_directory(dec);
         std::string size = "—";
         std::string mtime = "—";
         try {
@@ -234,8 +255,7 @@ std::string ShareServer::list_page(const std::string& rel, const std::string& no
             html << "<a href='/files?path=" << url_encode(child) << "'>" << html_escape(name) << "</a>";
         html << "</td><td>" << size << "</td><td>" << mtime << "</td><td>"
              << "<form method=post action='/delete?path=" << url_encode(child)
-             << "' onsubmit=\"return confirm('确认删除 " << html_escape(name)
-             << " ?')\" style='display:inline'><button class='danger' type=submit>删除</button></form>"
+             << "' onsubmit=\"return confirm('确认删除该条目？')\" style='display:inline'><button class='danger' type=submit>删除</button></form>"
              << "</td></tr>";
     }
     html << "</tbody></table><div class=muted>HTTP 端口 " << port_
@@ -259,7 +279,7 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
     if (uri == "/api/status") {
         std::ostringstream j;
         j << "{\"running\":" << (running_.load() ? "true" : "false") << ",\"port\":" << port_
-          << ",\"root\":\"" << html_escape(root_) << "\"}";
+          << ",\"root\":\"" << json_escape(root_) << "\"}";
         mg_http_reply(c, 200, "Content-Type: application/json; charset=utf-8\r\n", "%s",
                       j.str().c_str());
         return;
@@ -277,7 +297,8 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
 
     if (uri == "/files") {
         std::string abs;
-        if (!safe_join(rel, &abs) || !fs::is_regular_file(fs::path(abs))) {
+        std::error_code ec;
+        if (!safe_join(rel, &abs) || !fs::is_regular_file(fs::u8path(abs), ec)) {
             mg_http_reply(c, 404, "Content-Type: text/plain; charset=utf-8\r\n", "文件不存在");
             return;
         }
@@ -297,7 +318,17 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
             mg_http_reply(c, 400, "Content-Type: text/plain; charset=utf-8\r\n", "非法目录");
             return;
         }
-        fs::create_directories(fs::path(abs));
+        std::error_code ec;
+        fs::create_directories(fs::u8path(abs), ec);
+        if (ec) {
+            mg_http_reply(c, 400, "Content-Type: text/plain; charset=utf-8\r\n", "目录不可用");
+            return;
+        }
+        if (hm->body.len > 256ull * 1024 * 1024) {
+            mg_http_reply(c, 413, "Content-Type: text/plain; charset=utf-8\r\n",
+                          "上传内容超过 256 MB");
+            return;
+        }
         long written = 0;
         std::string error;
         bool multipart = false;
@@ -310,43 +341,59 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
             while ((off = mg_http_next_multipart(hm->body, off, &part)) != 0) {
                 if (part.filename.len == 0) continue;
                 std::string name(part.filename.buf, part.filename.len);
-                std::string base = fs::path(name).filename().string();
+                std::string base = fs::u8path(name).filename().u8string();
                 if (base.empty() || base == "." || base == ".." ||
                     base.find('/') != std::string::npos || base.find('\\') != std::string::npos) {
                     error = "非法文件名";
                     continue;
                 }
-                std::string target = fs::path(abs).append(base).string();
+                std::string target = (fs::u8path(abs) / fs::u8path(base)).u8string();
                 std::FILE* f = fopen_utf8(target, "wb");
                 if (!f) {
                     error = "无法写入 " + base;
                     continue;
                 }
-                if (part.body.len) std::fwrite(part.body.buf, 1, part.body.len, f);
-                std::fclose(f);
-                written += static_cast<long>(part.body.len);
+                size_t body_len = part.body.len;
+                bool write_ok = body_len == 0 ||
+                                std::fwrite(part.body.buf, 1, body_len, f) == body_len;
+                if (std::fclose(f) != 0) write_ok = false;
+                if (!write_ok) {
+                    error = "写入失败：" + base;
+                    std::error_code ec;
+                    fs::remove(fs::u8path(target), ec);
+                    continue;
+                }
+                written += static_cast<long>(body_len);
             }
         } else {
             char filebuf[512] = "";
             mg_http_get_var(&hm->query, "file", filebuf, sizeof(filebuf));
-            std::string base = fs::path(std::string(filebuf)).filename().string();
+            std::string base = fs::u8path(std::string(filebuf)).filename().u8string();
             if (base.empty()) {
                 error = "缺少 file 参数或 multipart 表单";
             } else if (hm->body.len > 256ull * 1024 * 1024) {
                 error = "文件超过 256 MB";
             } else {
-                std::string target = fs::path(abs).append(base).string();
+                std::string target = (fs::u8path(abs) / fs::u8path(base)).u8string();
                 std::FILE* f = fopen_utf8(target, "wb");
                 if (!f)
                     error = "无法写入 " + base;
                 else {
-                    if (hm->body.len) std::fwrite(hm->body.buf, 1, hm->body.len, f);
-                    std::fclose(f);
-                    written = static_cast<long>(hm->body.len);
+                    size_t body_len = hm->body.len;
+                    bool write_ok = body_len == 0 ||
+                                    std::fwrite(hm->body.buf, 1, body_len, f) == body_len;
+                    if (std::fclose(f) != 0) write_ok = false;
+                    if (!write_ok) {
+                        error = "写入失败：" + base;
+                        std::error_code ec;
+                        fs::remove(fs::u8path(target), ec);
+                    } else {
+                        written = static_cast<long>(body_len);
+                    }
                 }
             }
         }
-        char loc[1600];
+        char loc[8192];
         if (!error.empty())
             std::snprintf(loc, sizeof(loc), "/browse?path=%s&notice=%s", url_encode(dirbuf).c_str(),
                           url_encode("上传失败：" + error).c_str());
@@ -368,29 +415,39 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
         std::string rel_dir = dirbuf;
         std::string child = rel_dir.empty() ? std::string(name) : rel_dir + "/" + name;
         std::string abs;
+        std::string notice = "目录已创建";
         if (name[0] && safe_join(child, &abs)) {
             std::error_code ec;
-            fs::create_directory(fs::path(abs), ec);
+            fs::create_directory(fs::u8path(abs), ec);
+            if (ec) notice = "新建失败：" + ec.message();
+        } else if (!name[0] || !safe_join(child, &abs)) {
+            notice = "新建失败：目录名非法";
         }
-        char loc[1600];
+        char loc[8192];
         std::snprintf(loc, sizeof(loc), "/browse?path=%s&notice=%s", url_encode(rel_dir).c_str(),
-                      url_encode("目录已创建").c_str());
+                      url_encode(notice).c_str());
         mg_http_reply(c, 302, ("Location: " + std::string(loc) + "\r\n").c_str(), "%s", "");
         return;
     }
 
     if (uri == "/delete" && is_post(hm)) {
         std::string abs;
-        if (safe_join(rel, &abs)) {
-            std::error_code ec;
-            fs::remove_all(fs::path(abs), ec);
+        // 根目录不允许删除：否则一个 POST /delete?path= 就能清空整个共享目录
+        if (rel.empty() || !safe_join(rel, &abs) ||
+            (_strnicmp(abs.c_str(), root_.c_str(), root_.size()) == 0 &&
+             abs.size() == root_.size())) {
+            mg_http_reply(c, 400, "Content-Type: text/plain; charset=utf-8\r\n",
+                          "不能删除共享根目录");
+            return;
         }
+        std::error_code ec;
+        fs::remove_all(fs::u8path(abs), ec);
         std::string parent = rel;
         size_t p = parent.find_last_of('/');
         parent = p == std::string::npos ? "" : parent.substr(0, p);
-        char loc[1600];
+        char loc[8192];
         std::snprintf(loc, sizeof(loc), "/browse?path=%s&notice=%s", url_encode(parent).c_str(),
-                      url_encode("已删除").c_str());
+                      url_encode(ec ? "删除失败：" + ec.message() : "已删除").c_str());
         mg_http_reply(c, 302, ("Location: " + std::string(loc) + "\r\n").c_str(), "%s", "");
         return;
     }

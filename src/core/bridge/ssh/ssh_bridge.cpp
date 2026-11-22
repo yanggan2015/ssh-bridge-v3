@@ -96,8 +96,10 @@ void SshBridge::apply_config(const SSHLinkConfig& cfg) {
 
 std::size_t SshBridge::write(const void* data, std::size_t n) {
     if (data == nullptr || n == 0) return 0;
+    // 断线期间不接收下行，避免 write() 声称成功但命令被 TX 线程丢弃
+    if (stop_.load() || !connected_.load()) return 0;
+    if (!cmds_.push(data, n)) return 0;
     core_.mark_tx(n);
-    cmds_.push(data, n);
     return n;
 }
 
@@ -124,7 +126,10 @@ void SshBridge::set_error(const std::string& msg) {
     error_ = msg;
 }
 
-const std::string& SshBridge::last_error() const { return error_; }
+std::string SshBridge::last_error() const {
+    std::lock_guard<std::mutex> lk(err_mu_);
+    return error_;
+}
 
 void SshBridge::set_state(const std::string& s) {
     std::lock_guard<std::mutex> lk(err_mu_);

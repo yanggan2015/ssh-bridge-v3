@@ -52,7 +52,7 @@ public:
     // 测试与状态栏用
     bool wait_connected(unsigned timeout_ms);
     bool wait_disconnected(unsigned timeout_ms);
-    const std::string& last_error() const;
+    std::string last_error() const;
     std::string state() const;
     std::uint64_t reconnect_count() const { return reconnects_.load(); }
     std::size_t queue_depth() const { return cmds_.depth(); }

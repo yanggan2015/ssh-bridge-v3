@@ -35,7 +35,7 @@ public:
     void close();
 
     bool connected() const;
-    const std::string& last_error() const;
+    std::string last_error() const;
 
     // 读：>0 字节数；0 暂无数据；-1 已断开/出错（原因在 last_error）
     int read_some(void* buf, std::size_t cap);

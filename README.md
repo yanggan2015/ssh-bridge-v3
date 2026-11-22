@@ -62,8 +62,8 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 | 扩展 | S9 | HTTP 基元 + 网页端 | Agent | 浏览器可用；关掉不影响本体 |
 | 扩展 | S10 | Agent 接口 :18086 | — | 能读控件树、点按钮、取状态；可单独关 |
 | 扩展 | S11 | 继电器 / TFTP / NFS / 共享目录 | — | 板端 tftp 取文件、nfs mount、继电器脉冲 |
-| 扩展 | S12 | TCP 转发 / 隧道 / UDP 发现 | — | 公网可映射 HTTP 与入站 SSH |
-| 扩展 | S13 | 自更新 / 打包 / 全量回归 | — | 单目录 zip、可升级、S0–S12 一键回归 |
+| 扩展 | S12 | TCP 转发 / 隧道 / UDP 发现（已完成） | — | 公网可映射 HTTP 与入站 SSH |
+| 扩展 | S13 | 自更新 / 打包 / 全量回归（已完成） | — | 单目录 zip、可升级、S0–S12 一键回归 |
 
 每步的测试清单与出口条件见 `docs/每步测试闸门.md`；`tests\CHECKLIST_stepN.md` 全量 PASS 才能进入下一步。
 
@@ -124,6 +124,10 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 - 步骤 2：**已完成并验收**。SSH 出站链路（libssh 静态链接）：PTY+shell、非阻塞读、保活、指数退避重连、双链路隔离；`tests\step2_check.ps1` 11 项全 PASS（自带 paramiko 测试服务器）。
 - 步骤 3：**已完成并验收**。原生窗口壳（菜单/工具栏/通道树/状态栏）、托盘（X=隐藏、双击恢复、菜单退出）、单实例、退出序列停通道并释放串口；`tests\step3_check.ps1` 14 项全 PASS。
 - 步骤 5：**已完成并验收（AI 可控桥接）**。`agent.enable=true` 时监听 `127.0.0.1:18086`，暴露 `/capabilities /ui-tree /control /state /action /logs`；41 个控件/动作全部可读可写（含菜单、托盘、关于窗、终端输入/搜索/绝对回滚/分屏），`tests\ui_bridge_check.ps1` 41 项全 PASS；关掉开关则一个端口都不监听。
+- 设计文档 §9 / S8：**已完成并验收（入站 SSH 共享网关）**。`inbound_ssh.enable=true` 时单口监听 `0.0.0.0:2222`，用户名=通道名，密码按三级规则解析，空密码允许 none；入站会话读写该通道同一份 ring/cmdq，支持多会话、配置重载启停和 `/state.services.inbound`。详见 `docs\S8-入站SSH验收报告.md`。
+- 设计文档 §10 / S9：**主体已完成并验收（Web 控制台）**。`web.enable=true` 时单端口同时提供 HTTP + WS；10 个页面、REST、`/ws/log` BINARY、token 鉴权、静态 304、配置页两 Tab 表单保存后热重载。TCP 转发/隧道页面已由 S12 接上真实状态。详见 `docs\S9-Web控制台验收报告.md`。
+- 设计文档 §13 / S12：**已完成并验收（TCP 转发 / 隧道 / UDP 发现）**。`tcp_forward.enable` 按 `port_base + 板 IP 末段` 一次绑定 256 个监听口，`WSAPoll(500ms)` 统一 accept，双向 relay 不阻塞 UI；`tunnel.enable` 拉起 `eadk-tunnel.exe -c runtime.json`，HTTP 映射 18xxx、入站 SSH 映射 28xxx，进程退出自动重启；`discovery.enable` 在 UDP 18071 应答 `EADK1 q`，只返回 `enable && discoverable` 的通道。配置保存后热重载即时生效，Web `/api/tcp-forward`、`/api/tunnel`、`/api/discovery` 与 `/state.services` 同步暴露状态。详见 `docs\S12-TCP隧道发现验收报告.md`。
+- 设计文档 §14 / S13：**已完成并验收（自更新 / 打包 / 全量回归）**。`scripts\package.ps1` 生成 `output\dist\ssh-bridge-v3-3.0-s13-r12-win64.zip`（含 exe、脱敏配置、README、`tools\smoke.ps1`、`tools\update.ps1`、`tools\ui_probe.py`）；`update.ps1` 校验 zip 与 exe SHA-256、白名单替换、失败回滚、更新后自动重启，安装目录只停自身实例。r11 → r12 在线升级、坏包拒绝、TFTP/共享/NFS 三开关、独立包冒烟、S0–S12 回归均已通过。详见 `docs\S13-自更新打包全量回归验收报告.md`。
 - 步骤 4：**已完成并验收**。终端窗格（`SB3_TermView`）：每通道回看 5000 行、ANSI/256 色、中文与宽字符、1/2/4 分屏独立游标、选区复制/右键粘贴、Ctrl+滚轮字号、搜索框输入即定位；界面直读内存、无端口。`tests\step4_check.ps1` 19 项全 PASS（含 110k 行灌流不丢字节、隐藏不耗 CPU）。
 
 ```powershell
@@ -141,8 +145,19 @@ pwsh -NoProfile -File tests\ui_bridge_check.ps1
 pwsh -NoProfile -File tests\ui_responsive_check.ps1
 # 删除通道闭环（11 项；自行起隔离实例，串口/SSH/最后一个通道/删空恢复）
 pwsh -NoProfile -File tests\ui_delete_channel_check.ps1
-# 打包分发（exe + 示例配置 + 使用说明 + ui_probe）
-pwsh -NoProfile -File scripts\package.ps1
+# 打包分发（exe + 示例配置 + 使用说明 + 更新器 + ui_probe）
+pwsh -NoProfile -File scripts\package.ps1 -Version 3.0-s13-r12
+# 独立包冒烟（解压后执行）
+pwsh -NoProfile -File tools\smoke.ps1
+# 本地升级验证（Manifest 可传本地 UPDATE.json）
+pwsh -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json路径> -InstallDir <安装目录>
+# S9 验收（隔离 output\webtest，起 18082；REST/WS/T9）
+python output\webtest\s9_accept.py
+# S9 页面/手机宽度/配置表单（需 Playwright-core + Edge）
+node output\webtest\pw_pages_test.js
+# S12 验收（隔离 output\s12test，TCP 22000+/UDP 18071/公网 18123）
+python output\s12test\s12_accept.py
+node output\s12test\s12_pages.js
 # 只看数据面
 .\output\build\ssh_bridge3.exe --selftest all loop:selftest
 .\output\build\ssh_bridge3.exe --selftest ssh 127.0.0.1 22 root <密码>

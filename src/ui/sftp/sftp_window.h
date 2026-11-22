@@ -196,7 +196,7 @@ private:
     HWND                      settings_ = nullptr;
     int                       active_index_ = 0;
     int                       active_count_ = 0;
-    bool         connected_ = false;
+    std::atomic<bool>         connected_{false};
     std::wstring status_;
     std::wstring flash_;
     DWORD        flash_ms_ = 0;

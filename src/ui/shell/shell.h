@@ -22,6 +22,7 @@ namespace sb3 {
 class RelayPanel;
 class FileServicePanel;
 class ServiceManager;
+class WebConsole;
 
 class Shell {
 public:
@@ -72,6 +73,9 @@ private:
 
     void show_relay_panel(int page);
     void show_file_panel();
+    void sync_inbound();
+    void sync_web();
+    void sync_s12();
     void refresh_board_buttons();
     void toggle_left_panel();
     int layout_board_buttons(int x, int y, int avail_w);
@@ -103,6 +107,7 @@ private:
     RelayPanel*    relay_panel_ = nullptr;
     FileServicePanel* file_panel_ = nullptr;
     ServiceManager* services_ = nullptr;
+    WebConsole*     web_ = nullptr;
     HWND           search_ = nullptr;
     HWND           search_label_ = nullptr;
     HWND           keyhint_ = nullptr;
@@ -110,6 +115,7 @@ private:
     HACCEL    accel_   = nullptr;
     bool      sync_tree_binding_ = false;    // 正在把左树选中同步到激活画框，避免回写通道
     bool      layout_ready_ = false;         // 启动恢复完成前不写分屏布局，避免临时状态覆盖配置
+    bool      layout_user_input_ = false;    // 只有用户操作过界面才允许持久化布局
     std::wstring last_note_;
     std::wstring update_log_path_;
     std::uint64_t update_deadline_ms_ = 0;

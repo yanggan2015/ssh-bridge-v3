@@ -6,8 +6,10 @@
 
 #include <libssh/libssh.h>
 
+#include <chrono>
 #include <cmath>
 #include <mutex>
+#include <thread>
 
 namespace sb3 {
 namespace {
@@ -147,7 +149,10 @@ bool SshSession::connected() const {
     return ssh_channel_is_open(impl_->channel) != 0 && ssh_channel_is_eof(impl_->channel) == 0;
 }
 
-const std::string& SshSession::last_error() const { return impl_->error; }
+std::string SshSession::last_error() const {
+    std::lock_guard<std::mutex> lk(impl_->mu);
+    return impl_->error;
+}
 
 int SshSession::read_some(void* buf, std::size_t cap) {
     std::lock_guard<std::mutex> lk(impl_->mu);
@@ -191,7 +196,13 @@ bool SshSession::write_all(const void* data, std::size_t n) {
                 impl_->ready = false;
                 return false;
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
+        }
+        if (rc == 0) {
+            impl_->error = "写缓冲返回 0 字节";
+            impl_->ready = false;
+            return false;
         }
         p += rc;
         left -= static_cast<std::size_t>(rc);

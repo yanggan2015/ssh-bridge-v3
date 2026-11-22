@@ -4,6 +4,7 @@
 
 #include "app/selftest.h"
 
+#include "app/app_core.h"
 #include "app/selftest_ssh.h"
 #include "app/selftest_term.h"
 #include "core/bridge/serial/serial_bridge.h"
@@ -171,7 +172,8 @@ std::string sample_json() {
         "  \"boards\": [\n"
         "    {\"name\":\"b1\",\"serial_device\":\"COM3\",\"baudrate\":115200,\"databits\":8,"
         "\"parity\":\"N\",\"stopbits_x10\":10,\"flowcontrol\":\"none\",\"encoding\":\"utf-8\","
-        "\"line_ending\":\"crlf\",\"timestamp\":true},\n"
+        "\"line_ending\":\"crlf\",\"timestamp\":true,"
+        "\"quick_commands\":[{\"label\":\"Q1\",\"command\":\"ls -l\"}]},\n"
         "    {\"name\":\"b2\",\"serial_device\":\"COM4\",\"baudrate\":921600,\"password\":\"\"}\n"
         "  ],\n"
         "  \"ssh\": [{\"name\":\"s1\",\"target_host\":\"192.168.1.9\",\"target_port\":22}],\n"
@@ -190,12 +192,16 @@ bool write_sample(const std::string& path) {
 }
 
 bool same_board(const BoardConfig& a, const BoardConfig& b) {
+    bool quick = a.quick_commands.size() == b.quick_commands.size();
+    for (std::size_t i = 0; quick && i < a.quick_commands.size(); ++i)
+        quick = a.quick_commands[i].label == b.quick_commands[i].label &&
+                a.quick_commands[i].command == b.quick_commands[i].command;
     return a.name == b.name && a.serial_device == b.serial_device &&
            a.baudrate == b.baudrate && a.databits == b.databits &&
            a.parity == b.parity && a.stopbits_x10 == b.stopbits_x10 &&
            a.flowcontrol == b.flowcontrol && a.encoding == b.encoding &&
            a.line_ending == b.line_ending && a.timestamp == b.timestamp &&
-           a.password == b.password;
+           a.password == b.password && a.username == b.username && quick;
 }
 
 bool run_config() {
@@ -240,6 +246,115 @@ bool run_config() {
     report("T1-1", "配置往返 + patch/delete", ok,
            "load=" + std::to_string(load_ok) + " rtt=" + std::to_string(roundtrip) +
            " patch=" + std::to_string(patch_ok2) + " del=" + std::to_string(del_ok2));
+    return ok;
+}
+
+// 旧版 boards 是对象；patch/delete 必须无损转成数组，且新 relay_devices 不能被旧 relays 覆盖
+bool run_config_migration() {
+    std::string dir = temp_root("config_migration");
+    std::string path = util::join_path(dir, "legacy.json");
+    const std::string json =
+        "{"
+        "\"boards\":{"
+        "\"b1\":{\"serial_device\":\"COM3\",\"baudrate\":115200},"
+        "\"b2\":{\"serial_device\":\"COM4\",\"baudrate\":921600}},"
+        "\"relays\":{\"old\":{\"windows_port\":\"COM9\",\"channels\":2}},"
+        "\"relay_devices\":[{\"name\":\"new\",\"windows_port\":\"COM10\",\"channels\":4}]"
+        "}\n";
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    bool wrote = f && std::fwrite(json.data(), 1, json.size(), f) == json.size();
+    if (f) std::fclose(f);
+    if (!wrote) {
+        report("T1-9", "旧配置迁移", false, "cannot write legacy json");
+        return false;
+    }
+
+    AppConfig cfg;
+    bool loaded = config_load(cfg, path);
+    std::string err;
+    bool patch = config_patch_board(path, "b1", "{\"baudrate\":460800}", &err);
+    AppConfig patched;
+    bool reloaded = config_load(patched, path);
+    bool del = config_delete_board(path, "b2", &err);
+    AppConfig deleted;
+    bool del_reload = config_load(deleted, path);
+    bool ok = loaded && cfg.boards.size() == 2 && cfg.boards[0].name == "b1" &&
+              cfg.boards[1].name == "b2" && cfg.relays.size() == 1 &&
+              cfg.relays[0].name == "new" &&
+              patch && reloaded && patched.boards.size() == 2 &&
+              patched.boards[0].baudrate == 460800 && patched.boards[1].name == "b2" &&
+              del && del_reload && deleted.boards.size() == 1 && deleted.boards[0].name == "b1";
+    report("T1-9", "旧配置对象/继电器迁移", ok,
+           "load=" + std::to_string(loaded && cfg.boards.size() == 2) +
+           " relay=" + std::to_string(cfg.relays.size() == 1 && cfg.relays[0].name == "new") +
+           " patch=" + std::to_string(patch && patched.boards.size() == 2));
+    return ok;
+}
+
+// 编辑串口参数时，对话框没暴露的密码/用户名/缓冲/日志/按钮/快捷指令必须保留
+bool run_upsert_preserve() {
+    std::string dir = temp_root("upsert_preserve");
+    wchar_t old_cwd[MAX_PATH] = L"";
+    GetCurrentDirectoryW(MAX_PATH, old_cwd);
+    std::wstring wdir;
+    {
+        int n = MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), static_cast<int>(dir.size()), nullptr, 0);
+        if (n > 0) {
+            wdir.resize(static_cast<std::size_t>(n));
+            MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), static_cast<int>(dir.size()), wdir.data(), n);
+        }
+    }
+    if (wdir.empty() || !SetCurrentDirectoryW(wdir.c_str())) {
+        report("T1-10", "通道编辑保留隐藏字段", false, "cannot chdir");
+        return false;
+    }
+
+    AppConfig seed;
+    seed.abs_path = "ssh_bridge_config.json";
+    BoardConfig b;
+    b.name = "b1";
+    b.serial_device = "COM3";
+    b.log_enabled = false;
+    b.username = "root";
+    b.password = "secret";
+    b.password_present = true;
+    b.buffer_size = 65536;
+    b.log_dir = "logs";
+    b.timestamp = false;
+    b.quick_commands.push_back({"Q1", "ls -l"});
+    BoardActionConfig btn;
+    btn.id = "b1.btn";
+    btn.label = "BTN";
+    btn.commands = {"echo hi"};
+    b.buttons.push_back(btn);
+    seed.boards.push_back(b);
+    bool wrote = config_save(seed);
+
+    bool ok = false;
+    std::string detail;
+    if (!wrote) {
+        detail = "seed save failed";
+    } else {
+        AppCore core;
+        bool init_ok = core.init(dir);
+        BoardConfig edit;
+        edit.name = "b1";
+        edit.serial_device = "COM6";
+        edit.log_enabled = false;
+        std::string err;
+        bool upsert = init_ok && core.upsert_serial(edit, "b1", &err);
+        const BoardConfig* after = core.board_of("b1");
+        ok = upsert && after &&
+             after->serial_device == "COM6" &&
+             after->username == "root" && after->password == "secret" && after->password_present &&
+             after->buffer_size == 65536 && after->log_dir == "logs" && !after->timestamp &&
+             after->quick_commands.size() == 1 && after->quick_commands[0].command == "ls -l" &&
+             after->buttons.size() == 1 && after->buttons[0].label == "BTN";
+        detail = "init=" + std::to_string(init_ok) + " upsert=" + std::to_string(upsert) +
+                 (err.empty() ? "" : " err=" + err);
+    }
+    SetCurrentDirectoryW(old_cwd);
+    report("T1-10", "通道编辑保留隐藏字段", ok, detail);
     return ok;
 }
 
@@ -416,6 +531,8 @@ int selftest_main(const std::vector<std::string>& args) {
     }
     if (mode == "ring" || mode == "all") ok = run_ring() && ok;
     if (mode == "config" || mode == "all") ok = run_config() && ok;
+    if (mode == "config" || mode == "all") ok = run_config_migration() && ok;
+    if (mode == "config" || mode == "all") ok = run_upsert_preserve() && ok;
     if (mode == "serial") {
         bool loop = args.size() >= 2 && args[1].rfind("loop:", 0) == 0;
         if (args.size() < 2 || (!loop && args.size() < 3)) {

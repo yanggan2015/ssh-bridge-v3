@@ -13,7 +13,7 @@ namespace sb3 {
 
 class CmdQueue {
 public:
-    void push(const void* data, std::size_t n);
+    bool push(const void* data, std::size_t n);
     bool pop_all(std::string* out, unsigned wait_ms);
     void close();
     void reset();

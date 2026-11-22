@@ -33,7 +33,7 @@ public:
     bool connect(const SshTarget& t, std::string* err);
     void close();
     bool connected() const;
-    const std::string& last_error() const;
+    std::string last_error() const;
     // 0 = 不限速；单位字节/秒，按 64 KB 块在传输线程内节流
     void set_speed_limit(std::uint64_t bytes_per_sec);
 

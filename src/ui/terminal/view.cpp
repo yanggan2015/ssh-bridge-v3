@@ -561,8 +561,8 @@ bool TerminalView::copy_selection() {
     return copy_to_clipboard(text);
 }
 
-void TerminalView::paste_clipboard() {
-    if (!OpenClipboard(hwnd_)) return;
+bool TerminalView::paste_clipboard() {
+    if (!OpenClipboard(hwnd_)) return false;
     std::string utf8;
     HANDLE h = GetClipboardData(CF_UNICODETEXT);
     if (h) {
@@ -573,8 +573,12 @@ void TerminalView::paste_clipboard() {
         }
     }
     CloseClipboard();
-    if (utf8.empty()) return;
+    if (utf8.empty() || slots_.empty()) return false;
+    const Slot& slot = slots_[static_cast<std::size_t>(active_)];
+    if (slot.channel.empty()) return false;
+    if (!core_ || !core_->find(slot.channel)) return false;
     send_active(term::encode_paste(utf8));
+    return true;
 }
 
 void TerminalView::send_active(const std::string& bytes) {
@@ -954,10 +958,16 @@ LRESULT TerminalView::handle(UINT msg, WPARAM wp, LPARAM lp) {
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
         if (ctrl && (wp == 'C' || wp == 'V')) {
-            if (wp == 'C') copy_selection();
-            else paste_clipboard();
-            swallow_char_ = true;
-            return 0;
+            if (wp == 'V') {
+                paste_clipboard();
+                swallow_char_ = true;
+                return 0;
+            }
+            // 有选区才复制；没有选区时放行，让 Ctrl+C 作为 SIGINT 发给远端
+            if (copy_selection()) {
+                swallow_char_ = true;
+                return 0;
+            }
         }
         if (term::is_special_key(static_cast<UINT>(wp))) {
             send_active(term::encode_key(static_cast<UINT>(wp), ctrl, alt, shift));
@@ -981,7 +991,9 @@ LRESULT TerminalView::handle(UINT msg, WPARAM wp, LPARAM lp) {
             send_active(line_ending_bytes());
             return 0;
         }
-        send_active(term::encode_char(static_cast<unsigned int>(wp), ctrl, alt));
+        std::string bytes = term::encode_char(static_cast<unsigned int>(wp), ctrl, alt);
+        if (alt && !ctrl && !bytes.empty()) bytes.insert(0, "\x1b");  // Alt+字符 → ESC 前缀
+        send_active(bytes);
         return 0;
     }
 

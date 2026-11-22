@@ -536,8 +536,9 @@ BoardConfig ChannelDialog::collect_board() const {
     b.name = util::trim(b.name);
     b.serial_device = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdDevice)));
     b.baudrate = number_of(chan_dlg::kIdBaud, 115200);
-    b.databits = 5 + static_cast<int>(SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdDatabits),
-                                                   CB_GETCURSEL, 0, 0));
+    int dbidx = static_cast<int>(SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdDatabits),
+                                              CB_GETCURSEL, 0, 0));
+    b.databits = (dbidx >= 0 && dbidx <= 3) ? 5 + dbidx : 8;
     int pidx = static_cast<int>(SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdParity), CB_GETCURSEL, 0, 0));
     static const char* kP[] = {"N", "E", "O", "M", "S"};
     b.parity = kP[pidx >= 0 && pidx < 5 ? pidx : 0];
@@ -647,20 +648,33 @@ void ChannelDialog::test_open() {
             return;
         }
         WSADATA wsa{};
-        WSAStartup(MAKEWORD(2, 2), &wsa);
-        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+            set_hint(L"网络初始化失败", false);
+            return;
+        }
+        addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+        addrinfo* addrs = nullptr;
+        std::string port_s = std::to_string(port);
+        int gai = getaddrinfo(host.c_str(), port_s.c_str(), &hints, &addrs);
+        if (gai != 0 || !addrs) {
+            WSACleanup();
+            set_hint(L"主机名无法解析：" + widen(host), false);
+            return;
+        }
+        SOCKET s = socket(addrs->ai_family, addrs->ai_socktype, addrs->ai_protocol);
         if (s == INVALID_SOCKET) {
+            freeaddrinfo(addrs);
             WSACleanup();
             set_hint(L"创建套接字失败", false);
             return;
         }
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(static_cast<unsigned short>(port));
-        inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
         unsigned long nb = 1;
         ioctlsocket(s, FIONBIO, &nb);
-        connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+        connect(s, addrs->ai_addr, static_cast<int>(addrs->ai_addrlen));
+        freeaddrinfo(addrs);
         fd_set wf, ef;
         FD_ZERO(&wf);
         FD_ZERO(&ef);
@@ -670,10 +684,15 @@ void ChannelDialog::test_open() {
         tv.tv_sec = 0;
         tv.tv_usec = 900000;
         int sel = select(0, nullptr, &wf, &ef, &tv);
-        bool ok = sel > 0 && FD_ISSET(s, &wf);
+        bool ok = false;
+        if (sel > 0 && FD_ISSET(s, &wf)) {
+            int err = 0;
+            int len = sizeof(err);
+            ok = getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&err), &len) == 0 && err == 0;
+        }
         closesocket(s);
         WSACleanup();
-        set_hint(ok ? L"TCP 可连通（端口开放）" : L"连不上：超时或被拒绝", ok);
+        set_hint(ok ? L"TCP 可连通（端口开放）" : L"连不上：超时、域名解析失败或连接被拒绝", ok);
         return;
     }
     std::string dev = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdDevice)));

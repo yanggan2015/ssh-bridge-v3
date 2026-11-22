@@ -12,6 +12,11 @@ OUTDIR   ?= output
 BUILDDIR := $(OUTDIR)/build
 APP      := $(BUILDDIR)/ssh_bridge3.exe
 
+# 固定使用 MSYS2 的 POSIX sh：避免从 cmd/PowerShell 启动时 make 误用 cmd，
+# 导致 mkdir -p / rm -rf 这类 POSIX 命令失败。
+SHELL    := $(MINGW)/../usr/bin/sh.exe
+DEPFLAGS := -MMD -MP
+
 CXXFLAGS ?= -O2 -Wall -Wextra -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE -DLIBSSH_STATIC \
             -finput-charset=UTF-8 -fexec-charset=UTF-8 -std=c++17 \
             -Isrc -Isrc/third_party -Isrc/third_party/lua -Isrc/third_party/winnfsd/src -I$(MINGW)/include -DUI_BRIDGE_ENABLE
@@ -66,6 +71,11 @@ SOURCES := \
   src/services/board_actions/board_action_runner.cpp \
   src/services/script/script_lua.cpp \
   src/services/script/script_lines.cpp \
+  src/services/inbound/inbound_gateway.cpp \
+  src/services/tcpfwd/tcp_forward.cpp \
+  src/services/tunnel/tunnel_manager.cpp \
+  src/services/discovery/discovery_service.cpp \
+  src/services/web/web_console.cpp \
   src/services/service_manager.cpp
 
 THIRD_SOURCES := \
@@ -96,6 +106,7 @@ CSOURCES := \
 OBJS := $(patsubst src/%.cpp,$(BUILDDIR)/%.o,$(SOURCES)) \
         $(patsubst src/%.c,$(BUILDDIR)/%.o,$(CSOURCES)) \
         $(patsubst src/%.cpp,$(BUILDDIR)/%.o,$(THIRD_SOURCES))
+DEPS := $(OBJS:.o=.d)
 
 RC      := $(BUILDDIR)/app/app.res.o
 WINDRES ?= $(MINGW)/bin/windres.exe
@@ -104,27 +115,52 @@ WINDRES ?= $(MINGW)/bin/windres.exe
 
 all: dirs $(APP)
 
+DIRS := $(BUILDDIR) \
+        $(BUILDDIR)/app \
+        $(BUILDDIR)/core \
+        $(BUILDDIR)/core/util \
+        $(BUILDDIR)/core/logbuf \
+        $(BUILDDIR)/core/config \
+        $(BUILDDIR)/core/ssh \
+        $(BUILDDIR)/core/bridge \
+        $(BUILDDIR)/core/bridge/serial \
+        $(BUILDDIR)/core/bridge/ssh \
+        $(BUILDDIR)/ui \
+        $(BUILDDIR)/ui/shell \
+        $(BUILDDIR)/ui/dialogs \
+        $(BUILDDIR)/ui/sftp \
+        $(BUILDDIR)/ui/tray \
+        $(BUILDDIR)/ui/terminal \
+        $(BUILDDIR)/ui/aibridge \
+        $(BUILDDIR)/ui/services \
+        $(BUILDDIR)/services \
+        $(BUILDDIR)/services/relay \
+        $(BUILDDIR)/services/tftp \
+        $(BUILDDIR)/services/nfs \
+        $(BUILDDIR)/services/share \
+        $(BUILDDIR)/services/board_actions \
+        $(BUILDDIR)/services/script \
+        $(BUILDDIR)/services/inbound \
+        $(BUILDDIR)/services/tcpfwd \
+        $(BUILDDIR)/services/tunnel \
+        $(BUILDDIR)/services/discovery \
+        $(BUILDDIR)/services/web \
+        $(BUILDDIR)/third_party \
+        $(BUILDDIR)/third_party/winnfsd \
+        $(BUILDDIR)/third_party/winnfsd/src \
+        $(BUILDDIR)/third_party/lua
+
 dirs:
-> @mkdir -p "$(BUILDDIR)/app" "$(BUILDDIR)/core/util" "$(BUILDDIR)/core/logbuf" \
->          "$(BUILDDIR)/core/config" "$(BUILDDIR)/core/bridge/serial" \
->          "$(BUILDDIR)/core/ssh" "$(BUILDDIR)/core/bridge/ssh" \
->          "$(BUILDDIR)/ui/shell" "$(BUILDDIR)/ui/dialogs" "$(BUILDDIR)/ui/sftp" "$(BUILDDIR)/ui/tray" "$(BUILDDIR)/ui/terminal" \
->          "$(BUILDDIR)/ui/aibridge" "$(BUILDDIR)/third_party" \
->          "$(BUILDDIR)/ui/services" \
->          "$(BUILDDIR)/services/relay" "$(BUILDDIR)/services/tftp" "$(BUILDDIR)/services/nfs" \
->          "$(BUILDDIR)/services/share" "$(BUILDDIR)/services" \
->          "$(BUILDDIR)/services/board_actions" "$(BUILDDIR)/services/script" \
->          "$(BUILDDIR)/core/util" \
->          "$(BUILDDIR)/third_party/winnfsd/src" "$(BUILDDIR)/third_party/lua"
+> @mkdir -p $(DIRS)
 
-$(BUILDDIR)/third_party/winnfsd/src/%.o: src/third_party/winnfsd/src/%.cpp
-> $(CXX) $(CXXFLAGS) -UUNICODE -U_UNICODE -w -c -o $@ $<
+$(BUILDDIR)/third_party/winnfsd/src/%.o: src/third_party/winnfsd/src/%.cpp | dirs
+> $(CXX) $(CXXFLAGS) $(DEPFLAGS) -UUNICODE -U_UNICODE -w -c -o $@ $<
 
-$(BUILDDIR)/%.o: src/%.cpp
-> $(CXX) $(CXXFLAGS) -c -o $@ $<
+$(BUILDDIR)/%.o: src/%.cpp | dirs
+> $(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
-$(BUILDDIR)/%.o: src/%.c
-> $(CC) $(CFLAGS) -c -o $@ $<
+$(BUILDDIR)/%.o: src/%.c | dirs
+> $(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(APP): $(OBJS) $(RC)
 > $(CXX) $(OBJS) $(RC) -o $@ $(LIBS)
@@ -140,5 +176,7 @@ rebuild: clean all
 
 run: all
 > "$(APP)"
+
+-include $(DEPS)
 
 

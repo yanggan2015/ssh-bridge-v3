@@ -8,6 +8,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $root 'output\build\ssh_bridge3.exe'
 $resultFile = Join-Path $root 'output\selftest\result.txt'
+$runDir = Join-Path $root 'output\step1\run'
+New-Item -ItemType Directory -Force -Path $runDir | Out-Null
+$runConfig = Join-Path $runDir 'ssh_bridge_config.json'
+[System.IO.File]::WriteAllText($runConfig, '{}', (New-Object System.Text.UTF8Encoding($false)))
+$cfgHashBefore = (Get-FileHash -LiteralPath $runConfig -Algorithm SHA256).Hash
 $rows = @()
 
 function Check([string]$id, [string]$desc, [bool]$ok, [string]$detail = '') {
@@ -78,7 +83,7 @@ if (Test-Path $exe) {
     # 同上：偶发“起来了但窗口没建、标题为空”，只重试一次。
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         Kill-App
-        $proc = Start-Process -FilePath $exe -PassThru
+        $proc = Start-Process -FilePath $exe -WorkingDirectory $runDir -PassThru
         $hwnd = [IntPtr]::Zero
         for ($i = 0; $i -lt 40; $i++) {
             Start-Sleep -Milliseconds 250
@@ -96,6 +101,8 @@ if (Test-Path $exe) {
     $instances = @(Get-Process -Name 'ssh_bridge3' -ErrorAction SilentlyContinue).Count
     Check 'G-0' '单进程且无监听端口' ($alive -and $instances -eq 1) "instances=$instances"
     Check 'G-2' '启动存活' ($alive -and $hwnd -ne [IntPtr]::Zero) "title='$title'"
+    $cfgHashAfter = (Get-FileHash -LiteralPath $runConfig -Algorithm SHA256).Hash
+    Check 'G-8' '启动不重写配置文件' ($alive -and $cfgHashAfter -eq $cfgHashBefore) "before=$($cfgHashBefore.Substring(0,8)) after=$($cfgHashAfter.Substring(0,8))"
 
     if ($alive) {
         $listen = (& netstat -ano | Select-String -Pattern "\s$($proc.Id)$" | Select-String -Pattern 'LISTENING' | Out-String)

@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <functional>
+#include <memory>
 #include <string>
 
 #include "core/bridge/bridge.h"
@@ -53,7 +54,7 @@ struct AsyncBoardResult {
 };
 
 void run_board_action_async(const AppConfig& cfg, const std::string& channel,
-                            const BoardActionConfig& action, IBridge* bridge,
+                            const BoardActionConfig& action, std::shared_ptr<IBridge> bridge,
                             const PortInUseFn& port_in_use, HWND notify, UINT msg,
                             UINT progress_msg = 0);
 

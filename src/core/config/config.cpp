@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
+#include <algorithm>
 
 #include "core/util/util.h"
 
@@ -58,10 +59,16 @@ std::string home_dir() {
 }
 
 bool read_text(const std::string& path, std::string* out) {
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!out) return false;
+    std::wstring wpath = to_wide(path);
+    std::FILE* f = _wfopen(wpath.c_str(), L"rb");
     if (!f) return false;
     std::fseek(f, 0, SEEK_END);
     long size = std::ftell(f);
+    if (size < 0 || size > 256L * 1024 * 1024) {
+        std::fclose(f);
+        return false;
+    }
     std::fseek(f, 0, SEEK_SET);
     out->assign(size > 0 ? static_cast<std::size_t>(size) : 0, '\0');
     if (size > 0) {
@@ -74,18 +81,20 @@ bool read_text(const std::string& path, std::string* out) {
 
 bool write_text(const std::string& path, const std::string& data, std::string* err) {
     std::string tmp = path + ".tmp";
-    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    std::FILE* f = _wfopen(to_wide(tmp).c_str(), L"wb");
     if (!f) {
         if (err) *err = "cannot open " + tmp;
         return false;
     }
     bool ok = std::fwrite(data.data(), 1, data.size(), f) == data.size();
-    std::fclose(f);
+    if (std::fclose(f) != 0) ok = false;
     if (!ok) {
+        _wremove(to_wide(tmp).c_str());     // 不留半截临时文件
         if (err) *err = "write failed: " + tmp;
         return false;
     }
     if (!MoveFileExW(to_wide(tmp).c_str(), to_wide(path).c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        _wremove(to_wide(tmp).c_str());
         if (err) *err = "cannot replace " + path;
         return false;
     }
@@ -245,10 +254,12 @@ cJSON* button_to_json(const BoardActionConfig& b) {
 void load_default(const cJSON* root, DefaultConfig* def) {
     const cJSON* o = cJSON_GetObjectItemCaseSensitive(root, "default");
     if (!cJSON_IsObject(o)) return;
-    def->username = jstr(o, "username", def->username.c_str());
+    const cJSON* user = cJSON_GetObjectItemCaseSensitive(o, "username");
+    if (cJSON_IsString(user) && user->valuestring) def->username = user->valuestring;
     if (jhas(o, "password")) def->password = jstr(o, "password", "");
     int buf = jint(o, "buffer_size", static_cast<int>(def->buffer_size));
-    def->buffer_size = buf > 0 ? static_cast<std::uint32_t>(buf) : def->buffer_size;
+    def->buffer_size = buf > 0 ? static_cast<std::uint32_t>(std::min(buf, 256 * 1024 * 1024))
+                               : def->buffer_size;
     def->log_enabled = jbool(o, "log_enabled", def->log_enabled);
     def->work_dir = jstr(o, "work_dir", "");
     def->log_dir = jstr(o, "log_dir", "");
@@ -287,12 +298,14 @@ void load_board(const cJSON* o, const char* fallback_name, BoardConfig* b) {
     b->encoding = jstr(o, "encoding", "utf-8");
     b->auto_open = jbool(o, "auto_open", false);
     b->timestamp = jbool(o, "timestamp", true);
-    b->buffer_size = static_cast<std::uint32_t>(jint(o, "buffer_size", 0));
+    int bb = jint(o, "buffer_size", 0);
+    b->buffer_size = bb > 0 ? static_cast<std::uint32_t>(std::min(bb, 256 * 1024 * 1024)) : 0;
     b->log_enabled = jbool(o, "log_enabled", b->log_enabled);
     b->log_dir = jstr(o, "log_dir", "");
     b->password_present = jhas(o, "password");
     b->password = jstr(o, "password", "");
     b->username = jstr(o, "username", "root");
+    b->discoverable = jbool(o, "discoverable", false);
     load_buttons(o, &b->buttons);
     load_quick_commands(o, &b->quick_commands);
 }
@@ -309,9 +322,11 @@ void load_ssh(const cJSON* o, SSHLinkConfig* s) {
     s->height = jint(o, "height", 32);
     s->connect_timeout_ms = jint(o, "connect_timeout_ms", jint(o, "connect_timeout", 5000));
     s->keepalive_s = jint(o, "keepalive", 3);
-    s->buffer_size = static_cast<std::uint32_t>(jint(o, "buffer_size", 0));
+    int sb = jint(o, "buffer_size", 0);
+    s->buffer_size = sb > 0 ? static_cast<std::uint32_t>(std::min(sb, 256 * 1024 * 1024)) : 0;
     s->log_enabled = jbool(o, "log_enabled", true);
     s->log_dir = jstr(o, "log_dir", "");
+    s->discoverable = jbool(o, "discoverable", false);
     load_buttons(o, &s->buttons);
     load_quick_commands(o, &s->quick_commands);
 }
@@ -372,6 +387,7 @@ void load_root(const cJSON* root, AppConfig* out) {
     if (cJSON_IsObject(web)) {
         out->web.enabled = jbool(web, "enable", false);
         out->web.port = jint(web, "port", 18081);
+        out->web.token = jstr(web, "token", "");
     }
     const cJSON* agent = cJSON_GetObjectItemCaseSensitive(root, "agent");
     if (cJSON_IsObject(agent)) {
@@ -421,9 +437,37 @@ void load_root(const cJSON* root, AppConfig* out) {
         out->nfs.gid = jint(nfs, "gid", 0);
         out->nfs.root = jstr(nfs, "root", "");
     }
+    const cJSON* tfwd = cJSON_GetObjectItemCaseSensitive(root, "tcp_forward");
+    if (cJSON_IsObject(tfwd)) {
+        out->tcp_fwd.enable = jbool(tfwd, "enable", false);
+        out->tcp_fwd.listen_ip = jstr(tfwd, "listen_ip", "0.0.0.0");
+        out->tcp_fwd.port_base = jint(tfwd, "port_base", 22000);
+        out->tcp_fwd.target_port = jint(tfwd, "target_port", 22);
+        out->tcp_fwd.board_cidr = jstr(tfwd, "board_cidr", "192.168.1.0/24");
+    }
+    const cJSON* tun = cJSON_GetObjectItemCaseSensitive(root, "tunnel");
+    if (cJSON_IsObject(tun)) {
+        out->tunnel.enable = jbool(tun, "enable", false);
+        out->tunnel.http_enable = jbool(tun, "map_http", jbool(tun, "http_enable", true));
+        out->tunnel.ssh_enable = jbool(tun, "map_inbound_ssh", jbool(tun, "ssh_enable", false));
+        out->tunnel.exe_path = jstr(tun, "exe_path", "");
+        out->tunnel.server_addr = jstr(tun, "server_addr", "");
+        out->tunnel.server_port = jint(tun, "server_port", 7000);
+        out->tunnel.token = jstr(tun, "token", "");
+        out->tunnel.http_local_port = jint(tun, "local_port", jint(tun, "http_local_port", 18081));
+        out->tunnel.http_remote_port = jint(tun, "remote_port", jint(tun, "http_remote_port", 0));
+        out->tunnel.ssh_local_port = jint(tun, "ssh_local_port", 2222);
+        out->tunnel.ssh_remote_port = jint(tun, "ssh_remote_port", 0);
+    }
+    const cJSON* disc = cJSON_GetObjectItemCaseSensitive(root, "discovery");
+    if (cJSON_IsObject(disc)) {
+        out->discovery.enable = jbool(disc, "enable", false);
+        out->discovery.port = jint(disc, "port", 18071);
+    }
+    // 新键 relay_devices 优先；只有旧配置仅有 relays 时才回退
     const cJSON* relays = cJSON_GetObjectItemCaseSensitive(root, "relay_devices");
-    const cJSON* relayObj = cJSON_GetObjectItemCaseSensitive(root, "relays");
-    if (cJSON_IsObject(relayObj)) relays = relayObj;
+    if (!cJSON_IsArray(relays) && !cJSON_IsObject(relays))
+        relays = cJSON_GetObjectItemCaseSensitive(root, "relays");
     if (cJSON_IsArray(relays) || cJSON_IsObject(relays)) {
         const cJSON* it = nullptr;
         cJSON_ArrayForEach(it, relays) {
@@ -463,6 +507,7 @@ cJSON* board_to_json(const BoardConfig& b) {
     cJSON_AddStringToObject(o, "log_dir", b.log_dir.c_str());
     cJSON_AddStringToObject(o, "password", b.password.c_str());
     cJSON_AddStringToObject(o, "username", b.username.c_str());
+    cJSON_AddBoolToObject(o, "discoverable", b.discoverable);
     cJSON* btns = cJSON_AddArrayToObject(o, "buttons");
     for (const BoardActionConfig& a : b.buttons) cJSON_AddItemToArray(btns, button_to_json(a));
     cJSON_AddItemToObject(o, "quick_commands", quick_commands_to_json(b.quick_commands));
@@ -484,6 +529,7 @@ cJSON* ssh_to_json(const SSHLinkConfig& s) {
     cJSON_AddNumberToObject(o, "buffer_size", static_cast<double>(s.buffer_size));
     cJSON_AddBoolToObject(o, "log_enabled", s.log_enabled);
     cJSON_AddStringToObject(o, "log_dir", s.log_dir.c_str());
+    cJSON_AddBoolToObject(o, "discoverable", s.discoverable);
     cJSON* btns = cJSON_AddArrayToObject(o, "buttons");
     for (const BoardActionConfig& a : s.buttons) cJSON_AddItemToArray(btns, button_to_json(a));
     cJSON_AddItemToObject(o, "quick_commands", quick_commands_to_json(s.quick_commands));
@@ -524,6 +570,18 @@ void save_root(cJSON* root, const AppConfig& cfg) {
     cJSON_AddBoolToObject(inb, "enable", cfg.inbound.enabled);
     cJSON_DeleteItemFromObjectCaseSensitive(inb, "port");
     cJSON_AddNumberToObject(inb, "port", cfg.inbound.port);
+
+    cJSON* web = cJSON_GetObjectItemCaseSensitive(root, "web");
+    if (!cJSON_IsObject(web)) {
+        cJSON_DeleteItemFromObjectCaseSensitive(root, "web");
+        web = cJSON_AddObjectToObject(root, "web");
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(web, "enable");
+    cJSON_AddBoolToObject(web, "enable", cfg.web.enabled);
+    cJSON_DeleteItemFromObjectCaseSensitive(web, "port");
+    cJSON_AddNumberToObject(web, "port", cfg.web.port);
+    cJSON_DeleteItemFromObjectCaseSensitive(web, "token");
+    cJSON_AddStringToObject(web, "token", cfg.web.token.c_str());
 
     cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
     if (!cJSON_IsObject(ui)) {
@@ -581,6 +639,34 @@ void save_root(cJSON* root, const AppConfig& cfg) {
     cJSON_AddNumberToObject(nfs, "gid", cfg.nfs.gid);
     cJSON_AddStringToObject(nfs, "root", cfg.nfs.root.c_str());
 
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "tcp_forward");
+    cJSON* tfwd = cJSON_AddObjectToObject(root, "tcp_forward");
+    cJSON_AddBoolToObject(tfwd, "enable", cfg.tcp_fwd.enable);
+    cJSON_AddStringToObject(tfwd, "listen_ip", cfg.tcp_fwd.listen_ip.c_str());
+    cJSON_AddNumberToObject(tfwd, "port_base", cfg.tcp_fwd.port_base);
+    cJSON_AddNumberToObject(tfwd, "target_port", cfg.tcp_fwd.target_port);
+    cJSON_AddStringToObject(tfwd, "board_cidr", cfg.tcp_fwd.board_cidr.c_str());
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "tunnel");
+    cJSON* tun = cJSON_AddObjectToObject(root, "tunnel");
+    cJSON_AddBoolToObject(tun, "enable", cfg.tunnel.enable);
+    cJSON_AddBoolToObject(tun, "map_http", cfg.tunnel.http_enable);
+    cJSON_AddBoolToObject(tun, "map_inbound_ssh", cfg.tunnel.ssh_enable);
+    cJSON_AddStringToObject(tun, "exe_path", cfg.tunnel.exe_path.c_str());
+    cJSON_AddStringToObject(tun, "server_addr", cfg.tunnel.server_addr.c_str());
+    cJSON_AddNumberToObject(tun, "server_port", cfg.tunnel.server_port);
+    cJSON_AddStringToObject(tun, "token", cfg.tunnel.token.c_str());
+    cJSON_AddNumberToObject(tun, "local_port", cfg.tunnel.http_local_port);
+    cJSON_AddNumberToObject(tun, "remote_port", cfg.tunnel.http_remote_port);
+    cJSON_AddNumberToObject(tun, "ssh_local_port", cfg.tunnel.ssh_local_port);
+    cJSON_AddNumberToObject(tun, "ssh_remote_port", cfg.tunnel.ssh_remote_port);
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "discovery");
+    cJSON* disc = cJSON_AddObjectToObject(root, "discovery");
+    cJSON_AddBoolToObject(disc, "enable", cfg.discovery.enable);
+    cJSON_AddNumberToObject(disc, "port", cfg.discovery.port);
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "relays");   // 清掉旧键，避免下次加载被旧对象覆盖
     cJSON_DeleteItemFromObjectCaseSensitive(root, "relay_devices");
     cJSON* relays = cJSON_AddArrayToObject(root, "relay_devices");
     for (const RelayDeviceConfig& r : cfg.relays) {
@@ -666,6 +752,33 @@ bool config_save(const AppConfig& cfg) {
     return write_text(cfg.abs_path, data, nullptr);
 }
 
+namespace {
+
+// boards 兼容旧版对象写法；patch/delete 前先无损转成数组，避免把旧板卡清空
+cJSON* ensure_boards_array(cJSON* root) {
+    cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, "boards");
+    if (cJSON_IsArray(arr)) return arr;
+    cJSON* old = arr;
+    cJSON* out = cJSON_CreateArray();
+    if (!out) return nullptr;
+    if (cJSON_IsObject(old)) {
+        cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, old) {
+            if (!cJSON_IsObject(it)) continue;
+            cJSON* dup = cJSON_Duplicate(it, 1);
+            if (!dup) continue;
+            if (!cJSON_GetObjectItemCaseSensitive(dup, "name") && it->string)
+                cJSON_AddStringToObject(dup, "name", it->string);
+            cJSON_AddItemToArray(out, dup);
+        }
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "boards");
+    cJSON_AddItemToObject(root, "boards", out);
+    return out;
+}
+
+}  // namespace
+
 bool config_patch_board(const std::string& path, const std::string& name,
                         const std::string& json_patch, std::string* err) {
     if (path.empty()) {
@@ -691,10 +804,12 @@ bool config_patch_board(const std::string& path, const std::string& name,
         return false;
     }
 
-    cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, "boards");
+    cJSON* arr = ensure_boards_array(root);
     if (!cJSON_IsArray(arr)) {
-        cJSON_DeleteItemFromObjectCaseSensitive(root, "boards");
-        arr = cJSON_AddArrayToObject(root, "boards");
+        cJSON_Delete(patch);
+        cJSON_Delete(root);
+        if (err) *err = "cannot create boards array";
+        return false;
     }
     cJSON* target = nullptr;
     cJSON* it = nullptr;
@@ -742,13 +857,15 @@ bool config_delete_board(const std::string& path, const std::string& name,
         if (err) *err = "bad json: " + path;
         return false;
     }
-    cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, "boards");
+    cJSON* arr = ensure_boards_array(root);
     int idx = 0;
     int found = -1;
     cJSON* it = nullptr;
-    cJSON_ArrayForEach(it, arr) {
-        if (name == jstr(it, "name", "")) { found = idx; break; }
-        ++idx;
+    if (cJSON_IsArray(arr)) {
+        cJSON_ArrayForEach(it, arr) {
+            if (name == jstr(it, "name", "")) { found = idx; break; }
+            ++idx;
+        }
     }
     if (found >= 0) cJSON_DeleteItemFromArray(arr, found);
     char* dumped = cJSON_Print(root);
@@ -761,6 +878,32 @@ bool config_delete_board(const std::string& path, const std::string& name,
     }
     data.push_back('\n');
     return write_text(path, data, err);
+}
+
+std::string config_export_json(const AppConfig& cfg) {
+    cJSON* root = cJSON_CreateObject();
+    if (!root) return "{}";
+    save_root(root, cfg);
+    char* text = cJSON_Print(root);
+    std::string out = text ? text : "{}";
+    cJSON_free(text);
+    cJSON_Delete(root);
+    return out;
+}
+
+bool config_parse_json(const std::string& text, AppConfig* out, std::string* err) {
+    if (!out) return false;
+    *out = AppConfig();
+    cJSON* root = cJSON_Parse(text.c_str());
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        if (err) *err = "配置必须是 JSON 对象";
+        return false;
+    }
+    load_root(root, out);
+    cJSON_Delete(root);
+    if (err) err->clear();
+    return true;
 }
 
 std::string config_resolve_password(const AppConfig& cfg, const BoardConfig& board) {

@@ -43,7 +43,7 @@ void ChannelCore::on_rx(const void* data, std::size_t n) {
         }
     }
     log_.append(data, n);
-    if (kick_) kick_();
+    kick();
 }
 
 }  // namespace sb3

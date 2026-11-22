@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -38,12 +39,24 @@ public:
     LogBuffer& log() { return log_; }
     const LogBuffer& log() const { return log_; }
     const std::string& name() const { return name_; }
-    void set_kick(std::function<void()> fn) { kick_ = std::move(fn); }
+    void set_kick(std::function<void()> fn) {
+        std::lock_guard<std::mutex> lk(kick_mu_);
+        kick_ = std::move(fn);
+    }
+    void kick() {
+        std::function<void()> fn;
+        {
+            std::lock_guard<std::mutex> lk(kick_mu_);
+            fn = kick_;
+        }
+        if (fn) fn();
+    }
 
 private:
     std::string name_;
     LogBuffer log_;
     std::function<void()> kick_;
+    mutable std::mutex kick_mu_;
     std::atomic<std::uint64_t> tx_bytes_{0};
     std::atomic<std::uint64_t> rx_bytes_{0};
     std::atomic<std::uint64_t> tx_mark_us_{0};

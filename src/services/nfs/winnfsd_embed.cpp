@@ -128,7 +128,9 @@ int winnfsd_embed_running(void) { return InterlockedCompareExchange(&g_running, 
 int winnfsd_embed_stop(void) {
     if (g_stop) SetEvent(g_stop);
     if (g_thread) {
-        WaitForSingleObject(g_thread, 15000);
+        DWORD wait = WaitForSingleObject(g_thread, 15000);
+        // 线程未退出时不能关闭它仍在使用的 stop/ready 句柄，也不能继续下一次 start
+        if (wait != WAIT_OBJECT_0) return -1;
         CloseHandle(g_thread);
         g_thread = NULL;
     }
@@ -158,7 +160,11 @@ int winnfsd_embed_start(const char *export_path, const char *alias_path, unsigne
     }
     if (winnfsd_embed_running()) return 0;
 
-    winnfsd_embed_stop();
+    // 上一次停止超时说明旧线程仍持有全局句柄/端口；此时绝不能覆盖全局状态再启动
+    if (winnfsd_embed_stop() != 0) {
+        if (err) snprintf(err, errcap, "上一次 NFS 停止未完成，请稍后重试");
+        return -1;
+    }
 
     WSAStartup(MAKEWORD(2, 2), &wsa);
 

@@ -9,6 +9,10 @@
 #include <vector>
 
 #include "core/config/config.h"
+#include "services/discovery/discovery_service.h"
+#include "services/inbound/inbound_gateway.h"
+#include "services/tcpfwd/tcp_forward.h"
+#include "services/tunnel/tunnel_manager.h"
 
 struct TftpSvc;
 
@@ -46,6 +50,27 @@ public:
     bool nfs_running() const;
     void stop_all();
 
+    // S8 入站 SSH：进程级唯一监听；先装 resolver，再启动。
+    void set_inbound_resolver(InboundGateway::Resolver resolver);
+    bool start_inbound(const InboundConfig& cfg, std::string* err);
+    void stop_inbound();
+    bool inbound_running() const;
+    std::string inbound_status() const;
+
+    // S12：TCP 转发 / 外网隧道 / UDP 发现
+    bool start_tcp_forward(const TcpForwardConfig& cfg, std::string* err);
+    void stop_tcp_forward();
+    bool tcp_forward_running() const;
+    std::string tcp_forward_status() const;
+    bool start_tunnel(const TunnelConfig& cfg, std::string* err);
+    void stop_tunnel();
+    bool tunnel_running() const;
+    std::string tunnel_status() const;
+    bool start_discovery(const DiscoveryConfig& cfg, const AppConfig& app, std::string* err);
+    void stop_discovery();
+    bool discovery_running() const;
+    std::string discovery_status() const;
+
     // 继电器：同步 set 很快（一次写+短延时），脉冲放后台，不冻结 UI
     bool relay_set(const RelayDeviceConfig& dev, int channel, bool on, std::string* err);
     bool relay_pulse_async(const RelayDeviceConfig& dev, int channel, double hold_seconds);
@@ -77,6 +102,18 @@ private:
     ShareServer* share_ = nullptr;
     bool nfs_on_ = false;
     std::string tftp_note_, share_note_, nfs_note_;
+
+    InboundGateway inbound_;
+    InboundGateway::Resolver inbound_resolver_;
+    bool inbound_on_ = false;
+    std::string inbound_note_;
+
+    TcpForwardService tcp_fwd_;
+    std::string tcp_fwd_note_;
+    TunnelManager tunnel_mgr_;
+    std::string tunnel_note_;
+    DiscoveryService discovery_;
+    std::string discovery_note_;
 
     mutable std::mutex relay_mu_;
     std::vector<std::pair<std::string, std::vector<RelayChannelState>>> relay_state_;

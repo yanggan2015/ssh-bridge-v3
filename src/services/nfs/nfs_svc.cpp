@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
 static void util_log(const char *fmt, ...) { (void)fmt; }
 
@@ -21,11 +22,35 @@ static void alias_norm(const char *alias, char *out, size_t cap) {
         snprintf(out, cap, "/%s", a);
 }
 
+// 本工程内部路径统一 UTF-8；winnfsd 第三方层按 ANSI/CP932 处理路径，
+// 这里把导出目录转成 8.3 短路径（纯 ASCII）再交给它，避免中文目录直接失败。
+static int mkdir_utf8(const char *utf8) {
+    wchar_t w[32768];
+    if (!utf8 || !utf8[0]) return -1;
+    if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, 32768) <= 0) return -1;
+    if (_wmkdir(w) == 0) return 0;
+    return errno == EEXIST ? 0 : -1;
+}
+
+static bool to_short_ansi(const char *utf8, char *out, size_t cap) {
+    wchar_t w[32768];
+    wchar_t sw[32768];
+    if (!utf8 || !utf8[0] || !out || cap == 0) return false;
+    if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, 32768) <= 0) return false;
+    DWORD n = GetShortPathNameW(w, sw, 32768);
+    if (n == 0 || n >= 32768) return false;
+    int m = WideCharToMultiByte(CP_ACP, 0, sw, -1, out, static_cast<int>(cap), nullptr, nullptr);
+    if (m <= 0) return false;
+    for (int i = 0; i + 1 < m; ++i) {
+        if (static_cast<unsigned char>(out[i]) >= 0x80) return false;  // 未拿到纯 ASCII 短路径
+    }
+    return true;
+}
+
 int nfs_svc_running(void) { return winnfsd_embed_running(); }
 
 int nfs_svc_stop(void) {
-    winnfsd_embed_stop();
-    return 0;
+    return winnfsd_embed_stop() == 0 ? 0 : -1;
 }
 
 int nfs_svc_start(const char *export_abs, const char *alias, unsigned uid, unsigned gid,
@@ -36,10 +61,16 @@ int nfs_svc_start(const char *export_abs, const char *alias, unsigned uid, unsig
         if (err) snprintf(err, errcap, "export empty");
         return -1;
     }
-    _mkdir(export_abs);
+    mkdir_utf8(export_abs);
     alias_norm(alias, al, sizeof(al));
-    if (winnfsd_embed_start(export_abs, al, uid, gid, err, errcap) != 0) return -1;
-    util_log("[nfs] started export=%s alias=%s", export_abs, al);
+    char export_path[MAX_PATH] = "";
+    if (!to_short_ansi(export_abs, export_path, sizeof(export_path))) {
+        if (err && errcap)
+            snprintf(err, errcap, "导出路径无法转换为 8.3 短路径（中文路径可能不受 winnfsd 支持）");
+        return -1;
+    }
+    if (winnfsd_embed_start(export_path, al, uid, gid, err, errcap) != 0) return -1;
+    util_log("[nfs] started export=%s (short=%s) alias=%s", export_abs, export_path, al);
     return 0;
 }
 

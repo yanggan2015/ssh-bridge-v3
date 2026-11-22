@@ -80,9 +80,13 @@ std::wstring to_wide_path(const std::string& s) {
 }
 
 std::string current_dir() {
-    wchar_t buf[MAX_PATH * 2] = L"";
-    GetCurrentDirectoryW(static_cast<DWORD>(sizeof(buf) / sizeof(buf[0])), buf);
-    std::string s(buf, buf + wcslen(buf));
+    wchar_t buf[32768] = L"";
+    DWORD n = GetCurrentDirectoryW(static_cast<DWORD>(sizeof(buf) / sizeof(buf[0])), buf);
+    if (n == 0) return std::string();
+    int need = WideCharToMultiByte(CP_UTF8, 0, buf, static_cast<int>(n), nullptr, 0, nullptr, nullptr);
+    if (need <= 0) return std::string();
+    std::string s(static_cast<std::size_t>(need), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, buf, static_cast<int>(n), s.data(), need, nullptr, nullptr);
     return s;
 }
 

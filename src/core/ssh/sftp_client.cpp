@@ -65,7 +65,8 @@ struct SftpClient::Impl {
     ssh_session  session = nullptr;
     sftp_session sftp    = nullptr;
     std::string  error;
-    std::uint64_t speed_limit = 0;
+    std::atomic<bool> ready{false};
+    std::atomic<std::uint64_t> speed_limit{0};
 };
 
 SftpClient::SftpClient() : impl_(new Impl()) {}
@@ -74,9 +75,11 @@ SftpClient::~SftpClient() {
     delete impl_;
 }
 
-bool SftpClient::connected() const { return impl_ && impl_->sftp != nullptr; }
-const std::string& SftpClient::last_error() const { return impl_->error; }
-void SftpClient::set_speed_limit(std::uint64_t bytes_per_sec) { impl_->speed_limit = bytes_per_sec; }
+bool SftpClient::connected() const { return impl_ && impl_->ready.load(std::memory_order_acquire); }
+std::string SftpClient::last_error() const { return impl_->error; }
+void SftpClient::set_speed_limit(std::uint64_t bytes_per_sec) {
+    impl_->speed_limit.store(bytes_per_sec, std::memory_order_relaxed);
+}
 
 bool SftpClient::connect(const SshTarget& t, std::string* err) {
     close();
@@ -132,11 +135,13 @@ bool SftpClient::connect(const SshTarget& t, std::string* err) {
     impl_->session = s;
     impl_->sftp = sftp;
     impl_->error.clear();
+    impl_->ready.store(true, std::memory_order_release);
     return true;
 }
 
 void SftpClient::close() {
     if (!impl_) return;
+    impl_->ready.store(false, std::memory_order_release);
     if (impl_->sftp) sftp_free(impl_->sftp);
     if (impl_->session) {
         ssh_disconnect(impl_->session);
@@ -283,7 +288,17 @@ std::string md5_local_file(const std::string& path, bool* ok) {
         return std::string();
     }
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-    EVP_DigestInit_ex(ctx, EVP_md5(), nullptr);
+    if (!ctx) {
+        std::fclose(f);
+        if (ok) *ok = false;
+        return std::string();
+    }
+    if (EVP_DigestInit_ex(ctx, EVP_md5(), nullptr) != 1) {
+        EVP_MD_CTX_free(ctx);
+        std::fclose(f);
+        if (ok) *ok = false;
+        return std::string();
+    }
     bool good = hash_stream(ctx, f, nullptr, nullptr, nullptr, nullptr);
     std::string hex = good ? hex_digest(ctx) : std::string();
     EVP_MD_CTX_free(ctx);
@@ -346,7 +361,12 @@ bool SftpClient::upload(const std::string& local, const std::string& remote,
                 if (err) *err = "续传定位失败（远端偏移 " + human_bytes(offset) + "）";
                 return false;
             }
-            _fseeki64(f, static_cast<__int64>(offset), SEEK_SET);
+            if (_fseeki64(f, static_cast<__int64>(offset), SEEK_SET) != 0) {
+                sftp_close(rf);
+                std::fclose(f);
+                if (err) *err = "续传定位失败（本地偏移 " + human_bytes(offset) + "）";
+                return false;
+            }
         }
 
         unsigned char buf[kChunk];
@@ -377,7 +397,8 @@ bool SftpClient::upload(const std::string& local, const std::string& remote,
             if (!ok) break;
             sent += got;
             if (done) done->store(sent, std::memory_order_relaxed);
-            throttle_to(sent - rate_base, rate_start, impl_->speed_limit, cancel);
+            throttle_to(sent - rate_base, rate_start,
+                        impl_->speed_limit.load(std::memory_order_relaxed), cancel);
         }
         std::fclose(f);
         sftp_close(rf);
@@ -393,8 +414,17 @@ bool SftpClient::upload(const std::string& local, const std::string& remote,
     } else {
         std::fclose(f);
     }
-    if (sftp_rename(impl_->sftp, tmp.c_str(), remote.c_str()) != SSH_OK) {
-        impl_->error = err_of(impl_->session, "远端重命名失败（目标可能已存在；断点已保留）");
+    bool renamed = sftp_rename(impl_->sftp, tmp.c_str(), remote.c_str()) == SSH_OK;
+    if (!renamed) {
+        // SFTP v3 的 RENAME 在多数服务器上不允许覆盖已存在目标；显式删旧文件后重试
+        if (sftp_attributes existing = sftp_stat(impl_->sftp, remote.c_str())) {
+            sftp_attributes_free(existing);
+            if (sftp_unlink(impl_->sftp, remote.c_str()) == SSH_OK)
+                renamed = sftp_rename(impl_->sftp, tmp.c_str(), remote.c_str()) == SSH_OK;
+        }
+    }
+    if (!renamed) {
+        impl_->error = err_of(impl_->session, "远端重命名失败（目标可能是目录或无权限；断点已保留）");
         if (err) *err = impl_->error;
         return false;
     }
@@ -414,13 +444,14 @@ bool SftpClient::upload(const std::string& local, const std::string& remote,
         std::string remote_md5;
         if (sftp_file chk = sftp_open(impl_->sftp, remote.c_str(), O_RDONLY, 0)) {
             EVP_MD_CTX* rctx = EVP_MD_CTX_new();
-            EVP_DigestInit_ex(rctx, EVP_md5(), nullptr);
-            unsigned char buf[kChunk];
-            int n = 0;
-            while ((n = sftp_read(chk, buf, kChunk)) > 0)
-                EVP_DigestUpdate(rctx, buf, static_cast<std::size_t>(n));
-            remote_md5 = hex_digest(rctx);
-            EVP_MD_CTX_free(rctx);
+            if (rctx && EVP_DigestInit_ex(rctx, EVP_md5(), nullptr) == 1) {
+                unsigned char buf[kChunk];
+                int n = 0;
+                while ((n = sftp_read(chk, buf, kChunk)) > 0)
+                    EVP_DigestUpdate(rctx, buf, static_cast<std::size_t>(n));
+                remote_md5 = hex_digest(rctx);
+            }
+            if (rctx) EVP_MD_CTX_free(rctx);
             sftp_close(chk);
         }
         notes += (local_md5.empty() || remote_md5.empty())
@@ -471,7 +502,7 @@ bool SftpClient::download(const std::string& remote, const std::string& local,
         sftp_close(rf);
         return false;
     }
-    if (resumed && offset < size && sftp_seek64(rf, offset) != SSH_OK) {
+    if (resumed && sftp_seek64(rf, offset) != SSH_OK) {
         std::fclose(f);
         sftp_close(rf);
         if (err) *err = "续传定位远端失败（偏移 " + human_bytes(offset) + "）";
@@ -496,7 +527,8 @@ bool SftpClient::download(const std::string& remote, const std::string& local,
         }
         got_total += static_cast<std::uint64_t>(n);
         if (done) done->store(got_total, std::memory_order_relaxed);
-        throttle_to(got_total - rate_base, rate_start, impl_->speed_limit, cancel);
+        throttle_to(got_total - rate_base, rate_start,
+                    impl_->speed_limit.load(std::memory_order_relaxed), cancel);
     }
     std::fclose(f);
     sftp_close(rf);

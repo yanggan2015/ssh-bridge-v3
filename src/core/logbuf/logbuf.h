@@ -52,7 +52,7 @@ public:
     // 运行中开关落盘（会重建文件）
     bool set_disk(bool enabled, const std::string& dir, const std::string& name);
 
-    const std::string& last_error() const { return last_error_; }
+    std::string last_error() const;
 
 private:
     void write_ring(const char* data, std::size_t n);
@@ -79,9 +79,12 @@ private:
     std::atomic<bool> disk_flush_stop_{false};
     std::atomic<bool> dirty_{false};
     std::FILE* disk_ = nullptr;
-    std::mutex disk_mu_;
+
+    mutable std::mutex ring_mu_;            // 保护 ring_/total_/epoch_ 与读取拷贝
+    mutable std::mutex disk_mu_;
     std::thread flusher_;
 
+    mutable std::mutex err_mu_;             // 保护 last_error_
     std::string last_error_;
 };
 

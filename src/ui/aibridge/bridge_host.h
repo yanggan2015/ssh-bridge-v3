@@ -15,6 +15,7 @@ class AppCore;
 class SftpWindow;
 class TerminalView;
 class ServiceManager;
+class WebConsole;
 
 namespace aibridge {
 
@@ -53,6 +54,8 @@ void unregister_sftp_dialog(HWND wnd);
 
 // S11 服务与继电器面板：状态常驻 /state.services；窗口控件挂 svc.*。
 void set_service_manager(ServiceManager* mgr);
+// S9 Web 控制台状态：常驻 /state.web；对象可为空（未启动）。
+void set_web_console(WebConsole* web);
 void register_service_panel(HWND wnd);
 
 // S12 独立继电器窗口：窗口控件挂 relay.*，页签单独登记以便切换。

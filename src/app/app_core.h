@@ -24,7 +24,7 @@ public:
         std::string state;       // "offline" / "ready" / "idle"
         std::string sig;         // 参数指纹：变了就热应用
         bool        started = false;
-        std::unique_ptr<IBridge> bridge;
+        std::shared_ptr<IBridge> bridge;   // 异步按钮执行期间也要保住对象，避免配置重载后悬空
         std::shared_ptr<std::atomic<bool>> wake;   // 合并 RX 唤醒，避免消息洪水
     };
 
@@ -52,6 +52,7 @@ public:
     void clear_pending(std::size_t idx);
 
     IBridge* find(const std::string& name);
+    std::shared_ptr<IBridge> find_shared(const std::string& name);
     bool reconnect(const std::string& name);
     bool disconnect(const std::string& name);
     bool clear(const std::string& name);
@@ -69,6 +70,9 @@ public:
     const BoardConfig*   board_of(const std::string& name) const;
     const SSHLinkConfig* link_of(const std::string& name) const;
     bool is_ssh_name(const std::string& name) const;
+    // S8 入站 SSH：用户名=通道名；返回该通道对象与入站密码（空=允许 none）。
+    bool resolve_inbound(const std::string& name, std::shared_ptr<IBridge>* bridge,
+                         std::string* password, std::string* err) const;
     // 指定 COM 口是否正被本程序某个运行中的串口通道占用（板控按钮执行前检查）
     bool port_in_use(const std::string& port) const;
 
@@ -91,6 +95,10 @@ public:
     std::string state_json(bool window_visible) const;
 
     const AppConfig& config() const { return cfg_; }
+    // 网页只读配置页：当前已知字段导出（不包含未知历史键）
+    std::string config_json_text() const { return config_export_json(cfg_); }
+    // S9 网页配置表单保存：校验 JSON、落盘到当前 abs_path；UI 线程随后 reload_config。
+    bool save_config_json(const std::string& text, std::string* err);
     // UI 分屏布局（窗格数/各画框通道/激活画框）落盘，不改服务配置、不重建通道
     bool save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane);
     // 服务面板保存后同步内存配置，避免下一次面板采集用旧值覆盖

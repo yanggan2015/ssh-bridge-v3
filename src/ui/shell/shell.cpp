@@ -13,6 +13,7 @@
 #include "core/util/util.h"
 #include "services/board_actions/board_action_runner.h"
 #include "services/service_manager.h"
+#include "services/web/web_console.h"
 #include "ui/services/file_service_panel.h"
 #include "ui/services/relay_panel.h"
 #include "ui/dialogs/quick_dialog.h"
@@ -188,6 +189,12 @@ RECT load_window_rect() {
 }
 
 Shell::~Shell() {
+    if (web_) {
+        web_->stop();
+        aibridge::set_web_console(nullptr);
+        delete web_;
+        web_ = nullptr;
+    }
     if (services_) {
         services_->stop_all();
         delete services_;
@@ -203,6 +210,14 @@ bool Shell::create(HINSTANCE inst, int nShow, AppCore* core) {
 
     services_ = new ServiceManager(core_->config().project_root);
     services_->apply_config(core_->config());
+    services_->set_inbound_resolver([this](const std::string& name, InboundTarget* target,
+                                           std::string* err) {
+        if (!target || !core_) {
+            if (err) *err = "入站解析器未就绪";
+            return false;
+        }
+        return core_->resolve_inbound(name, &target->bridge, &target->password, err);
+    });
     aibridge::set_service_manager(services_);
 
     // 临时打点：窗口创建链路出问题时要能看出停在哪一步
@@ -266,7 +281,94 @@ bool Shell::create(HINSTANCE inst, int nShow, AppCore* core) {
     if (!aibridge::start(hwnd, core_, &view_, bo)) {
         OutputDebugStringW(L"[aibridge] start skipped/failed\n");
     }
+    sync_inbound();
+    sync_web();
+    sync_s12();
     return true;
+}
+
+void Shell::sync_inbound() {
+    if (!services_ || !core_) return;
+    const InboundConfig& inb = core_->config().inbound;
+    if (!inb.enabled) {
+        if (services_->inbound_running()) {
+            services_->stop_inbound();
+            note_status(L"入站 SSH 已关闭");
+        }
+        return;
+    }
+    std::string err;
+    if (!services_->start_inbound(inb, &err)) {
+        note_status(L"入站 SSH 启动失败：" + widen(err));
+        return;
+    }
+    note_status(widen(services_->inbound_status()));
+}
+
+void Shell::sync_web() {
+    if (!services_ || !core_) return;
+    const WebConfig& w = core_->config().web;
+    if (!web_) web_ = new WebConsole();
+    web_->set_notify(hwnd_);
+    if (!w.enabled) {
+        if (web_->running()) {
+            web_->stop();
+            note_status(L"Web 控制台已关闭");
+        }
+        web_->configure(w.port, w.token);
+        aibridge::set_web_console(web_);
+        return;
+    }
+    if (web_->running() && web_->port() == w.port && web_->token() == w.token) {
+        aibridge::set_web_console(web_);
+        return;
+    }
+    if (web_->running()) web_->stop();
+    web_->configure(w.port, w.token);
+    std::string err;
+    if (!web_->start(core_, services_, w.port, w.token, &err)) {
+        note_status(L"Web 控制台启动失败：" + widen(err));
+        aibridge::set_web_console(web_);
+        return;
+    }
+    aibridge::set_web_console(web_);
+    std::string url = "http://" + services_->local_ip() + ":" + std::to_string(w.port);
+    note_status(L"Web 控制台：" + widen(url) +
+                (w.token.empty() ? L"（只读，无 token）" : L"（写接口需 token）"));
+}
+
+void Shell::sync_s12() {
+    if (!services_ || !core_) return;
+    const AppConfig& cfg = core_->config();
+
+    if (!cfg.tcp_fwd.enable) {
+        services_->stop_tcp_forward();
+    } else {
+        std::string err;
+        if (!services_->start_tcp_forward(cfg.tcp_fwd, &err)) {
+            note_status(L"TCP 转发启动失败：" + widen(err));
+        }
+    }
+
+    if (!cfg.tunnel.enable) {
+        services_->stop_tunnel();
+    } else {
+        std::string err;
+        if (!services_->start_tunnel(cfg.tunnel, &err)) {
+            note_status(L"隧道启动失败：" + widen(err));
+        } else if (!err.empty()) {
+            note_status(L"隧道部分失败：" + widen(err));
+        }
+    }
+
+    if (!cfg.discovery.enable) {
+        services_->stop_discovery();
+    } else {
+        std::string err;
+        if (!services_->start_discovery(cfg.discovery, cfg, &err)) {
+            note_status(L"UDP 发现启动失败：" + widen(err));
+        }
+    }
 }
 
 void Shell::build_menu() {
@@ -454,7 +556,6 @@ void Shell::build_children() {
 
     tray_.create(hwnd_, L"ssh-bridge v3 · 双击恢复窗口");
     layout_ready_ = true;
-    save_layout_state();
 }
 
 void Shell::fill_tree() {
@@ -974,6 +1075,10 @@ void Shell::refresh_quick_buttons() {
                                  0, 0, 0, 0, hwnd_,
                                  reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kIdcQuickBase + i)),
                                  inst_, nullptr);
+        if (!h) {
+            quick_buttons_.push_back(nullptr);
+            continue;
+        }
         SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
         SetWindowSubclass(h, QuickBtnProc, 2, static_cast<DWORD_PTR>(i + 1));
         aibridge::register_quick_button(h, i);
@@ -998,6 +1103,10 @@ void Shell::refresh_board_buttons() {    for (HWND h : board_buttons_) {
                                      WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                      0, 0, 0, 0, hwnd_,
                                      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(id)), inst_, nullptr);
+            if (!h) {
+                board_buttons_.push_back(nullptr);
+                continue;
+            }
             SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
             board_buttons_.push_back(h);
             aibridge::register_board_button(h, a.id);
@@ -1040,7 +1149,7 @@ void Shell::on_board_button(std::size_t index) {
     note_status(L"已触发按钮：" + active_button_id_ +
                 (active_button_label_.empty() ? L"" : L"（" + active_button_label_ + L"）"));
     AppCore* core = core_;
-    IBridge* bridge = core->find(sel);
+    std::shared_ptr<IBridge> bridge = core->find_shared(sel);
     PortInUseFn in_use = [core](const std::string& name) {
         return core->port_in_use(name);
     };
@@ -1575,6 +1684,10 @@ void Shell::on_command(int id) {
             break;
         }
         refresh_channels(selected_channel());
+        services_->apply_config(core_->config());
+        sync_inbound();
+        sync_web();
+        sync_s12();
         note_status(L"已重载配置（新增 " + std::to_wstring(r.added) + L" / 删除 " +
                     std::to_wstring(r.removed) + L" / 变更 " + std::to_wstring(r.changed) +
                     L"）· " + std::to_wstring(ms) + L" ms");
@@ -1657,8 +1770,11 @@ void Shell::on_command(int id) {
         }
         break;
     case kIdmPaste:
-        view_.paste_clipboard();
-        note_status(L"已粘贴到终端");
+        if (view_.paste_clipboard()) {
+            note_status(L"已粘贴到终端");
+        } else {
+            note_status(L"粘贴失败：剪贴板为空或当前通道不可用");
+        }
         break;
     case kIdmReplay:
         view_.replay_active();
@@ -1778,7 +1894,7 @@ void Shell::restore_layout_from_config() {
 }
 
 void Shell::save_layout_state() {
-    if (!layout_ready_ || !core_) return;
+    if (!layout_ready_ || !layout_user_input_ || !core_) return;
     core_->save_ui_layout(view_.split_count(), view_.slot_channels(), view_.active_index());
 }
 
@@ -1841,7 +1957,14 @@ LRESULT CALLBACK Shell::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_LBUTTONDOWN || msg == WM_KEYDOWN || msg == WM_COMMAND) {
+        layout_user_input_ = true;
+    }
     switch (msg) {
+    case kMsgWebReload:
+        // 网页配置页保存后，由 Web 线程 PostMessage 回来，在 UI 线程做手术式重载
+        on_command(kIdmChanReload);
+        return 0;
     case WM_CREATE:
 
         build_menu();

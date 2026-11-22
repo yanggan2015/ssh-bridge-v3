@@ -292,6 +292,7 @@ void AnsiScreen::csi_dispatch(char final_byte) {
         char c = csi_[i];
         if (is_digit(c)) {
             cur = (cur < 0 ? 0 : cur) * 10 + (c - '0');
+            if (cur > 9999) cur = 9999;     // 防止超长数字导致有符号溢出
         } else if (c == ';' || c == ':') {
             params.push_back(cur < 0 ? 0 : cur);
             cur = -1;

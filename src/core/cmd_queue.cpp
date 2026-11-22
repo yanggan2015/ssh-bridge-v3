@@ -6,12 +6,13 @@
 
 namespace sb3 {
 
-void CmdQueue::push(const void* data, std::size_t n) {
-    if (data == nullptr || n == 0) return;
+bool CmdQueue::push(const void* data, std::size_t n) {
+    if (data == nullptr || n == 0) return false;
     std::lock_guard<std::mutex> lock(mu_);
-    if (closed_) return;
+    if (closed_) return false;
     q_.emplace_back(static_cast<const char*>(data), n);
     cv_.notify_one();
+    return true;
 }
 
 bool CmdQueue::pop_all(std::string* out, unsigned wait_ms) {

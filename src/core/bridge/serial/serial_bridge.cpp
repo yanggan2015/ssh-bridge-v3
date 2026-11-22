@@ -39,11 +39,12 @@ bool wait_io(HANDLE port, OVERLAPPED* ov, DWORD timeout_ms, DWORD* got) {
     if (w == WAIT_OBJECT_0) {
         return GetOverlappedResult(port, ov, got, FALSE) != 0;
     }
-    if (w == WAIT_TIMEOUT || w == WAIT_ABANDONED) {
+    if (w == WAIT_TIMEOUT || w == WAIT_ABANDONED || w == WAIT_FAILED) {
         CancelIoEx(port, ov);
-        WaitForSingleObject(ov->hEvent, 100);
+        // 必须等内核真正收尾再返回：调用方的 OVERLAPPED/缓冲区都在栈上，
+        // 若取消还没完成就返回，驱动随后写栈会造成内存破坏。
         DWORD n = 0;
-        GetOverlappedResult(port, ov, &n, FALSE);
+        GetOverlappedResult(port, ov, &n, TRUE);
     }
     if (got) *got = 0;
     return false;
@@ -103,8 +104,8 @@ bool SerialBridge::open_port() {
         close_port();
         return false;
     }
-    dcb.BaudRate = static_cast<DWORD>(cfg_.baudrate);
-    dcb.ByteSize = static_cast<BYTE>(cfg_.databits);
+    dcb.BaudRate = static_cast<DWORD>(cfg_.baudrate > 0 ? cfg_.baudrate : 115200);
+    dcb.ByteSize = static_cast<BYTE>(cfg_.databits >= 5 && cfg_.databits <= 8 ? cfg_.databits : 8);
     dcb.Parity = parity_of(cfg_.parity);
     dcb.StopBits = stopbits_of(cfg_.stopbits_x10);
     dcb.fBinary = TRUE;
@@ -144,6 +145,7 @@ void SerialBridge::close_port() {
 }
 
 void SerialBridge::set_error(const std::string& msg) {
+    std::lock_guard<std::mutex> lk(err_mu_);
     last_error_ = msg;
 }
 
@@ -202,7 +204,10 @@ void SerialBridge::apply_config(const BoardConfig& cfg) {
                  cfg_.timestamp, cfg_.log_enabled, log_dir, cfg_.name);
     if (!old.empty()) core_.log().append(old.data(), old.size());
 
-    last_error_.clear();
+    {
+        std::lock_guard<std::mutex> lk(err_mu_);
+        last_error_.clear();
+    }
     if (was_running || cfg_.auto_open) start();
 }
 
@@ -222,7 +227,8 @@ void SerialBridge::rx_loop() {
             DWORD w = WaitForSingleObject(ov.hEvent, kEventWaitMs);
             if (w != WAIT_OBJECT_0) {
                 CancelIoEx(port_, &ov);
-                WaitForSingleObject(ov.hEvent, 100);
+                DWORD n = 0;
+                GetOverlappedResult(port_, &ov, &n, TRUE);
                 core_.log().flush_cr_hold();
                 continue;
             }
@@ -304,8 +310,8 @@ void SerialBridge::writer_loop() {
 
 std::size_t SerialBridge::write(const void* data, std::size_t n) {
     if (!running_.load() || data == nullptr || n == 0) return 0;
+    if (!cmds_.push(data, n)) return 0;
     core_.mark_tx(n);
-    cmds_.push(data, n);
     return n;
 }
 
@@ -345,7 +351,8 @@ std::string SerialBridge::status_json() const {
     cJSON_AddNumberToObject(o, "echo_latency_us", static_cast<double>(core_.echo_latency_us()));
     cJSON_AddNumberToObject(o, "echo_count", static_cast<double>(core_.echo_count()));
     cJSON_AddBoolToObject(o, "log_enabled", core_.log().disk_enabled());
-    cJSON_AddStringToObject(o, "last_error", last_error_.c_str());
+    std::string err = last_error();
+    cJSON_AddStringToObject(o, "last_error", err.c_str());
     char* s = cJSON_PrintUnformatted(o);
     std::string out = s ? s : "{}";
     if (s) cJSON_free(s);

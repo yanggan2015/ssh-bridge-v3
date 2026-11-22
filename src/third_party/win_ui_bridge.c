@@ -77,6 +77,7 @@ static volatile LONG     g_inited;
 static volatile LONG     g_action_count;
 static CRITICAL_SECTION  g_lock;
 static HANDLE            g_done_event;
+static HANDLE            g_thread;
 static int               g_port;
 
 static UB_REQUEST        g_req;
@@ -1462,13 +1463,15 @@ int ui_bridge_start(HWND hwnd_main, int port)
     g_inited = 1;
     ui_bridge_log("bridge: start on port %d", port);
 
-    HANDLE th = CreateThread(NULL, 0, ub_http_thread, (LPVOID) (intptr_t) port, 0, NULL);
-    if (!th) {
+    g_thread = CreateThread(NULL, 0, ub_http_thread, (LPVOID) (intptr_t) port, 0, NULL);
+    if (!g_thread) {
         g_inited = 0;
         g_running = 0;
+        CloseHandle(g_done_event);
+        g_done_event = NULL;
+        DeleteCriticalSection(&g_lock);
         return 0;
     }
-    CloseHandle(th);
     return 1;
 }
 
@@ -1476,7 +1479,18 @@ void ui_bridge_stop(void)
 {
     if (!g_inited) return;
     g_running = 0;
-    Sleep(200);
+    /* 唤醒正在等待 UI 动作结果的 HTTP 线程，避免关窗时白等 8 秒 */
+    if (g_done_event) SetEvent(g_done_event);
+    if (g_thread) {
+        DWORD w = WaitForSingleObject(g_thread, 3000);
+        if (w != WAIT_OBJECT_0) {
+            /* 线程仍在用 g_lock / g_done_event：宁可泄漏到进程退出，也不能删掉正在使用的对象 */
+            ui_bridge_log("bridge: stop timeout, keep resources");
+            return;
+        }
+        CloseHandle(g_thread);
+        g_thread = NULL;
+    }
     if (g_done_event) CloseHandle(g_done_event);
     g_done_event = NULL;
     DeleteCriticalSection(&g_lock);

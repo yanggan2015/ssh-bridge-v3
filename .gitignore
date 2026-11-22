@@ -1,6 +1,5 @@
-# 构建产物
-output/build/
-output/pdf/
+# 构建 / 运行产物（output 下的安装包、截图、日志、自测目录都不入库）
+output/
 *.o
 *.d
 *.exe
@@ -18,28 +17,3 @@ backend_child.log
 Thumbs.db
 *.swp
 .cache/
-output/selftest/
-output/*.txt
-output/s3run/
-output/s3test/
-output/s4check/
-output/s4run/
-output/s4test/
-output/ui_terminal.json
-output/ui_state.json
-output/ui_prefs.ini
-
-# 本地测试运行目录（闸门自建自清）
-output/s5check/
-output/s5check-off/
-output/s5check-token/
-output/aibrun/
-output/cfgtest/
-output/dist/
-output/disttest/
-output/acceptance/
-output/quickcheck/
-
-# SFTP 本地测试数据
-output/sftp_test/
-output/sftp_dl/

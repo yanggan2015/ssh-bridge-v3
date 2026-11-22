@@ -166,6 +166,7 @@ BoardActionResult run_board_action(const AppConfig& cfg, const std::string& chan
     }
 
     if (action.backend == "commands") {
+        if (action.commands.empty()) return fail("按钮没有配置命令", elapsed());
         std::string cmd_out;
         int last_code = 0;
         for (const std::string& command : action.commands) {
@@ -190,7 +191,8 @@ BoardActionResult run_board_action(const AppConfig& cfg, const std::string& chan
             } else {
                 if (!bridge) return fail("通道不可用：" + channel, elapsed());
                 std::string line = command + line_ending_for(cfg, channel);
-                bridge->write(line.data(), line.size());
+                if (bridge->write(line.data(), line.size()) == 0)
+                    return fail("命令发送失败（通道可能已断开）：" + command, elapsed());
                 if (action.delay_ms > 0)
                     std::this_thread::sleep_for(std::chrono::milliseconds(action.delay_ms));
             }
@@ -206,6 +208,7 @@ BoardActionResult run_board_action(const AppConfig& cfg, const std::string& chan
     }
 
     if (action.backend == "script") {
+        if (action.script.empty()) return fail("按钮没有配置脚本", elapsed());
         if (!bridge) return fail("通道不可用：" + channel, elapsed());
         ScriptLuaContext ctx;
         ctx.bridge = bridge;
@@ -270,7 +273,7 @@ BoardActionResult run_board_action(const AppConfig& cfg, const std::string& chan
 }
 
 void run_board_action_async(const AppConfig& cfg, const std::string& channel,
-                            const BoardActionConfig& action, IBridge* bridge,
+                            const BoardActionConfig& action, std::shared_ptr<IBridge> bridge,
                             const PortInUseFn& port_in_use, HWND notify, UINT msg,
                             UINT progress_msg) {
     std::thread([cfg, channel, action, bridge, port_in_use, notify, msg, progress_msg]() {
@@ -282,7 +285,7 @@ void run_board_action_async(const AppConfig& cfg, const std::string& channel,
             p->line = line;
             if (!PostMessageW(notify, progress_msg, 0, reinterpret_cast<LPARAM>(p))) delete p;
         };
-        BoardActionResult r = run_board_action(cfg, channel, action, bridge, port_in_use, 0, progress);
+        BoardActionResult r = run_board_action(cfg, channel, action, bridge.get(), port_in_use, 0, progress);
         AsyncBoardResult* out = new AsyncBoardResult();
         out->ok = r.ok;
         out->message = r.message;

@@ -93,7 +93,7 @@ void AppCore::build_entries() {
         e.kind = "serial";
         e.detail = serial_detail(b);
         e.sig = serial_sig(b);
-        e.bridge = std::make_unique<SerialBridge>(b, project_root_);
+        e.bridge = std::make_shared<SerialBridge>(b, project_root_);
         e.wake = std::make_shared<std::atomic<bool>>(false);
         entries_.push_back(std::move(e));
     }
@@ -104,7 +104,7 @@ void AppCore::build_entries() {
         e.kind = "ssh";
         e.detail = ssh_detail(s);
         e.sig = ssh_sig(s);
-        e.bridge = std::make_unique<SshBridge>(s, project_root_);
+        e.bridge = std::make_shared<SshBridge>(s, project_root_);
         e.wake = std::make_shared<std::atomic<bool>>(false);
         entries_.push_back(std::move(e));
     }
@@ -221,7 +221,7 @@ AppCore::ReloadResult AppCore::reload_config() {
             e.kind = "serial";
             e.detail = serial_detail(b);
             e.sig = serial_sig(b);
-            e.bridge = std::make_unique<SerialBridge>(b, project_root_);
+            e.bridge = std::make_shared<SerialBridge>(b, project_root_);
             e.wake = std::make_shared<std::atomic<bool>>(false);
             entries_.push_back(std::move(e));
             added_idx.push_back(entries_.size() - 1);
@@ -256,7 +256,7 @@ AppCore::ReloadResult AppCore::reload_config() {
             e.kind = "ssh";
             e.detail = ssh_detail(s);
             e.sig = ssh_sig(s);
-            e.bridge = std::make_unique<SshBridge>(s, project_root_);
+            e.bridge = std::make_shared<SshBridge>(s, project_root_);
             e.wake = std::make_shared<std::atomic<bool>>(false);
             entries_.push_back(std::move(e));
             added_idx.push_back(entries_.size() - 1);
@@ -308,15 +308,34 @@ bool AppCore::upsert_serial(const BoardConfig& board, const std::string& old_nam
         if (err) *err = "通道名不能为空";
         return false;
     }
+    if (old_name.empty() && (board_of(board.name) || link_of(board.name))) {
+        if (err) *err = "通道名已存在：" + board.name;
+        return false;
+    }
     BoardConfig nb = board;
-    // 通道编辑对话框不编辑按钮；保留原通道的板卡按钮，避免编辑串口参数后按钮消失
+    // 通道编辑对话框只编辑串口参数；保留对话框没有暴露的字段，避免编辑一次就丢密码/快捷指令/按钮
     std::string src = old_name.empty() ? board.name : old_name;
     const BoardConfig* oldBoard = board_of(src);
-    if (oldBoard && nb.buttons.empty() && !oldBoard->buttons.empty()) nb.buttons = oldBoard->buttons;
+    if (oldBoard) {
+        nb.username = oldBoard->username;
+        nb.password = oldBoard->password;
+        nb.password_present = oldBoard->password_present;
+        nb.buffer_size = oldBoard->buffer_size;
+        nb.log_dir = oldBoard->log_dir;
+        nb.timestamp = oldBoard->timestamp;
+        nb.buttons = oldBoard->buttons;
+        nb.quick_commands = oldBoard->quick_commands;
+    }
     AppConfig next = cfg_;
     if (!old_name.empty() && old_name != board.name) {
+        if (board_of(board.name) || link_of(board.name)) {
+            if (err) *err = "通道名已存在：" + board.name;
+            return false;
+        }
         erase_named(&next.boards, old_name);
         erase_named(&next.links, old_name);
+        for (std::string& pane : next.ui.pane_channels)
+            if (pane == old_name) pane = board.name;
     }
     erase_named(&next.boards, board.name);
     erase_named(&next.links, board.name);
@@ -346,14 +365,30 @@ bool AppCore::upsert_ssh(const SSHLinkConfig& link, const std::string& old_name,
         if (err) *err = "通道名不能为空";
         return false;
     }
+    if (old_name.empty() && (board_of(link.name) || link_of(link.name))) {
+        if (err) *err = "通道名已存在：" + link.name;
+        return false;
+    }
     SSHLinkConfig nl = link;
     std::string src = old_name.empty() ? link.name : old_name;
     const SSHLinkConfig* oldLink = link_of(src);
-    if (oldLink && nl.buttons.empty() && !oldLink->buttons.empty()) nl.buttons = oldLink->buttons;
+    if (oldLink) {
+        // 对话框不编辑按钮/快捷指令/日志缓冲；保留这些设置
+        nl.buttons = oldLink->buttons;
+        nl.quick_commands = oldLink->quick_commands;
+        nl.buffer_size = oldLink->buffer_size;
+        nl.log_dir = oldLink->log_dir;
+    }
     AppConfig next = cfg_;
     if (!old_name.empty() && old_name != link.name) {
+        if (board_of(link.name) || link_of(link.name)) {
+            if (err) *err = "通道名已存在：" + link.name;
+            return false;
+        }
         erase_named(&next.boards, old_name);
         erase_named(&next.links, old_name);
+        for (std::string& pane : next.ui.pane_channels)
+            if (pane == old_name) pane = link.name;
     }
     erase_named(&next.boards, link.name);
     erase_named(&next.links, link.name);
@@ -391,6 +426,8 @@ bool AppCore::delete_channel(const std::string& name, std::string* err) {
     }
     erase_named(&next.boards, name);
     erase_named(&next.links, name);
+    for (std::string& pane : next.ui.pane_channels)
+        if (pane == name) pane.clear();   // 删除后不要再把画框绑回不存在的通道
     bool saved = config_save(next);
 
     if (!saved) {
@@ -519,10 +556,48 @@ bool AppCore::set_quick_commands(const std::string& name,
     return true;
 }
 
-IBridge* AppCore::find(const std::string& name) {    for (Entry& e : entries_) {
+IBridge* AppCore::find(const std::string& name) {
+    for (Entry& e : entries_) {
         if (e.name == name) return e.bridge.get();
     }
     return nullptr;
+}
+
+std::shared_ptr<IBridge> AppCore::find_shared(const std::string& name) {
+    for (Entry& e : entries_) {
+        if (e.name == name) return e.bridge;
+    }
+    return nullptr;
+}
+
+bool AppCore::resolve_inbound(const std::string& name, std::shared_ptr<IBridge>* bridge,
+                              std::string* password, std::string* err) const {
+    if (name.empty()) {
+        if (err) *err = "用户名为空（应为通道名）";
+        return false;
+    }
+    for (const Entry& e : entries_) {
+        if (e.name != name || !e.bridge) continue;
+        std::string pass;
+        for (const BoardConfig& b : cfg_.boards) {
+            if (b.name == name) {
+                pass = config_resolve_password(cfg_, b);
+                break;
+            }
+        }
+        for (const SSHLinkConfig& s : cfg_.links) {
+            if (s.name == name) {
+                pass = s.password;
+                break;
+            }
+        }
+        if (bridge) *bridge = e.bridge;
+        if (password) *password = pass;
+        if (err) err->clear();
+        return true;
+    }
+    if (err) *err = "通道不存在：" + name;
+    return false;
 }
 
 bool AppCore::reconnect(const std::string& name) {
@@ -562,6 +637,23 @@ std::string AppCore::line_ending_for(const std::string& name) const {
         if (b.name == name && !b.line_ending.empty()) return b.line_ending;
     }
     return "crlf";
+}
+
+bool AppCore::save_config_json(const std::string& text, std::string* err) {
+    if (cfg_.abs_path.empty()) {
+        if (err) *err = "当前配置没有落盘路径";
+        return false;
+    }
+    AppConfig next;
+    if (!config_parse_json(text, &next, err)) return false;
+    next.abs_path = cfg_.abs_path;
+    next.project_root = project_root_;
+    if (!config_save(next)) {
+        if (err) *err = "写配置文件失败";
+        return false;
+    }
+    if (err) err->clear();
+    return true;
 }
 
 std::string AppCore::summary() const {

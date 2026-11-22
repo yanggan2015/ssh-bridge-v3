@@ -5,13 +5,13 @@
 # GitHub Release：v<Version>，资产为 zip + 本地 UPDATE.json + zip.sha256
 #
 # 用法：
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r11
-#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r11 -SkipPush
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r12
+#   powershell -NoProfile -File scripts\publish-release.ps1 -Version 3.0-s13-r12 -SkipPush
 #
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r11',
+    [string]$Version = '3.0-s13-r12',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
