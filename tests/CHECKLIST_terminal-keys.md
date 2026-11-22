@@ -34,6 +34,9 @@ python tests\terminal_bracketed_paste.py --base http://127.0.0.1:18096 --channel
 
 # PTY 尺寸联动（初始/缩放/恢复/重连，断言远端 stty size 与窗格一致）
 pwsh -NoProfile -File tests\terminal_pty_resize.ps1
+
+# 鼠标上报（真实 SSH 两条；1000/SGR、1002 拖动、1003 移动、X10、关闭后不发送）
+pwsh -NoProfile -File tests\terminal_mouse_report.ps1
 ```
 
 每台必须 5/5，且结果为 `RESULT: ALL PASS`：
@@ -47,17 +50,20 @@ pwsh -NoProfile -File tests\terminal_pty_resize.ps1
 - [ ] 分屏路由：`terminal_pane_routing_check.ps1` 6 项 PASS，`term.send` 与 `WM_KEYDOWN` 只增活动窗格通道
 - [ ] bracketed paste：`terminal_bracketed_paste.py` 的 hold / submit 均 PASS；该用例走 `term.paste_text`，不依赖剪贴板；`--selftest term` 含 `T4U-13`
 - [ ] PTY 尺寸：`terminal_pty_resize.ps1` 初始/缩放/恢复/重连 4 项 PASS，远端 `stty size` 始终等于 `/state` 窗格尺寸
+- [ ] 鼠标上报：`terminal_mouse_report.ps1` 在 `ssh-demo1`/`ssh-demo2` 各 16 项 PASS（1000 SGR 按下/释放/滚轮/修饰，1002 拖动，1003 移动，X10 兼容，关闭后 `term.mouse` 不增字节）
+- [ ] 真实 TUI：`nano -m` 点击第 20 行后输入 `X`，保存后远端第 20 行为 `LINE-20X`；视觉证据 `output\acceptance\r19-mouse-nano2.png`
 
 ## 配套门禁
 
-- [ ] `output\build\ssh_bridge3.exe --selftest term` → `RESULT: ALL PASS`，含 `T4U-11`、`T4U-12`
-- [ ] `pwsh -NoProfile -File tests\ui_bridge_check.ps1 -SkipBuild` → 41 项 ALL PASS
+- [ ] `output\build\ssh_bridge3.exe --selftest term` → `RESULT: ALL PASS`，含 `T4U-11`、`T4U-12`、`T4U-13`、`T4U-14`
+- [ ] `pwsh -NoProfile -File tests\ui_bridge_check.ps1 -SkipBuild` → 41 项 ALL PASS，基线 40 个 id 含 `term.mouse`
 - [ ] `pwsh -NoProfile -File tests\step3_check.ps1 -SkipBuild`、`tests\step4_check.ps1 -SkipBuild` → ALL PASS
 - [ ] 测完退出隔离实例，确认无 `ssh_bridge3.exe` 残留
 
 ## 最近一次结果
 
 - 回环 11/11、`ssh-demo1` 5/5、`ssh-demo2` 5/5、`ztl-com3` 5/5、`ok3568-com5` 5/5；物理消息路径 `PHY-backspace` / `PHY-up` PASS；分屏路由 6/6 PASS；`term.paste_text` 真实 SSH hold/submit ALL PASS
+- 鼠标上报：`ssh-demo1`、`ssh-demo2` 各 16/16 PASS；`nano -m` 点击第 20 行后输入 `X`，保存后 `sed -n "20p"` 返回 `LINE-20X`
 - PTY 尺寸：`ssh-demo1`、`ssh-demo2` 初始、1000×600、恢复 1280×800、重连 4/4 PASS
-- 产品代码为 r18：PTY `change_pty_size` 随窗格尺寸发送并在重连沿用目标尺寸；UI 桥控件数 72
-- `ui_bridge_check` 41 项、`step0/1/3/4`、`quality_gate` 126 个源文件全部 PASS
+- 产品代码为 r19：新增 SGR/X10 鼠标上报、`term.mouse` 桥动作、`/state` 暴露 `mouse_mode`/`mouse_sgr`；UI 桥控件数 72（验收配置）/73（分发包）
+- `ui_bridge_check` 41 项、`step0/1/3/4`、`quality_gate` 128 个源文件全部 PASS
