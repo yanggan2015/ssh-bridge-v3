@@ -130,7 +130,7 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 - 设计文档 §13 / S12：**已完成并验收（TCP 转发 / 隧道 / UDP 发现）**。`tcp_forward.enable` 按 `port_base + 板 IP 末段` 一次绑定 256 个监听口，`WSAPoll(500ms)` 统一 accept，双向 relay 不阻塞 UI；`tunnel.enable` 拉起 `eadk-tunnel.exe -c runtime.json`，HTTP 映射 18xxx、入站 SSH 映射 28xxx，进程退出自动重启；`discovery.enable` 在 UDP 18071 应答 `EADK1 q`，只返回 `enable && discoverable` 的通道。配置保存后热重载即时生效，Web `/api/tcp-forward`、`/api/tunnel`、`/api/discovery` 与 `/state.services` 同步暴露状态。详见 `docs\S12-TCP隧道发现验收报告.md`。
 - 设计文档 §14 / S13：**已完成并验收（自更新 / 打包 / 全量回归）**。`scripts\package.ps1` 生成 `output\dist\ssh-bridge-v3-3.0-s13-r14-win64.zip`（含 exe、脱敏配置、README、`tools\smoke.ps1`、`tools\update.ps1`、`tools\ui_probe.py`）；`update.ps1` 校验 zip 与 exe SHA-256、白名单替换、失败回滚、更新后自动重启，安装目录只停自身实例。r12 → r13 在线升级、r13 → r14 本地升级、坏包拒绝、TFTP/共享/NFS 三开关、独立包冒烟、S0–S12 回归均已通过。r14 已发布：<https://github.com/yanggan2015/ssh-bridge-v3-releases/releases/tag/v3.0-s13-r14>。详见 `docs\S13-自更新打包全量回归验收报告.md`。
 - 步骤 4：**已完成并验收**。终端窗格（`SB3_TermView`）：每通道回看 5000 行、ANSI/256 色、中文与宽字符、1/2/4 分屏独立游标、选区复制/右键粘贴、Ctrl+滚轮字号、搜索框输入即定位；界面直读内存、无端口。`tests\step4_check.ps1` 19 项全 PASS（含 110k 行灌流不丢字节、隐藏不耗 CPU）。
-- 终端输入/回显加固：修复 BMP 外字符被 16 位截断、满最后一列覆盖末格、真实串口 TX 正常但 RX 恒 0 三个缺陷；串口读泵改为持续 overlapped `ReadFile`。新增 `tests\terminal_echo_matrix.py`，两条真实 SSH 各 13 项、COM3 13 项、COM5 ASCII 7 项、串口回环 12 项通过；内置自测新增 `T4U-11`。详见 `docs\终端回显与特殊字符测试报告.md`。
+- 终端输入/回显加固：修复 BMP 外字符被 16 位截断、满最后一列覆盖末格、真实串口 TX 正常但 RX 恒 0 三个缺陷；串口读泵改为持续 overlapped `ReadFile`。新增 `tests\terminal_echo_matrix.py`，两条真实 SSH 各 13 项、COM3 13 项、COM5 ASCII 7 项、串口回环 12 项通过；内置自测新增 `T4U-11`。`term.send` 改为原样字节发送，新增 `tests\terminal_key_matrix.py`：回环 11 项、两台 SSH 各 4 项控制键/方向键/Tab/退格通过，自测新增 `T4U-12`。详见 `docs\终端回显与特殊字符测试报告.md`。
 
 ```powershell
 # S1 验收（构建 + 8 条自检 + 窗口/进程/整理/git 共 18 项）
