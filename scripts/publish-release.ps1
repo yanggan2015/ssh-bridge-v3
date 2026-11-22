@@ -11,7 +11,7 @@
 # 前置：先运行 scripts\package.ps1 生成 output\dist 下的 zip / UPDATE.json / .sha256。
 
 param(
-    [string]$Version = '3.0-s13-r18',
+    [string]$Version = '3.0-s13-r19',
     [string]$Repo = 'yanggan2015/ssh-bridge-v3-releases',
     [string]$ReleaseDir = 'C:\code\ssh-bridge-v3-releases',
     [switch]$SkipPush
