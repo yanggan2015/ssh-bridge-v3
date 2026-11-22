@@ -148,7 +148,7 @@ pwsh -NoProfile -File tests\ui_responsive_check.ps1
 # 删除通道闭环（11 项；自行起隔离实例，串口/SSH/最后一个通道/删空恢复）
 pwsh -NoProfile -File tests\ui_delete_channel_check.ps1
 # 打包分发（exe + 示例配置 + 使用说明 + 更新器 + ui_probe）
-pwsh -NoProfile -File scripts\package.ps1 -Version 3.0-s13-r14
+pwsh -NoProfile -File scripts\package.ps1 -Version 3.0-s13-r15
 # 独立包冒烟（解压后执行）
 pwsh -NoProfile -File tools\smoke.ps1
 # 本地升级验证（Manifest 可传本地 UPDATE.json）
