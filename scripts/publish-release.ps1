@@ -1,4 +1,4 @@
-# publish-release.ps1 — 把 ssh-bridge v3 安装包发布到独立 release 仓库
+﻿# publish-release.ps1 — 把 ssh-bridge v3 安装包发布到独立 release 仓库
 #
 # 发布仓库：yanggan2015/ssh-bridge-v3-releases（只放二进制，不放源码）
 # 分支：windows_x86_64，分支根 UPDATE.json 供应用内升级读取
@@ -36,6 +36,19 @@ $manifestRaw = Get-Content -LiteralPath $localManifest -Raw
 $builtMatch = [regex]::Match($manifestRaw, '"built_utc"\s*:\s*"([^"]+)"')
 $builtUtc = if ($builtMatch.Success) { $builtMatch.Groups[1].Value } else { [string]$m.built_utc }
 
+function Write-Utf8NoBom([string]$path, [string]$text) {
+    [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function RunGitQuiet([string]$work, [string[]]$gitArgs) {
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    & git -C $work @gitArgs 2>$null | Out-Null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $old
+    return $code
+}
+
 function RunGit([string]$work, [string[]]$gitArgs, [switch]$AllowFail) {
     & git -C $work @gitArgs
     if (-not $AllowFail -and $LASTEXITCODE -ne 0) { throw "git $($gitArgs -join ' ') 失败" }
@@ -58,7 +71,7 @@ if (-not (& git -C $ReleaseDir config user.email)) {
     RunGit $ReleaseDir @('config', 'user.name', 'yanggan2015')
 }
 
-& git -C $ReleaseDir fetch origin --prune 2>$null | Out-Null
+RunGitQuiet $ReleaseDir @('fetch', 'origin', '--prune') | Out-Null
 $hasBranch = (& git -C $ReleaseDir ls-remote --heads origin windows_x86_64) -match 'refs/heads/windows_x86_64$'
 $hasLocalBranch = $false
 & git -C $ReleaseDir show-ref --verify --quiet refs/heads/windows_x86_64
@@ -105,7 +118,7 @@ $releaseManifest = [ordered]@{
     source      = 'https://github.com/yanggan2015/ssh-bridge-v3'
 }
 $manifestText = $releaseManifest | ConvertTo-Json
-Set-Content -LiteralPath (Join-Path $ReleaseDir 'UPDATE.json') -Value $manifestText -Encoding utf8NoBOM
+Write-Utf8NoBom (Join-Path $ReleaseDir 'UPDATE.json') $manifestText
 # Release 同时挂一个固定名 UPDATE.json，供更新器在 raw 清单失败时按 latest 资产兜底。
 $stableManifestAsset = Join-Path $ReleaseDir 'UPDATE.json'
 Write-Output "release UPDATE.json: $Version -> $zipName"
@@ -125,7 +138,7 @@ The app's **Help → Check for updates** button reads
 `https://raw.githubusercontent.com/$Repo/windows_x86_64/UPDATE.json` and
 downloads the package from the same raw branch with SHA-256 verification.
 "@
-Set-Content -LiteralPath (Join-Path $ReleaseDir 'README.md') -Value $branchReadme -Encoding utf8NoBOM
+Write-Utf8NoBom (Join-Path $ReleaseDir 'README.md') $branchReadme
 
 RunGit $ReleaseDir @('add', '-A')
 $dirty = (& git -C $ReleaseDir status --porcelain)
@@ -140,13 +153,17 @@ if (-not $SkipPush) {
     RunGit $ReleaseDir @('push', '-u', 'origin', 'HEAD:windows_x86_64')
     Write-Output "pushed: https://github.com/$Repo/tree/windows_x86_64"
 
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
     & gh release view $tag -R $Repo 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $releaseExists = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $oldEap
+    if ($releaseExists) {
         & gh release upload $tag $zip $localManifest $sumFile $stableManifestAsset -R $Repo --clobber
         if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败：$tag" }
     } else {
         $notes = Join-Path $env:TEMP "ssh-bridge-v3-$Version-notes.md"
-        @"
+        $notesText = @"
 # ssh-bridge v3 $Version
 
 Windows x64 便携安装包。
@@ -158,14 +175,15 @@ Windows x64 便携安装包。
 应用内升级：**帮助 → 检查更新…** 或 **关于 → 检查更新**。
 
 源码：<https://github.com/yanggan2015/ssh-bridge-v3>
-"@ | Set-Content -LiteralPath $notes -Encoding utf8NoBOM
+"@
+        Write-Utf8NoBom $notes $notesText
         & gh release create $tag $zip $localManifest $sumFile $stableManifestAsset -R $Repo --title "ssh-bridge v3 $Version" --notes-file $notes
         if ($LASTEXITCODE -ne 0) { throw "创建 GitHub Release 失败：$tag" }
     }
 }
 
 # 主分支只放导航 README；发布分支负责二进制与清单。
-& git -C $ReleaseDir fetch origin --prune 2>$null | Out-Null
+RunGitQuiet $ReleaseDir @('fetch', 'origin', '--prune') | Out-Null
 $hasMain = (& git -C $ReleaseDir ls-remote --heads origin main) -match 'refs/heads/main$'
 $hasLocalMain = $false
 & git -C $ReleaseDir show-ref --verify --quiet refs/heads/main
@@ -195,7 +213,7 @@ $mainReadme = @"
 The app's **Help → Check for updates** button reads the manifest above and
 downloads the matching GitHub Release asset with SHA-256 verification.
 "@
-Set-Content -LiteralPath (Join-Path $ReleaseDir 'README.md') -Value $mainReadme -Encoding utf8NoBOM
+Write-Utf8NoBom (Join-Path $ReleaseDir 'README.md') $mainReadme
 RunGit $ReleaseDir @('add', '-A')
 $mainDirty = (& git -C $ReleaseDir status --porcelain)
 if ($mainDirty) {
