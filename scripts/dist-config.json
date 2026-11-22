@@ -46,7 +46,13 @@
       "log_dir": "",
       "password": "",
       "username": "root",
-      "buttons": []
+      "buttons": [],
+      "quick_commands": [
+        {
+          "label": "回显测试",
+          "command": "hello-quick"
+        }
+      ]
     },
     {
       "name": "ztl",

@@ -38,6 +38,7 @@ output/cfgtest/
 output/dist/
 output/disttest/
 output/acceptance/
+output/quickcheck/
 
 # SFTP 本地测试数据
 output/sftp_test/
