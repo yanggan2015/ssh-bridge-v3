@@ -1,12 +1,12 @@
 ﻿# dist-smoke.ps1 — 解压后自检（冒烟，不改代码、不依赖仓库）
-# 用法： pwsh -NoProfile -File tools\smoke.ps1 [-Exe .\ssh_bridge3.exe] [-Port 18086]
+# 用法： pwsh -NoProfile -File tools\smoke.ps1 [-Exe .\ssh_bridge3.exe] [-Port 18096]
 #
 # 做四件事：起进程 → /ping + /ui-tree 确认控件在册 → 驱动输入/搜索/分屏 → 退出关端口
 # 退出码： 0 = 冒烟通过；1 = 失败（会打印失败项）
 
 param(
     [string]$Exe  = '',
-    [int]$Port    = 18086
+    [int]$Port    = 18096
 )
 
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }

@@ -392,7 +392,7 @@ void load_root(const cJSON* root, AppConfig* out) {
     const cJSON* agent = cJSON_GetObjectItemCaseSensitive(root, "agent");
     if (cJSON_IsObject(agent)) {
         out->agent.enabled = jbool(agent, "enable", false);
-        out->agent.port = jint(agent, "port", 18086);
+        out->agent.port = jint(agent, "port", 18096);
         out->agent.token = jstr(agent, "token", "");
     }
     const cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");

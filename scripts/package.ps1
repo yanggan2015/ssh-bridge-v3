@@ -49,7 +49,7 @@ $versionText = @(
 ) -join "`r`n"
 Set-Content -LiteralPath (Join-Path $stage 'VERSION.txt') -Value $versionText -Encoding ascii
 
-# 探针：技能自带的 ui_probe.py（默认端口 8086，本程序是 18086，用 --base 指定）
+# 探针：技能自带的 ui_probe.py（默认端口 8086，本程序是 18096，用 --base 指定）
 $sk = Join-Path $env:USERPROFILE 'AppData\Local\Doubao\User Data\Profile 9\.doubao\agent_mode\workspace\.user_skills\win32-ai-ui-bridge'
 $probe = Join-Path $sk 'scripts\ui_probe.py'
 if (Test-Path -LiteralPath $probe) {

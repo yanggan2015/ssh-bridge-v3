@@ -21,7 +21,7 @@ namespace aibridge {
 
 struct Options {
     bool        enabled = false;
-    int         port    = 18086;
+    int         port    = 18096;
     std::string token;
 };
 

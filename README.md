@@ -61,7 +61,7 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 | 本体 | S7 | 文件与脚本（SFTP / xmodem / 按钮 / Lua） | 网页文件页 | **本体出口**：完整终端工具，可独立交付 |
 | 扩展 | S8 | SSH 入站共享网关 :2222 | 网页、Agent | 外部 `ssh -p 2222 <通道名>@<主机>` 进同一终端 |
 | 扩展 | S9 | HTTP 基元 + 网页端 | Agent | 浏览器可用；关掉不影响本体 |
-| 扩展 | S10 | Agent 接口 :18086 | — | 能读控件树、点按钮、取状态；可单独关 |
+| 扩展 | S10 | Agent 接口 :18096 | — | 能读控件树、点按钮、取状态；可单独关 |
 | 扩展 | S11 | 继电器 / TFTP / NFS / 共享目录 | — | 板端 tftp 取文件、nfs mount、继电器脉冲 |
 | 扩展 | S12 | TCP 转发 / 隧道 / UDP 发现（已完成） | — | 公网可映射 HTTP 与入站 SSH |
 | 扩展 | S13 | 自更新 / 打包 / 全量回归（已完成） | — | 单目录 zip、可升级、S0–S12 一键回归 |
@@ -124,7 +124,7 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 - 步骤 1：**已完成并验收**。`--selftest ring|config|serial|all` 自检 + `tests\step1_check.ps1` 18 项全 PASS。已有能力：配置读写（原子替换、单板 patch/delete、三级密码）、环形日志（单写多读游标、时间戳、CR-hold、可选落盘）、串口桥（overlap 读泵、写队列、重连、`loop:` 内置回环端点）。
 - 步骤 2：**已完成并验收**。SSH 出站链路（libssh 静态链接）：PTY+shell、非阻塞读、保活、指数退避重连、双链路隔离；`tests\step2_check.ps1` 11 项全 PASS（自带 paramiko 测试服务器）。
 - 步骤 3：**已完成并验收**。原生窗口壳（菜单/工具栏/通道树/状态栏）、托盘（X=隐藏、双击恢复、菜单退出）、单实例、退出序列停通道并释放串口；`tests\step3_check.ps1` 14 项全 PASS。
-- 步骤 5：**已完成并验收（AI 可控桥接）**。`agent.enable=true` 时监听 `127.0.0.1:18086`，暴露 `/capabilities /ui-tree /control /state /action /logs`；72–73 个控件/动作（随配置）全部可读可写（含菜单、托盘、关于窗、终端输入/原始发送/无剪贴板粘贴/鼠标事件/搜索/绝对回滚/分屏），`tests\ui_bridge_check.ps1` 41 项全 PASS；关掉开关则一个端口都不监听。
+- 步骤 5：**已完成并验收（AI 可控桥接）**。`agent.enable=true` 时监听 `127.0.0.1:18096`，暴露 `/capabilities /ui-tree /control /state /action /logs`；72–73 个控件/动作（随配置）全部可读可写（含菜单、托盘、关于窗、终端输入/原始发送/无剪贴板粘贴/鼠标事件/搜索/绝对回滚/分屏），`tests\ui_bridge_check.ps1` 41 项全 PASS；关掉开关则一个端口都不监听。
 - 设计文档 §9 / S8：**已完成并验收（入站 SSH 共享网关）**。`inbound_ssh.enable=true` 时单口监听 `0.0.0.0:2222`，用户名=通道名，密码按三级规则解析，空密码允许 none；入站会话读写该通道同一份 ring/cmdq，支持多会话、配置重载启停和 `/state.services.inbound`；16 项自动化矩阵覆盖 none、默认密码继承、SSH 通道自身密码、错误/未知用户、双会话和热关闭重开。详见 `docs\S8-入站SSH验收报告.md`。
 - 设计文档 §10 / S9：**已完成并验收（Web 控制台）**。`web.enable=true` 时单端口同时提供 HTTP + WS；10 个页面、REST、`/ws/log` BINARY、token 鉴权、静态 304、配置页两 Tab 表单保存后热重载。板控动作走单后台队列，`MG_EV_WAKEUP` 回写完成状态，避免并发抢串口；页面资产已拆到 `web_pages.cpp`。TCP 转发/隧道页面已由 S12 接上真实状态。详见 `docs\S9-Web控制台验收报告.md`。
 - 设计文档 §13 / S12：**已完成并验收（TCP 转发 / 隧道 / UDP 发现）**。`tcp_forward.enable` 按 `port_base + 板 IP 末段` 一次绑定 256 个监听口，`WSAPoll(500ms)` 统一 accept，双向 relay 不阻塞 UI；`tunnel.enable` 拉起 `eadk-tunnel.exe -c runtime.json`，HTTP 映射 18xxx、入站 SSH 映射 28xxx，进程退出自动重启；`discovery.enable` 在 UDP 18071 应答 `EADK1 q`，只返回 `enable && discoverable` 的通道。配置保存后热重载即时生效，Web `/api/tcp-forward`、`/api/tunnel`、`/api/discovery` 与 `/state.services` 同步暴露状态。详见 `docs\S12-TCP隧道发现验收报告.md`。
@@ -143,7 +143,7 @@ pwsh -NoProfile -File tests\step3_check.ps1          # 会写 output\s3run 下�
 pwsh -NoProfile -File tests\step4_check.ps1          # 需 python + paramiko；-SkipBuild / -LongLoad
 # S5 验收（桥接 41 项；不加 -SkipBuild 会先 make clean，避免旧 .o 布局错位）
 pwsh -NoProfile -File tests\ui_bridge_check.ps1
-# 响应式验收（9 项；需应用已在 18086 运行）
+# 响应式验收（9 项；需应用已在 18096 运行）
 pwsh -NoProfile -File tests\ui_responsive_check.ps1
 # 删除通道闭环（11 项；自行起隔离实例，串口/SSH/最后一个通道/删空恢复）
 pwsh -NoProfile -File tests\ui_delete_channel_check.ps1

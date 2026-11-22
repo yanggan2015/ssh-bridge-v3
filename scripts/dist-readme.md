@@ -92,8 +92,8 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 | --- | --- |
 | `ssh_bridge3.exe` | 主程序（静态链接，目标机不需要 MSYS2 / DLL） |
 | `VERSION.txt` | 当前版本、构建 UTC、exe SHA-256 |
-| `ssh_bridge_config.json` | 示例配置：`agent.enable=true`，端口 18086，token 为空 |
-| `tools\ui_probe.py` | 桥接探针（技能自带；**本程序端口是 18086**，用 `--base` 指定） |
+| `ssh_bridge_config.json` | 示例配置：`agent.enable=true`，端口 18096，token 为空 |
+| `tools\ui_probe.py` | 桥接探针（技能自带；**本程序端口是 18096**，用 `--base` 指定） |
 | `tools\smoke.ps1` | 冒烟脚本：起进程 → 读树 → 输入/搜索/滚动/分屏/关于窗 → 退出 |
 | `tools\update.ps1` | 独立更新器：版本比较、SHA-256 校验、白名单替换、失败回滚 |
 | `README.md` | 本文件 |
@@ -104,7 +104,7 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 {
   "boards": [ {"name":"loop1","serial_device":"loop:ai","auto_open":true} ],
   "ssh":    [ {"name":"board","host":"192.168.1.10","port":22,"username":"root","password":""} ],
-  "agent":  {"enable": true, "port": 18086, "token": ""}
+  "agent":  {"enable": true, "port": 18096, "token": ""}
 }
 ```
 
@@ -112,7 +112,7 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 - `agent.enable=false`（或删掉 `agent` 段）时进程**不监听任何端口**，回到纯本地形态。
 - `agent.token` 非空后，所有请求要带 `X-Ui-Token`，否则 401。建议对外演示时设一个。
 
-## 桥接接口（127.0.0.1:18086）
+## 桥接接口（127.0.0.1:18096）
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -149,7 +149,7 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 ## 命令行自测（不写代码）
 
 ```powershell
-$base = 'http://127.0.0.1:18086'
+$base = 'http://127.0.0.1:18096'
 (Invoke-RestMethod "$base/ping")
 (Invoke-RestMethod "$base/capabilities").actions
 (Invoke-RestMethod "$base/ui-tree").controls | Select-Object id,role,actions
@@ -222,7 +222,7 @@ AI 桥接 id（主面板 30 个 + 历史 5 个 + 设置 5 个，共 40 个）：
 `POST /action` 例：
 
 ```powershell
-$b='http://127.0.0.1:18086'
+$b='http://127.0.0.1:18096'
 # 选中远端目录（支持 “name/” 或纯名）
 Invoke-RestMethod "$b/action" -Method Post -ContentType 'application/json' `
   -Body (@{id='sftp.remote.list';action='select';text='demo_a'}|ConvertTo-Json)

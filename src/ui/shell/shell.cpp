@@ -1486,7 +1486,7 @@ void Shell::show_about() {
                   L"串口 / SSH / 日志共用一个 ring\r\n\r\n"
                   L"官方发布仓库：\r\n"
                   L"github.com/yanggan2015/ssh-bridge-v3-releases\r\n"
-                  L"AI 桥接：http://127.0.0.1:18086",
+                  L"AI 桥接：http://127.0.0.1:18096",
                   WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(44, dpi_, 96),
                   aw - pad * 2, MulDiv(112, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutText)), inst_, nullptr);

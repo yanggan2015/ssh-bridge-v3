@@ -45,7 +45,7 @@ NODES = [
     ('HTTP', 'http_core', 9, 'svc1'),
     ('WS', 'ws /ws/log', 9, 'svc1'),
     ('WEB', '网页 UI', 9, 'svc1'),
-    ('AGT', 'Agent :18086', 10, 'svc1'),
+    ('AGT', 'Agent :18096', 10, 'svc1'),
     ('REL', '继电器', 11, 'svc2'),
     ('TFTP', 'TFTP', 11, 'svc2'),
     ('NFS', 'NFS', 11, 'svc2'),

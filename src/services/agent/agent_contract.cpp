@@ -1,0 +1,366 @@
+// agent_contract.cpp — S10/C1：18081 设备 Agent 面的发现、帮助与状态投影。
+#include "services/agent/agent_contract.h"
+
+#include <cjson/cJSON.h>
+
+#include <cctype>
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include "app/app_core.h"
+
+namespace sb3 {
+namespace agent {
+namespace {
+
+const char* kVersion = "3.0";
+const char* kBuild = __DATE__ " " __TIME__;
+const char* kProtocol = "1.1";
+
+std::string json_text(cJSON* root, bool formatted = false) {
+    if (!root) return "{}";
+    char* p = formatted ? cJSON_Print(root) : cJSON_PrintUnformatted(root);
+    std::string out = p ? p : "{}";
+    cJSON_free(p);
+    cJSON_Delete(root);
+    return out;
+}
+
+std::vector<std::string> split_csv(const std::string& text) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : text) {
+        if (c == ',') {
+            if (!cur.empty()) out.push_back(cur);
+            cur.clear();
+        } else if (!std::isspace(static_cast<unsigned char>(c))) {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+const AppCore::Entry* find_entry(AppCore* core, const std::string& name) {
+    if (!core) return nullptr;
+    for (const AppCore::Entry& e : core->entries()) {
+        if (e.name == name) return &e;
+    }
+    return nullptr;
+}
+
+bool entry_running(const AppCore::Entry& e) {
+    return e.bridge && e.bridge->running();
+}
+
+std::string json_escape(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(c); break;
+        }
+    }
+    return out;
+}
+
+struct OperationSpec {
+    const char* id;
+    const char* method;
+    const char* path;
+    const char* description;
+    const char* auth;
+    const char* params;
+    const char* returns;
+};
+
+const OperationSpec kOperations[] = {
+    {"health.get", "GET", "/health", "存活、版本、构建与 API 开关", "public", "", "ok,service,version,build,api_enabled"},
+    {"api.help.get", "GET", "/api/help", "机器可读发现契约：surfaces + operations", "public", "", "schema,protocol,surfaces,operations"},
+    {"help.get", "GET", "/help", "当前设备面的文本总览与闭环顺序", "public", "", "text"},
+    {"help.channel.get", "GET", "/help/<channel>", "单通道帮助：状态、按钮 id、可复制 curl", "public", "channel", "text"},
+    {"agent.status.get", "GET", "/api/agent/status", "18081 设备面与 18096 UI 桥状态", "token", "", "device,ui_bridge,endpoints"},
+    {"agent.resolve.get", "GET", "/api/agent/resolve", "解析 board/link/channel，返回唯一通道", "public", "board,link,channel", "channel,kind,running"},
+    {"status.get", "GET", "/status", "应用、通道、服务、分屏状态", "public", "", "channels,services,web"},
+    {"log.get", "GET", "/log", "通道最近回显或增量回显", "public", "channel,chars", "channel,text,chars"},
+    {"log.download.get", "GET", "/log/download", "下载通道日志", "public", "channel", "file"},
+    {"log.clear.post", "POST", "/log/clear", "清空通道日志缓冲", "token", "channel", "ok,channel"},
+    {"ws.log.get", "GET", "/ws/log", "WebSocket 二进制回显流", "public", "channel", "binary"},
+    {"write.post", "POST", "/write", "向通道发送文本/原始字节", "token", "channel,data", "ok,bytes"},
+    {"api.config.get", "GET", "/api/config", "完整配置 JSON（含密钥，需 token）", "token", "", "config"},
+    {"config.save.post", "POST", "/api/config/save", "保存完整配置 JSON", "token", "body", "ok"},
+    {"api.channels.get", "GET", "/api/channels", "串口/SSH 通道列表", "token", "", "channels"},
+    {"api.channels.post", "POST", "/api/channels", "新增或编辑通道", "token", "kind,old_name,channel", "ok,channel"},
+    {"channels.delete.post", "POST", "/api/channels/delete", "删除通道", "token", "kind,name", "ok"},
+    {"api.actions.get", "GET", "/api/actions", "板控动作列表", "public", "", "items"},
+    {"actions.create.post", "POST", "/api/actions", "新增/编辑板控动作", "token", "channel,action", "ok"},
+    {"actions.delete.post", "POST", "/api/actions/delete", "删除板控动作", "token", "channel,id", "ok"},
+    {"quick.commands.get", "GET", "/api/quick/commands", "快捷指令列表", "public", "", "items"},
+    {"quick.commands.post", "POST", "/api/quick/commands", "新增/编辑快捷指令", "token", "channel,index,label,command", "ok"},
+    {"relay.devices.get", "GET", "/api/relay/devices", "继电器设备列表", "public", "", "items"},
+    {"relay.devices.post", "POST", "/api/relay/devices", "新增/编辑继电器设备", "token", "device", "ok"},
+    {"relay.devices.delete.post", "POST", "/api/relay/devices/delete", "删除继电器设备", "token", "name", "ok"},
+    {"files.get", "GET", "/api/files", "共享根目录列表", "public", "path", "entries"},
+    {"files.upload.post", "POST", "/api/files/upload", "上传 multipart 文件", "token", "file", "ok,path"},
+    {"files.download.get", "GET", "/api/files/download", "下载共享文件", "public", "path", "file"},
+    {"files.delete.post", "POST", "/api/files/delete", "删除共享文件/空目录", "token", "path", "ok"},
+    {"files.mkdir.post", "POST", "/api/files/mkdir", "新建共享目录", "token", "path", "ok"},
+    {"tftp.config.get", "GET", "/api/tftp/config", "TFTP 配置", "public", "", "config"},
+    {"tftp.config.post", "POST", "/api/tftp/config", "保存 TFTP 配置", "token", "config", "ok"},
+    {"nfs.config.get", "GET", "/api/nfs/config", "NFS 配置", "public", "", "config"},
+    {"nfs.config.post", "POST", "/api/nfs/config", "保存 NFS 配置", "token", "config", "ok"},
+    {"share.config.get", "GET", "/api/share/config", "HTTP 共享配置", "public", "", "config"},
+    {"share.config.post", "POST", "/api/share/config", "保存 HTTP 共享配置", "token", "config", "ok"},
+    {"tcp.forward.get", "GET", "/api/tcp-forward", "TCP 转发运行状态", "public", "", "running"},
+    {"tcp.forward.config.get", "GET", "/api/tcp-forward/config", "TCP 转发配置", "public", "", "config"},
+    {"tcp.forward.config.post", "POST", "/api/tcp-forward/config", "保存 TCP 转发配置", "token", "config", "ok"},
+    {"tunnel.get", "GET", "/api/tunnel", "隧道运行状态", "public", "", "running"},
+    {"tunnel.config.get", "GET", "/api/tunnel/config", "隧道配置", "public", "", "config"},
+    {"tunnel.config.post", "POST", "/api/tunnel/config", "保存隧道配置", "token", "config", "ok"},
+    {"service.post", "POST", "/service", "启停服务", "token", "name,on", "ok,running"},
+    {"action.post", "POST", "/action", "执行板控动作", "token", "channel,id,backend", "ok,job"},
+    {"job.get", "GET", "/job", "查询动作输出", "public", "id", "id,done,ok,message,output"},
+};
+
+}  // namespace
+
+std::string health_json(int web_port, const UiBridgeInfo& ui) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "service", "ssh-bridge");
+    cJSON_AddStringToObject(root, "tool", "ssh-bridge");
+    cJSON_AddStringToObject(root, "version", kVersion);
+    cJSON_AddStringToObject(root, "build", kBuild);
+    cJSON_AddBoolToObject(root, "api_enabled", true);
+    cJSON_AddNumberToObject(root, "web_port", web_port);
+    cJSON_AddStringToObject(root, "protocol", kProtocol);
+    cJSON* u = cJSON_AddObjectToObject(root, "ui_bridge");
+    cJSON_AddBoolToObject(u, "enabled", ui.enabled);
+    cJSON_AddNumberToObject(u, "port", ui.port);
+    cJSON_AddBoolToObject(u, "token_required", ui.token_required);
+    return json_text(root);
+}
+
+std::string help_json(AppCore* core, int web_port, const UiBridgeInfo& ui, bool web_token_required) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "service", "ssh-bridge");
+    cJSON_AddStringToObject(root, "version", kVersion);
+    cJSON_AddStringToObject(root, "build", kBuild);
+    cJSON_AddNumberToObject(root, "schema", 2);
+    cJSON_AddStringToObject(root, "protocol", kProtocol);
+    cJSON_AddStringToObject(root, "auth", "写接口使用 Authorization: Bearer <web.token>；读接口公开");
+
+    cJSON* surfaces = cJSON_AddObjectToObject(root, "surfaces");
+    cJSON* device = cJSON_AddObjectToObject(surfaces, "device");
+    cJSON_AddBoolToObject(device, "enabled", true);
+    cJSON_AddNumberToObject(device, "port", web_port);
+    cJSON_AddStringToObject(device, "base_url", "/");
+    cJSON_AddStringToObject(device, "protocol", kProtocol);
+    cJSON_AddStringToObject(device, "auth", web_token_required ? "bearer-write" : "read-only-write-disabled");
+    cJSON* ui_json = cJSON_AddObjectToObject(surfaces, "ui_bridge");
+    cJSON_AddBoolToObject(ui_json, "enabled", ui.enabled);
+    cJSON_AddNumberToObject(ui_json, "port", ui.port);
+    cJSON_AddStringToObject(ui_json, "base_url", ("http://127.0.0.1:" + std::to_string(ui.port)).c_str());
+    cJSON_AddStringToObject(ui_json, "protocol", kProtocol);
+    cJSON_AddStringToObject(ui_json, "auth", ui.token_required ? "x-ui-token" : "optional-token");
+
+    cJSON* ops = cJSON_AddArrayToObject(root, "operations");
+    for (const OperationSpec& spec : kOperations) {
+        cJSON* e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "id", spec.id);
+        cJSON_AddStringToObject(e, "surface", "device");
+        cJSON_AddStringToObject(e, "method", spec.method);
+        cJSON_AddStringToObject(e, "path", spec.path);
+        cJSON_AddStringToObject(e, "description", spec.description);
+        cJSON_AddStringToObject(e, "auth", spec.auth);
+        cJSON* params = cJSON_AddArrayToObject(e, "params");
+        for (const std::string& p : split_csv(spec.params))
+            cJSON_AddItemToArray(params, cJSON_CreateString(p.c_str()));
+        cJSON* returns = cJSON_AddArrayToObject(e, "returns");
+        for (const std::string& r : split_csv(spec.returns))
+            cJSON_AddItemToArray(returns, cJSON_CreateString(r.c_str()));
+        cJSON_AddBoolToObject(e, "implemented", true);
+        cJSON_AddItemToArray(ops, e);
+    }
+
+    cJSON* pages = cJSON_AddArrayToObject(root, "pages");
+    for (const char* p : {"dashboard", "channels", "actions", "button-script", "relay", "tftp",
+                          "nfs", "share", "tcp-forward", "tunnel", "agent", "config"})
+        cJSON_AddItemToArray(pages, cJSON_CreateString(p));
+    cJSON* channels = cJSON_AddArrayToObject(root, "channels");
+    if (core) {
+        for (const AppCore::Entry& e : core->entries()) {
+            cJSON* ch = cJSON_CreateObject();
+            cJSON_AddStringToObject(ch, "name", e.name.c_str());
+            cJSON_AddStringToObject(ch, "kind", e.kind.c_str());
+            cJSON_AddBoolToObject(ch, "running", entry_running(e));
+            cJSON_AddStringToObject(ch, "state", e.state.c_str());
+            cJSON_AddItemToArray(channels, ch);
+        }
+    }
+    return json_text(root);
+}
+
+std::string status_json(AppCore* core, int web_port, const UiBridgeInfo& ui, bool web_token_required) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "service", "ssh-bridge");
+    cJSON_AddStringToObject(root, "protocol", kProtocol);
+    cJSON_AddNumberToObject(root, "web_port", web_port);
+    cJSON* device = cJSON_AddObjectToObject(root, "device");
+    cJSON_AddBoolToObject(device, "enabled", true);
+    cJSON_AddNumberToObject(device, "port", web_port);
+    cJSON_AddStringToObject(device, "base_url", "/");
+    cJSON_AddStringToObject(device, "auth", web_token_required ? "bearer-write" : "read-only-write-disabled");
+    cJSON_AddNumberToObject(device, "channels", core ? static_cast<double>(core->entries().size()) : 0);
+    cJSON* deps = cJSON_AddArrayToObject(device, "endpoints");
+    for (const char* e : {"/health", "/api/help", "/help", "/help/<channel>", "/api/agent/status",
+                          "/api/agent/resolve", "/status", "/log", "/write", "/action", "/job", "/api/channels"})
+        cJSON_AddItemToArray(deps, cJSON_CreateString(e));
+
+    cJSON* ui_json = cJSON_AddObjectToObject(root, "ui_bridge");
+    cJSON_AddBoolToObject(ui_json, "enabled", ui.enabled);
+    cJSON_AddNumberToObject(ui_json, "port", ui.port);
+    cJSON_AddBoolToObject(ui_json, "token_required", ui.token_required);
+    cJSON_AddStringToObject(ui_json, "base_url", ("http://127.0.0.1:" + std::to_string(ui.port)).c_str());
+    cJSON* ueps = cJSON_AddArrayToObject(ui_json, "endpoints");
+    for (const char* e : {"/ping", "/capabilities", "/ui-tree", "/control?id=ID", "/state",
+                          "/action", "/logs?since=N"})
+        cJSON_AddItemToArray(ueps, cJSON_CreateString(e));
+
+    // 兼容旧 Agent 页面字段；这些字段只描述 18096，不代表 18081 板控面。
+    cJSON_AddBoolToObject(root, "enable", ui.enabled);
+    cJSON_AddNumberToObject(root, "port", ui.port);
+    cJSON_AddBoolToObject(root, "token_required", ui.token_required);
+    cJSON_AddStringToObject(root, "base_url", ("http://127.0.0.1:" + std::to_string(ui.port)).c_str());
+    cJSON* eps = cJSON_AddArrayToObject(root, "endpoints");
+    for (const char* e : {"/ping", "/capabilities", "/ui-tree", "/control?id=ID", "/state",
+                          "/action", "/logs?since=N"})
+        cJSON_AddItemToArray(eps, cJSON_CreateString(e));
+    return json_text(root);
+}
+
+std::string help_text(AppCore* core, int web_port, const UiBridgeInfo& ui) {
+    std::string out;
+    out += "ssh-bridge Agent 设备控制面\n";
+    out += "base: http://<host>:" + std::to_string(web_port) + "\n";
+    out += "protocol: " + std::string(kProtocol) + "  build: " + kBuild + "\n";
+    out += "发现: GET /health -> GET /api/help -> GET /help/<channel>\n";
+    out += "闭环: /status -> /log?channel=.. -> /write -> /log?channel=..\n";
+    out += "通道路由: board=串口, link=SSH Link, channel=任意；三选一，冲突 400。\n\n";
+    out += "18096 UI 调试桥（独立系统，不用于板控）: " +
+           (ui.enabled ? ("http://127.0.0.1:" + std::to_string(ui.port)) : std::string("disabled")) + "\n\n";
+    out += "通道:\n";
+    if (core) {
+        for (const AppCore::Entry& e : core->entries()) {
+            out += "  - " + e.name + "  kind=" + e.kind + "  " +
+                   (entry_running(e) ? "running" : "offline") + "  " + e.detail + "\n";
+        }
+    } else {
+        out += "  (core not ready)\n";
+    }
+    out += "\n写操作需要 Authorization: Bearer <web.token>。\n";
+    out += "板控按钮请用 /action {channel,id}；不要用 18096 的 UI 点击代替。\n";
+    out += "Tunnel 启停不进入 Agent 帮助；危险配置只允许人工或管理接口。\n";
+    return out;
+}
+
+std::string channel_help(AppCore* core, const std::string& channel, int web_port) {
+    const AppCore::Entry* e = find_entry(core, channel);
+    if (!e) return "channel not found";
+    std::string out;
+    out += "通道 " + e->name + "\n";
+    out += "kind: " + e->kind + "  state: " + e->state + "  " +
+           (entry_running(*e) ? "running" : "offline") + "\n";
+    if (!e->detail.empty()) out += "detail: " + e->detail + "\n";
+    out += "base: http://<host>:" + std::to_string(web_port) + "\n";
+    out += "\n读:\n";
+    out += "  GET /log?channel=" + e->name + "&chars=8192\n";
+    out += "  GET /status\n";
+    out += "\n写:\n";
+    out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"data\":\"<text>\"}' \\\n";
+    out += "    http://127.0.0.1:" + std::to_string(web_port) + "/write\n";
+    out += "\n按钮:\n";
+    const std::vector<BoardActionConfig>* btns = core ? core->buttons_of(e->name) : nullptr;
+    if (!btns || btns->empty()) {
+        out += "  (none)\n";
+    } else {
+        for (const BoardActionConfig& b : *btns) {
+            out += "  - " + b.id + "  " + b.label + "  backend=" + b.backend +
+                   (b.enable ? "" : "  disabled") + "\n";
+            out += "    curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
+            out += "      -d '{\"channel\":\"" + json_escape(e->name) + "\",\"id\":\"" +
+                   json_escape(b.id) + "\"}' http://127.0.0.1:" + std::to_string(web_port) + "/action\n";
+        }
+    }
+    out += "\n注意: 18096 是桌面 UI 调试桥，不是本通道的板控路径。\n";
+    return out;
+}
+
+ResolveResult resolve_channel(AppCore* core, const std::string& board, const std::string& link,
+                              const std::string& channel) {
+    ResolveResult r;
+    if (!core) {
+        r.http_status = 500;
+        r.error_code = "core_not_ready";
+        r.error_message = "core not ready";
+        return r;
+    }
+    int provided = (!board.empty() ? 1 : 0) + (!link.empty() ? 1 : 0) + (!channel.empty() ? 1 : 0);
+    if (provided == 0) {
+        r.http_status = 400;
+        r.error_code = "channel_required";
+        r.error_message = "one of board/link/channel is required";
+        return r;
+    }
+    if (provided > 1) {
+        r.http_status = 400;
+        r.error_code = "channel_conflict";
+        r.error_message = "board, link and channel are mutually exclusive";
+        return r;
+    }
+    const std::string name = !board.empty() ? board : (!link.empty() ? link : channel);
+    const std::string want_kind = !board.empty() ? "serial" : (!link.empty() ? "ssh" : "");
+    const AppCore::Entry* e = find_entry(core, name);
+    if (!e) {
+        r.http_status = 404;
+        r.error_code = "channel_not_found";
+        r.error_message = "channel not found: " + name;
+        return r;
+    }
+    if (!want_kind.empty() && e->kind != want_kind) {
+        r.http_status = 400;
+        r.error_code = "channel_kind_mismatch";
+        r.error_message = "expect " + want_kind + " but channel is " + e->kind;
+        return r;
+    }
+    r.ok = true;
+    r.http_status = 200;
+    r.name = e->name;
+    r.kind = e->kind;
+    r.running = entry_running(*e);
+    return r;
+}
+
+std::string error_json(const std::string& code, const std::string& message,
+                       const std::string& request_id) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", false);
+    cJSON* error = cJSON_AddObjectToObject(root, "error");
+    cJSON_AddStringToObject(error, "code", code.c_str());
+    cJSON_AddStringToObject(error, "message", message.c_str());
+    if (!request_id.empty()) cJSON_AddStringToObject(root, "request_id", request_id.c_str());
+    return json_text(root);
+}
+
+}  // namespace agent
+}  // namespace sb3

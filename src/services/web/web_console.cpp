@@ -34,6 +34,7 @@
 #include "app/app_core.h"
 #include "core/bridge/bridge.h"
 #include "core/util/util.h"
+#include "services/agent/agent_contract.h"
 #include "services/board_actions/board_action_runner.h"
 #include "services/service_manager.h"
 #include "ui/ui_messages.h"
@@ -395,6 +396,15 @@ bool method_is(const mg_http_message* hm, const char* m) {
            std::string(hm->method.buf, hm->method.len) == m;
 }
 
+// C1：错误响应带 request_id；不记录任何 token 或请求正文。
+std::string new_request_id() {
+    static std::atomic<unsigned long long> seq{0};
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count();
+    return "r-" + std::to_string(ms) + "-" + std::to_string(++seq);
+}
+
 void reply_text(mg_connection* c, int code, const std::string& body, const char* ctype) {
     std::string hdrs = std::string("Content-Type: ") + ctype +
                        "\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n";
@@ -464,6 +474,16 @@ struct WebConsole::Impl {
 
     std::shared_ptr<IBridge> bridge(const std::string& name) {
         return core ? core->find_shared(name) : nullptr;
+    }
+
+    agent::UiBridgeInfo ui_info() const {
+        agent::UiBridgeInfo info;
+        if (!core) return info;
+        const AgentConfig& a = core->config().agent;
+        info.enabled = a.enabled;
+        info.port = a.port;
+        info.token_required = !a.token.empty();
+        return info;
     }
 
     std::string status() const;
@@ -702,6 +722,11 @@ void WebConsole::Impl::cleanup_job() {
 
 void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
     if (!hm) return;
+    // A1-5：请求体总量上限 16MB；超限不解析、不落日志，直接结构化 413。
+    if (hm->body.len > 16u * 1024u * 1024u) {
+        reply_json_text(c, 413, agent::error_json("request_too_large", "body exceeds 16MB", new_request_id()));
+        return;
+    }
     std::string path(hm->uri.buf, hm->uri.len);
     if (path == "/" || path == "") path = "/dashboard";
     if (path.size() > 5 && path.rfind(".html") == path.size() - 5) path.resize(path.size() - 5);
@@ -752,7 +777,31 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         return;
     }
     if (path == "/health") {
-        reply_json_text(c, 200, "{\"ok\":true,\"service\":\"ssh-bridge-web\",\"s9\":true}");
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        reply_json_text(c, 200, agent::health_json(port, ui_info()));
+        return;
+    }
+    if (path == "/api/agent/resolve") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        agent::ResolveResult r = agent::resolve_channel(core, query_var(hm, "board"),
+                                                        query_var(hm, "link"), query_var(hm, "channel"));
+        if (!r.ok) {
+            reply_json_text(c, r.http_status,
+                            agent::error_json(r.error_code, r.error_message, new_request_id()));
+            return;
+        }
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddStringToObject(out, "channel", r.name.c_str());
+        cJSON_AddStringToObject(out, "kind", r.kind.c_str());
+        cJSON_AddBoolToObject(out, "running", r.running);
+        reply_json(c, 200, out);
         return;
     }
     if (path == "/favicon.ico") {
@@ -873,93 +922,22 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
     }
     if (path == "/api/help") {
         if (!method_is(hm, "GET")) {
-            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
             return;
         }
-        cJSON* out = cJSON_CreateObject();
-        cJSON_AddBoolToObject(out, "ok", true);
-        cJSON_AddStringToObject(out, "service", "ssh-bridge-web");
-        cJSON_AddStringToObject(out, "protocol", "1.1");
-        cJSON_AddStringToObject(out, "auth", "写入接口使用 Authorization: Bearer <web.token>；只读接口公开");
-        cJSON* ops = cJSON_AddArrayToObject(out, "operations");
-        auto op = [&](const char* method, const char* path, const char* desc, const char* auth) {
-            cJSON* e = cJSON_CreateObject();
-            cJSON_AddStringToObject(e, "method", method);
-            cJSON_AddStringToObject(e, "path", path);
-            cJSON_AddStringToObject(e, "description", desc);
-            cJSON_AddStringToObject(e, "auth", auth);
-            cJSON_AddItemToArray(ops, e);
-        };
-        op("GET", "/status", "应用、通道、服务、分屏状态", "public");
-        op("GET", "/log?channel=NAME&chars=N", "通道最近回显", "public");
-        op("GET", "/log/download?channel=NAME", "下载通道日志", "public");
-        op("POST", "/log/clear?channel=NAME", "清空通道日志缓冲", "token");
-        op("GET", "/ws/log?channel=NAME", "WebSocket 二进制回显流", "public");
-        op("POST", "/write?channel=NAME", "向通道发送文本", "token");
-        op("GET", "/api/help", "本机可读接口清单", "public");
-        op("GET", "/api/config", "完整配置 JSON（含密钥，需 token）", "token");
-        op("POST", "/api/config/save", "保存完整配置 JSON", "token");
-        op("GET", "/api/channels", "串口/SSH 通道列表", "token");
-        op("POST", "/api/channels", "新增或编辑通道 {kind,old_name,channel}", "token");
-        op("POST", "/api/channels/delete", "删除通道 {kind,name}", "token");
-        op("GET", "/api/actions", "板控动作列表", "public");
-        op("POST", "/api/actions", "新增/编辑板控动作", "token");
-        op("POST", "/api/actions/delete", "删除板控动作", "token");
-        op("GET", "/api/quick/commands", "快捷指令列表", "public");
-        op("POST", "/api/quick/commands", "新增/编辑快捷指令", "token");
-        op("GET", "/api/relay/devices", "继电器设备列表", "public");
-        op("POST", "/api/relay/devices", "新增/编辑继电器设备", "token");
-        op("POST", "/api/relay/devices/delete", "删除继电器设备", "token");
-        op("GET", "/api/files?path=REL", "共享根目录列表", "public");
-        op("POST", "/api/files/upload", "上传 multipart 文件", "token");
-        op("GET", "/api/files/download?path=REL", "下载共享文件", "public");
-        op("POST", "/api/files/delete", "删除共享文件/空目录", "token");
-        op("POST", "/api/files/mkdir", "新建共享目录", "token");
-        op("GET", "/api/tftp/config", "TFTP 配置", "public");
-        op("POST", "/api/tftp/config", "保存 TFTP 配置", "token");
-        op("GET", "/api/nfs/config", "NFS 配置", "public");
-        op("POST", "/api/nfs/config", "保存 NFS 配置", "token");
-        op("GET", "/api/share/config", "HTTP 共享配置", "public");
-        op("POST", "/api/share/config", "保存 HTTP 共享配置", "token");
-        op("GET", "/api/tcp-forward", "TCP 转发运行状态", "public");
-        op("GET", "/api/tcp-forward/config", "TCP 转发配置", "public");
-        op("POST", "/api/tcp-forward/config", "保存 TCP 转发配置", "token");
-        op("GET", "/api/tunnel", "隧道运行状态", "public");
-        op("GET", "/api/tunnel/config", "隧道配置", "public");
-        op("POST", "/api/tunnel/config", "保存隧道配置", "token");
-        op("GET", "/api/agent/status", "Agent UI 桥配置与端点", "token");
-        op("POST", "/service", "启停服务 {name,on}", "token");
-        op("POST", "/action", "执行板控动作 {id,backend?}", "token");
-        op("GET", "/job?id=N", "查询动作输出", "public");
-        cJSON* pages = cJSON_AddArrayToObject(out, "pages");
-        for (const char* p : {"dashboard", "channels", "actions", "button-script", "relay", "tftp",
-                              "nfs", "share", "tcp-forward", "tunnel", "agent", "config"})
-            cJSON_AddItemToArray(pages, cJSON_CreateString(p));
-        reply_json(c, 200, out);
+        reply_json_text(c, 200, agent::help_json(core, port, ui_info(), !token.empty()));
         return;
     }
     if (path == "/api/agent/status") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
         if (!write_ok(hm)) {
             reply_json_text(c, 401, "{\"ok\":false,\"error\":\"agent status requires Bearer token\"}");
             return;
         }
-        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
-        cJSON* agent = cJSON_IsObject(root) ? cJSON_GetObjectItemCaseSensitive(root, "agent") : nullptr;
-        int port = agent ? json_int(agent, "port", 18096) : 18096;
-        bool enable = agent ? json_bool(agent, "enable", true) : true;
-        std::string token = agent ? json_str(agent, "token") : std::string();
-        cJSON* out = cJSON_CreateObject();
-        cJSON_AddBoolToObject(out, "ok", true);
-        cJSON_AddBoolToObject(out, "enable", enable);
-        cJSON_AddNumberToObject(out, "port", port);
-        cJSON_AddBoolToObject(out, "token_required", !token.empty());
-        cJSON_AddStringToObject(out, "base_url", ("http://127.0.0.1:" + std::to_string(port)).c_str());
-        cJSON* eps = cJSON_AddArrayToObject(out, "endpoints");
-        for (const char* e : {"/ping", "/capabilities", "/ui-tree", "/control?id=ID", "/state",
-                              "/action", "/logs?since=N"})
-            cJSON_AddItemToArray(eps, cJSON_CreateString(e));
-        cJSON_Delete(root);
-        reply_json(c, 200, out);
+        reply_json_text(c, 200, agent::status_json(core, port, ui_info(), !token.empty()));
         return;
     }
     if (path == "/api/channels") {
@@ -2165,23 +2143,26 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         return;
     }
     if (path == "/help") {
-        std::string help = "ssh-bridge Web 控制台\n\n"
-                           "读：GET /status /log /actions /quick /relay /services\n"
-                           "写：POST /write /action /quick /relay /service，需 Authorization: Bearer <token>\n"
-                           "WS：/ws/log?channel=<通道名>，服务端只发 BINARY 帧。\n";
-        reply_text(c, 200, help, "text/plain; charset=utf-8");
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        reply_text(c, 200, agent::help_text(core, port, ui_info()), "text/plain; charset=utf-8");
         return;
     }
     if (path.rfind("/help/", 0) == 0) {
-        std::string ch = path.substr(6);
-        auto b = bridge(ch);
-        if (!b) {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        char decoded[512] = "";
+        int n = mg_url_decode(path.c_str() + 6, path.size() - 6, decoded, sizeof(decoded), 0);
+        std::string ch = n > 0 ? std::string(decoded, static_cast<std::size_t>(n)) : std::string();
+        if (ch.empty() || !core || !core->find_shared(ch)) {
             reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
             return;
         }
-        reply_text(c, 200, "通道 " + ch + "\n状态：" + (b->running() ? "在线" : "离线") +
-                                "\n读写：/log?channel=" + ch + "，/write 需要 token。\n",
-                   "text/plain; charset=utf-8");
+        reply_text(c, 200, agent::channel_help(core, ch, port), "text/plain; charset=utf-8");
         return;
     }
 

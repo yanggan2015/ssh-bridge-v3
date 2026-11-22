@@ -15,7 +15,7 @@ public class PW3 {
 }
 "@
 [PW3]::SetProcessDPIAware() | Out-Null
-$base = 'http://127.0.0.1:18086'
+$base = 'http://127.0.0.1:18096'
 $tree = Invoke-RestMethod "$base/ui-tree" -TimeoutSec 10
 $ctl = $tree.controls | Where-Object { $_.id -eq $Id } | Select-Object -First 1
 $h = [IntPtr]::new([Int64]$ctl.hwnd)

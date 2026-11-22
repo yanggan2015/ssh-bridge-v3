@@ -18,11 +18,13 @@ SHELL    := $(MINGW)/../usr/bin/sh.exe
 DEPFLAGS := -MMD -MP
 
 CXXFLAGS ?= -O2 -Wall -Wextra -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE -DLIBSSH_STATIC \
+            -DMG_MAX_RECV_SIZE=20971520 \
             -finput-charset=UTF-8 -fexec-charset=UTF-8 -std=c++17 \
             -Isrc -Isrc/third_party -Isrc/third_party/lua -Isrc/third_party/winnfsd/src -I$(MINGW)/include -DUI_BRIDGE_ENABLE
 
 # 第三方 C 源码（mongoose/win_ui_bridge）：只开 -Wall；mongoose 内部未用变量按规范局部抑制
 CFLAGS ?= -O2 -Wall -Wno-unused-variable -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
+          -DMG_MAX_RECV_SIZE=20971520 \
           -DUI_BRIDGE_ENABLE -finput-charset=UTF-8 -fexec-charset=UTF-8 -pthread \
           -UUNICODE -U_UNICODE \
           -Isrc/third_party -Isrc/third_party/lua -I$(MINGW)/include -I$(MINGW)/include/cjson
@@ -77,6 +79,7 @@ SOURCES := \
   src/services/discovery/discovery_service.cpp \
   src/services/web/web_console.cpp \
   src/services/web/web_pages.cpp \
+  src/services/agent/agent_contract.cpp \
   src/services/service_manager.cpp
 
 THIRD_SOURCES := \
@@ -146,6 +149,7 @@ DIRS := $(BUILDDIR) \
         $(BUILDDIR)/services/tunnel \
         $(BUILDDIR)/services/discovery \
         $(BUILDDIR)/services/web \
+        $(BUILDDIR)/services/agent \
         $(BUILDDIR)/third_party \
         $(BUILDDIR)/third_party/winnfsd \
         $(BUILDDIR)/third_party/winnfsd/src \

@@ -100,7 +100,7 @@ struct WebConfig {              // S9
 
 struct AgentConfig {            // S10
     bool        enabled = false;
-    int         port    = 18086;
+    int         port    = 18096;
     std::string token;          // 可选：非空则所有 / 请求要带 X-Ui-Token
 };
 

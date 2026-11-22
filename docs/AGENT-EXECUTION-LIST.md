@@ -21,12 +21,12 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A1-1 | `/health` 元数据 | `ok/service/version/build/api_enabled`；不暴露密钥 | `agent_routes.cpp`、`web_console.cpp` | 200；字段齐全；18096 关闭不影响 | 计划 |
-| A1-2 | `/api/help` 契约 | `schema/protocol/surfaces/operations`；每项 `id/surface/method/path/params/returns/auth/implemented` | `agent_help.cpp` | 只列已实现；POST 405；18096 `enabled:false` 可见 | 计划 |
-| A1-3 | 动态文本帮助 | `/help` 总览；`/help/<channel>` 实时状态、终端态、真实按钮 id、curl | `agent_help.cpp` | 换通道/端口后内容变化；无密码/token/tunnel | 计划 |
-| A1-4 | 通道路由归一 | `board/link/channel` 三选一；冲突 400；不存在 404；未运行 409 | `agent_routes.cpp` | 12 组键组合用例 | 计划 |
-| A1-5 | 鉴权与请求约束 | 写 token；body 16MB；命令 4KB；方法白名单；request_id | `agent_routes.cpp` | 401/405/413；无 token 读边界符合配置 | 计划 |
-| A1-6 | Agent 状态聚合 | `/api/agent/status` 返回 `device` 与 `ui_bridge`，UI 仅状态不代理 | `web_console.cpp` | 两段字段；18096 关闭时 `ui_bridge.enabled:false` | 计划 |
+| A1-1 | `/health` 元数据 | `ok/service/version/build/api_enabled`；不暴露密钥 | `agent_contract.cpp`、`web_console.cpp` | 200；字段齐全；18096 关闭不影响 | 已完成 |
+| A1-2 | `/api/help` 契约 | `schema/protocol/surfaces/operations`；每项 `id/surface/method/path/params/returns/auth/implemented` | `agent_contract.cpp` | 只列已实现；POST 405；18096 `enabled:false` 可见 | 已完成 |
+| A1-3 | 动态文本帮助 | `/help` 总览；`/help/<channel>` 实时状态、终端态、真实按钮 id、curl | `agent_contract.cpp` | 换通道/端口后内容变化；无密码/token/tunnel | 已完成 |
+| A1-4 | 通道路由归一 | `board/link/channel` 三选一；冲突 400；不存在 404 | `agent_contract.cpp`、`web_console.cpp` | 15 组键组合用例 | 已完成 |
+| A1-5 | 鉴权与请求约束 | 写 token；body 16MB；方法白名单；request_id；命令 4KB 随 C4 | `web_console.cpp`、`agent_contract.cpp` | 401/405/413；无 token 读边界符合配置 | 已完成（命令 4KB 待 C4） |
+| A1-6 | Agent 状态聚合 | `/api/agent/status` 返回 `device` 与 `ui_bridge`，UI 仅状态不代理 | `agent_contract.cpp`、`web_console.cpp` | 两段字段；18096 关闭时 `ui_bridge.enabled:false` | 已完成 |
 
 ## 2. P0-B：上下文与探测
 
@@ -161,3 +161,17 @@ D0 文档定稿
 ```
 
 C1 完成前不写 C2；C4 完成前不做 C5；A10-7（关闭 18096）必须在 C10 前全绿。任何“18081 做不了”的能力，必须补在 18081 或明确标记不做的安全边界，不得转向 18096。
+
+## 13. C1 完成记录（2026-11-23）
+
+- 新增 `src/services/agent/agent_contract.{h,cpp}`：发现契约、动态帮助、双面状态、通道路由归一、结构化错误。
+- `web_console.cpp` 只负责路由接线；`/health`、`/api/help`、`/help`、`/help/<channel>`、`/api/agent/status` 全部改为新实现。
+- 新增 `GET /api/agent/resolve?board=&link=&channel=`：三选一；冲突 400；未知 404；board 必须 serial、link 必须 ssh。
+- `/api/help` 列出 45 个已实现操作；每项含 `id/surface/params/returns/implemented`；`POST` 405。
+- `/api/agent/status` 保留旧顶层 UI 字段，新增 `device` 与 `ui_bridge` 两段；`POST` 405。
+- 请求体上限 16MB，`MG_MAX_RECV_SIZE` 提升到 20MB 以便返回 413；方法错误与上限错误均带 `request_id`。
+- 端口默认值统一为 18096：源码默认、README、分发包配置与说明；历史测试/审计证据不改。
+- 通道归一设计收敛：已配置但未运行的通道返回 `200 + running:false`；409 留给后续动作/锁接口。
+- 验证：`agent-contract-smoke` 82/82、`api-smoke` 58/58、`api-v3-smoke` 43/43、`agent-smoke` 63/63、`web-v3-audit` 120/120。
+- 隔离验证：`agent.enable=false` 时 18081 三处 `ui_bridge.enabled` 均为 false、18096 端口关闭，4/4；证据 `output/ux-audit/agent-contract-ui-disabled.json`。
+- 旧 `web-audit-round5.js` 仍在等待已不存在的 `#tcpBox`，属过期选择器；现行页面审计以 `web-v3-audit.js` 为准。

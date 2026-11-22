@@ -5,7 +5,7 @@
   },
   "agent": {
     "enable": true,
-    "port": 18086,
+    "port": 18096,
     "token": ""
   },
   "ui": {

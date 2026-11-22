@@ -3,7 +3,7 @@ param(
     [string]$Id = '',
     [int]$W = 0,
     [int]$H = 0,
-    [string]$Base = 'http://127.0.0.1:18086'
+    [string]$Base = 'http://127.0.0.1:18096'
 )
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
