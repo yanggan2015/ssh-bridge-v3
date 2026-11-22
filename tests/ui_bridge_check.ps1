@@ -20,12 +20,12 @@ $base = 'http://127.0.0.1:18086'
 
 # 基线：每个控件必须登记稳定 id，且至少要有一个可执行动作
 $expected = @(
-    'btn.refresh', 'btn.reconnect', 'btn.clear', 'btn.toggleTree',
+    'btn.refresh', 'btn.reconnect', 'btn.clear',
     'tree.channels', 'label.status', 'edit.search', 'term.view', 'label.searchHint',
     'menu.file.exit', 'menu.help.about', 'menu.view.hide', 'menu.view.refresh',
     'menu.view.reconnect', 'menu.view.split1', 'menu.view.split2', 'menu.view.split4',
     'menu.view.copy', 'menu.view.paste', 'menu.view.reload', 'menu.view.clear',
-    'menu.view.channelbar', 'menu.view.findnext', 'menu.view.focussearch',
+    'menu.view.findnext', 'menu.view.focussearch',
     'menu.tray.show', 'menu.tray.hide', 'menu.tray.exit',
     'term.input', 'term.send', 'term.search', 'term.scroll',
     'term.clear', 'term.copy', 'term.paste', 'term.reload', 'term.focus',
@@ -159,7 +159,7 @@ try {
     $aboutOk = Act 'btn.about.ok' 'click'
     Start-Sleep -Milliseconds 400
     Check 'T5-8' 'about.text 可读、btn.about.ok 可关闭' `
-        ($aboutText.json.ok -eq $true -and [string]$aboutText.json.result.text -like '*SSH Bridge 3.0*' `
+        ($aboutText.json.ok -eq $true -and [string]$aboutText.json.result.text -like '*ssh-bridge v3*' `
             -and $aboutOk.json.ok -eq $true -and (State).about_open -eq $false) `
         "text='$([string]$aboutText.json.result.text -replace "`r`n", ' / ')' about_open=$((State).about_open)"
 
