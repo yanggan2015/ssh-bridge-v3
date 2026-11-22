@@ -53,13 +53,22 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A4-1 | `/command` 202 | 入 cmdq；返回 job_id/queued；不返回输出 | `agent_routes.cpp`、`agent_jobs.cpp` | 202；job 可查；串口/loop 回显可见 | 计划 |
-| A4-2 | `/command_block` | JobRunner 等待；默认 2000ms，最大 60000ms；poll 不 sleep | `agent_exec.cpp` | 3s 命令返回 output；超时 `timed_out` | 计划 |
-| A4-3 | `/agent/exec` | 仅 shell；追加 `end_cmd_<id>`；超时/状态不匹配 409 | `agent_exec.cpp` | 标记输出完整；uboot 调用 409 | 计划 |
-| A4-4 | `/write` 兼容 | `data` 与 `text` 二选一；原始字节；202 | `agent_routes.cpp` | 原样写入；不补行尾 | 计划 |
-| A4-5 | `/send_keys` | 字符串数组；`\r/\u0003/\u0004`；interval 10–1000ms | `agent_routes.cpp` | Ctrl+C、多键序列生效 | 计划 |
-| A4-6 | `/action` | 复用 `/actions` id；backend command/script/relay；未知/禁用错误 | `agent_routes.cpp` | 按钮真实生效；409/404 正确 | 计划 |
-| A4-7 | 动作审计 | request_id/session/channel/action/status/duration/bytes | `agent_jobs.cpp` | 可查；无原始密码/命令全文 | 计划 |
+| A4-1 | `/command` 202 | 入 cmdq；返回 job_id/queued；不返回输出 | `web_console.cpp` | 202；job 可查；串口/loop 回显可见 | 已完成 |
+| A4-2 | `/command_block` | JobRunner 等待；默认 2000ms，最大 60000ms；poll 不 sleep | `web_console.cpp` | 3s 命令返回 output；超时 `timed_out` | 已完成 |
+| A4-3 | `/agent/exec` | 仅 shell；追加 `__C4_END_<jobid>__`；状态不匹配 409 | `web_console.cpp`、`agent_scan.cpp` | 标记输出完整；loop/uboot 调用 409 | 已完成 |
+| A4-4 | `/write` 兼容 | `data` 与 `text` 二选一；原始字节；202 | `web_console.cpp` | 原样写入；不补行尾 | 已完成 |
+| A4-5 | `/send_keys` | 字符串数组；`\r/\u0003/\u0004`；interval 10–1000ms | `web_console.cpp`、`key_chars.c` | Ctrl+C、多键序列生效 | 已完成 |
+| A4-6 | `/action` | 复用 `/actions` id；backend 校验；未知/禁用错误 | `web_console.cpp` | 按钮真实生效；409/404/400 正确 | 已完成 |
+| A4-7 | 动作审计 | request_id/session/channel/action/status/duration/bytes | `web_console.cpp` | `/job?id=` 可查；无原始密码/命令全文 | 已完成 |
+
+**C4 完成记录（2026-11-23）**
+
+- 实现位置：`src/services/web/web_console.cpp`。统一的 `Job`/`Task` 队列按 `Action/Command/CommandBlock/Exec/SendKeys` 分发；`/command_block` 与 `/agent/exec` 使用 pending HTTP + `MG_EV_WAKEUP` 回写，poll 线程不 sleep。
+- `/api/help` operations 由 50 增至 54，新增 `command.post`、`command.block.post`、`agent.exec.post`、`send.keys.post`；`write.post`、`action.post`、`job.get` 返回字段同步更新。
+- `agent_scan` 的 `features.command` 在完整/全局视图均改为 `true`；`lock` 仍为 `false`，留给 C5。
+- 测试：`output/webtest/agent-command-smoke.js` 84/84，结果 `output/ux-audit/agent-command-result.json`；18096 关闭隔离 7/7，`output/ux-audit/agent-command-ui-disabled.json`。
+- 回归：C1 82/82、C2 73/73、C3 59/59、api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120。
+- 提交：`feat(agent): add command jobs and action audit`。
 
 ## 5. P0-E：租约锁
 

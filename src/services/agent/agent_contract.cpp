@@ -98,7 +98,11 @@ const OperationSpec kOperations[] = {
     {"log.clear.post", "POST", "/log/clear", "清空通道日志缓冲并递增 epoch", "token", "channel", "ok,channel,epoch,total"},
     {"log.disk.post", "POST", "/log/disk", "运行时开关单通道落盘；256MB 上限", "token", "channel,enabled", "ok,channel,enabled,disk_enabled"},
     {"ws.log.get", "GET", "/ws/log", "WebSocket 二进制回显流", "public", "channel", "binary"},
-    {"write.post", "POST", "/write", "向通道发送文本/原始字节", "token", "channel,data", "ok,bytes"},
+    {"write.post", "POST", "/write", "向运行中的通道原样写入文本/字节，返回 202", "token", "channel,data,text", "ok,bytes,request_id"},
+    {"command.post", "POST", "/command", "入队执行一条命令，只返回 job 不等待输出", "token", "channel,command,line_ending", "ok,job_id,queued,request_id"},
+    {"command.block.post", "POST", "/command_block", "写入命令并等待回显/空闲，默认 2000ms 最大 60000ms", "token", "channel,command,line_ending,timeout_ms", "ok,output,timed_out,elapsed_ms,marker"},
+    {"agent.exec.post", "POST", "/agent/exec", "仅 shell 态执行命令，追加结束标记并等待完成", "token", "channel,command,line_ending,timeout_ms", "ok,output,timed_out,elapsed_ms,marker"},
+    {"send.keys.post", "POST", "/send_keys", "按 key 数组发送按键/控制序列，间隔 10..1000ms", "token", "channel,keys,interval_ms", "ok,count,job_id,request_id"},
     {"api.config.get", "GET", "/api/config", "完整配置 JSON（含密钥，需 token）", "token", "", "config"},
     {"config.save.post", "POST", "/api/config/save", "保存完整配置 JSON", "token", "body", "ok"},
     {"api.channels.get", "GET", "/api/channels", "串口/SSH 通道列表", "token", "", "channels"},
@@ -130,8 +134,8 @@ const OperationSpec kOperations[] = {
     {"tunnel.config.get", "GET", "/api/tunnel/config", "隧道配置", "public", "", "config"},
     {"tunnel.config.post", "POST", "/api/tunnel/config", "保存隧道配置", "token", "config", "ok"},
     {"service.post", "POST", "/service", "启停服务", "token", "name,on", "ok,running"},
-    {"action.post", "POST", "/action", "执行板控动作", "token", "channel,id,backend", "ok,job"},
-    {"job.get", "GET", "/job", "查询动作输出", "public", "id", "id,done,ok,message,output"},
+    {"action.post", "POST", "/action", "执行板控动作；backend 可选校验，返回 job 与审计 id", "token", "channel,id,backend,session", "ok,job,job_id,queued,request_id"},
+    {"job.get", "GET", "/job", "查询 job 状态、输出与审计摘要；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,done,ok,timed_out,output,audit"},
 };
 
 }  // namespace
