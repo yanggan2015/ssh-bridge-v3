@@ -72,7 +72,7 @@ std::string page_title(const std::string& page) {
 std::string page_subtitle(const std::string& page) {
     if (page == "dashboard") return "终端、通道与服务状态总览；同一份 ring，不另开设备连接。";
     if (page == "channels") return "串口与 SSH 通道的新增、编辑、改名和删除；保存后由 UI 线程重载。";
-    if (page == "agent") return "查看本机 Agent UI 桥配置，并直接做 capabilities / tree / state / logs 自检。";
+    if (page == "agent") return "上方 18081 设备控制面（唯一板控路径），下方 18096 桌面 UI 桥只读自检。";
     if (page == "config") return "基础 / 详细两套表单；保存后由 UI 线程重载，避免 Web 线程直接改内存。";
     if (page == "actions") return "编辑并测试板控按钮：commands、relay、script 三种执行方式。";
     if (page == "button-script") return "管理每个通道底部的快捷指令，发送只走当前通道。";
@@ -399,6 +399,50 @@ std::string url_encode(const std::string& s) {
         }
     }
     return out;
+}
+
+std::string html_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            case '\'': out += "&#39;"; break;
+            default: out.push_back(c);
+        }
+    }
+    return out;
+}
+
+std::string help_page_html(const std::string& title, const std::string& text) {
+    std::string h =
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>" + html_escape(title) + " · ssh-bridge</title><style>"
+        ":root{color-scheme:dark}body{margin:0;background:#08161a;color:#d9efe9;"
+        "font:14px/1.6 ui-sans-serif,Segoe UI,Arial,sans-serif}"
+        ".wrap{max-width:1080px;margin:0 auto;padding:24px 18px 48px}"
+        "nav a{color:#7ee0c8;text-decoration:none;margin-right:14px}"
+        "h1{font-size:22px;margin:14px 0 6px}p{color:#8fb9b4;margin:0 0 14px}"
+        "pre{white-space:pre-wrap;word-break:break-word;background:#0d2228;border:1px solid #1f3d43;"
+        "border-radius:12px;padding:16px;font:12.5px/1.55 ui-monospace,Consolas,monospace}"
+        "</style></head><body><div class=\"wrap\"><nav>"
+        "<a href=\"/\">仪表盘</a><a href=\"/channels\">通道</a><a href=\"/agent\">Agent</a>"
+        "<a href=\"/api/help\">机器契约</a></nav><h1>" + html_escape(title) + "</h1>"
+        "<p>只使用 /api/help 公布的接口；18081 是唯一板控路径，18096 仅桌面调试。</p>"
+        "<pre>" + html_escape(text) + "</pre></div></body></html>";
+    return h;
+}
+
+bool wants_html(const mg_http_message* hm) {
+    if (!hm) return false;
+    mg_str* h = mg_http_get_header(const_cast<mg_http_message*>(hm), "Accept");
+    if (!h) return false;
+    std::string accept(h->buf, h->len);
+    return accept.find("text/html") != std::string::npos;
 }
 
 bool reply_file_bytes(mg_connection* c, const std::string& data, const std::string& name) {
@@ -4286,7 +4330,12 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
             return;
         }
-        reply_text(c, 200, agent::help_text(core, port, ui_info()), "text/plain; charset=utf-8");
+        std::string text = agent::help_text(core, port, ui_info());
+        if (wants_html(hm) && query_var(hm, "format") != "text") {
+            reply_text(c, 200, help_page_html("Agent 设备面帮助", text), "text/html; charset=utf-8");
+        } else {
+            reply_text(c, 200, text, "text/plain; charset=utf-8");
+        }
         return;
     }
     if (path.rfind("/help/", 0) == 0) {
@@ -4301,7 +4350,12 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
             return;
         }
-        reply_text(c, 200, agent::channel_help(core, ch, port), "text/plain; charset=utf-8");
+        std::string text = agent::channel_help(core, ch, port);
+        if (wants_html(hm) && query_var(hm, "format") != "text") {
+            reply_text(c, 200, help_page_html("通道 " + ch + " 帮助", text), "text/html; charset=utf-8");
+        } else {
+            reply_text(c, 200, text, "text/plain; charset=utf-8");
+        }
         return;
     }
 

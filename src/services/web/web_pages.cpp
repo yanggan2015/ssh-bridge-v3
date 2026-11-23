@@ -178,6 +178,16 @@ pre{white-space:pre-wrap;word-break:break-word;background:#0c1820;color:#dcefe9;
 .agent-card .k{font-size:11px;color:var(--muted)}
 .agent-card .v{font-size:17px;font-weight:700;margin-top:3px;overflow-wrap:anywhere}
 .agent-log{max-height:300px}
+.agent-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+.agent-table th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.agent-table td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.agent-table tr:last-child td{border-bottom:0}
+.agent-table .mono{font-family:ui-monospace,Consolas,monospace;font-size:11px}
+.agent-table .state{display:inline-flex;align-items:center;gap:5px}
+.lock-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #e7b03b;background:rgba(231,176,59,.12);border-radius:10px;padding:8px 11px;margin:0 0 9px;font-size:12px}
+.lock-banner[hidden]{display:none}
+.lock-banner strong{color:#7a4b00}
+.lock-banner .btn{padding:5px 9px;min-height:30px;font-size:11px}
 .help-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}
 .help-item{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface-2)}
 .help-item code{font-size:11px;color:var(--accent-ink);overflow-wrap:anywhere}
@@ -429,7 +439,7 @@ std::string page_body(const std::string& page) {
   </aside>
   <section class="card terminal-card">
     <div class="card-head">
-      <div class="card-title"><div><h2>终端</h2><div class="terminal-meta"><span class="chip accent" id="activeName">未选择</span><span class="chip" id="wsState">WS 未连接</span></div></div></div>
+      <div class="card-title"><div><h2>终端</h2><div class="terminal-meta"><span class="chip accent" id="activeName">未选择</span><span class="chip" id="wsState">WS 未连接</span><span class="chip" id="termLock">无 Agent 锁</span></div></div></div>
       <div class="row-end"><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><span class="pill" id="ro">只读</span></div>
     </div>
     <div class="terminal-tools">
@@ -442,6 +452,7 @@ std::string page_body(const std::string& page) {
       <button class="btn ghost" id="fullTerm" type="button">全屏</button>
       <button class="btn ghost" id="clearBuf" type="button">清空缓冲</button>
     </div>
+    <div class="lock-banner" id="lockBanner" hidden><span id="lockText"></span><button class="btn" id="takeLock" type="button">人工接管</button></div>
     <pre class="terminal" id="term" aria-live="polite"></pre>
     <div class="terminal-foot"><input id="cmd" placeholder="输入到当前通道，Enter 发送" autocomplete="off" spellcheck="false"><button class="btn" id="send" type="button">发送</button><button class="btn ghost" id="clear" type="button">清屏</button></div>
     <div class="hint" id="hint"></div>
@@ -509,7 +520,31 @@ std::string page_body(const std::string& page) {
         return R"HTML(
 <section class="card">
   <div class="card-head">
-    <div class="card-title"><div><h2>Agent UI 桥</h2><div class="card-sub">本机 AI 控制面：capabilities → tree → action → state。此页只做只读自检，不执行点击。</div></div></div>
+    <div class="card-title"><div><h2>18081 设备控制面</h2><div class="card-sub">Agent 唯一板控主路径：scan → probe → lock → command/action → log → unlock。此页只读展示，不直接代发板控命令。</div></div></div>
+    <span class="chip" id="deviceChip">读取中</span>
+  </div>
+  <div class="agent-grid" id="deviceMetrics">
+    <div class="agent-card"><div class="k">通道 / 在线</div><div class="v" id="devChannels">--</div></div>
+    <div class="agent-card"><div class="k">作业（运行 / 总数）</div><div class="v" id="devJobs">--</div></div>
+    <div class="agent-card"><div class="k">租约锁</div><div class="v" id="devLocks">--</div></div>
+    <div class="agent-card"><div class="k">TFTP 工件面</div><div class="v" id="devTftp">--</div></div>
+    <div class="agent-card"><div class="k">已公布操作</div><div class="v" id="devOps">--</div></div>
+    <div class="agent-card"><div class="k">后端边界</div><div class="v" id="devBoundary">18081 only</div></div>
+  </div>
+  <div class="editor-actions">
+    <button class="btn" id="devRefresh" type="button">刷新设备面</button>
+    <a class="btn ghost" href="/api/help" target="_blank">机器契约 /api/help</a>
+    <a class="btn ghost" href="/help" target="_blank">闭环帮助 /help</a>
+    <span class="form-status" id="devNote"></span>
+  </div>
+  <div class="card-head" style="margin-top:14px"><div class="card-title"><div><h2>通道与终端态</h2><div class="card-sub">通道、运行状态、终端探测与当前持锁 owner。</div></div></div></div>
+  <div id="deviceChannels"><div class="empty"><strong>正在读取</strong><p>GET /agent/scan</p></div></div>
+  <div class="card-head" style="margin-top:14px"><div class="card-title"><div><h2>租约锁</h2><div class="card-sub">写路由被 Agent 锁住时返回 423；人工接管在仪表盘终端里执行。</div></div></div></div>
+  <div id="deviceLocks"><div class="empty"><strong>无锁</strong><p>当前没有 Agent 持有通道。</p></div></div>
+</section>
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><div><h2>18096 桌面 UI 桥（只读自检）</h2><div class="card-sub">独立调试面：capabilities → tree → state。18096 不参与板控闭环，关闭它不影响上方设备面。</div></div></div>
     <span class="chip" id="agentChip">读取中</span>
   </div>
   <div class="agent-grid" id="agentMetrics">
@@ -519,20 +554,24 @@ std::string page_body(const std::string& page) {
     <div class="agent-card"><div class="k">动作次数</div><div class="v" id="agActions">--</div></div>
   </div>
   <div class="form-grid" style="margin-top:14px">
-    <label class="field"><span>Agent 地址</span><input id="agBase" placeholder="http://127.0.0.1:18096"><span class="help">浏览器需与 ssh-bridge 在同一台机器；远程访问时 127.0.0.1 指向浏览器本机。</span></label>
+    <label class="field"><span>UI 桥地址</span><input id="agBase" placeholder="http://127.0.0.1:18096"><span class="help">浏览器需与 ssh-bridge 在同一台机器；远程访问时 127.0.0.1 指向浏览器本机。</span></label>
     <label class="field"><span>X-Ui-Token</span><input id="agToken" type="password" autocomplete="off" placeholder="agent.token 为空时留空"></label>
   </div>
   <div class="editor-actions">
-    <button class="btn" id="agProbe" type="button">运行自检</button>
+    <button class="btn" id="agProbe" type="button">运行 UI 自检</button>
     <button class="btn ghost" id="agCaps" type="button">查看 capabilities</button>
     <button class="btn ghost" id="agReloadCfg" type="button">从应用读取端口</button>
     <span class="form-status" id="agNote"></span>
   </div>
+  <pre id="agentJson" class="agent-log" style="margin-top:12px">运行 UI 自检后显示 capabilities / tree / state / logs 摘要。</pre>
 </section>
 <section class="card">
-  <div class="card-head"><div class="card-title"><div><h2>接口速查</h2><div class="card-sub">控制器必须串行调用 /action；ok:true 后要读 /state 或 /control 验证业务结果。</div></div></div><a class="btn ghost" href="/api/help" target="_blank">Web API JSON</a></div>
+  <div class="card-head"><div class="card-title"><div><h2>18081 接口速查</h2><div class="card-sub">优先从 /api/help 动态读取；下方只列闭环主路径。写操作需要 Bearer token，通道写还要过租约锁。</div></div></div><a class="btn ghost" href="/help" target="_blank">文本帮助</a></div>
+  <div class="help-list" id="deviceHelp"></div>
+</section>
+<section class="card">
+  <div class="card-head"><div class="card-title"><div><h2>18096 调试接口</h2><div class="card-sub">桌面窗口调试用；Agent 不得用这些接口代做板控。</div></div></div></div>
   <div class="help-list" id="agentHelp"></div>
-  <pre id="agentJson" class="agent-log" style="margin-top:12px">运行自检后显示 capabilities / tree / state / logs 摘要。</pre>
 </section>
 )HTML";
     }
@@ -738,7 +777,7 @@ std::string page_body(const std::string& page) {
 std::string page_script(const std::string& page) {
     if (page == "dashboard") {
         return R"JS(
-let ws=null, LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[];
+let ws=null, LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[], TERM_LOCK=null, TERM_TAKE_SID='web-'+Date.now().toString(36);
 const FONT_KEY='sb3_term_font';
 const SVC_DEFS=[['tftp','TFTP','/tftp'],['share','共享','/share'],['nfs','NFS','/nfs'],['inbound','入站 SSH','/tunnel'],['tcp_forward','TCP','/tcp-forward'],['tunnel','隧道','/tunnel'],['discovery','发现','/tcp-forward']];
 function isOnline(c){return c.state==='ready'||c.state==='online'}
@@ -790,6 +829,45 @@ function appendTerm(t){
   TERM_TEXT+=t;if(TERM_TEXT.length>180000)TERM_TEXT=TERM_TEXT.slice(-120000);
   renderTerm();const p=$('#term');if(p&&!TERM_FIND.trim())p.scrollTop=p.scrollHeight;
 }
+function renderTermLock(){
+  const chip=$('#termLock'),banner=$('#lockBanner'),text=$('#lockText'),take=$('#takeLock');
+  const l=TERM_LOCK;
+  if(!chip)return;
+  if(!l){
+    chip.textContent='无 Agent 锁';chip.className='chip on';
+    if(banner)banner.hidden=true;
+    if(take)take.hidden=true;
+    return;
+  }
+  const owner=l.owner||'agent';
+  const left=Math.max(0,Math.round((l.expires_in_ms||0)/1000));
+  chip.textContent='Agent 操作中';chip.className='chip warn';
+  if(banner)banner.hidden=false;
+  if(text)text.textContent='通道 '+l.channel+' 被 '+owner+' 持有；剩余 '+left+'s。人类写入前需接管。';
+  if(take)take.hidden=!tok();
+}
+async function lockRefresh(ch){
+  if(!ch)return;
+  const r=await api('/agent/scan');
+  if(!r.j||!r.j.locks){return}
+  const leases=r.j.locks.leases||[];
+  TERM_LOCK=leases.find(l=>l.channel===ch)||null;
+  renderTermLock();
+}
+async function takeLock(){
+  const ch=$('#ch').value;
+  if(!ch)return;
+  if(!tok()){toast('人工接管需要先保存 Bearer token','error');return}
+  const who=(TERM_LOCK&&TERM_LOCK.owner)||'Agent';
+  if(!await askConfirm('人工接管通道','将清掉 '+who+' 在 '+ch+' 上的租约，并把后续写操作交给网页终端。','接管'))return;
+  const r=await api('/lock/takeover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,reason:'web-terminal-human',session_id:TERM_TAKE_SID})});
+  if(r.status===200&&r.j&&r.j.ok){
+    toast('已接管 '+ch);TERM_LOCK=null;renderTermLock();
+    $('#hint').textContent='人工已接管 '+ch+'；现在可发送命令。';lockRefresh(ch);
+  }else{
+    toast('接管失败：'+r.status+' '+(r.j&&(r.j.error&&(r.j.error.message||r.j.error.code)||r.j.error)||r.t),'error');
+  }
+}
 function applyFont(px){
   px=Math.max(10,Math.min(22,px||13));localStorage.setItem(FONT_KEY,String(px));
   const card=$('.terminal-card');if(card)card.style.setProperty('--term-font',px+'px');
@@ -798,6 +876,7 @@ async function connect(){
   if(ws){try{ws.close()}catch(e){};ws=null}
   const ch=$('#ch').value; if(!ch){$('#term').textContent='没有通道';return}
   LAST_CH=ch;TERM_TEXT='';TERM_FIND='';TERM_HIT=0;renderTerm();
+  lockRefresh(ch);
   $('#activeName').textContent=ch;$('#hint').textContent='正在连接 '+ch+' …';
   const dl=$('#dlTerm');if(dl)dl.href='/log/download?channel='+encodeURIComponent(ch);
   const seed=await api('/log?'+qs({channel:ch,chars:16000}));
@@ -818,6 +897,7 @@ async function dashLoad(){
   renderChannels(r.j);renderServices(r.j);
   const ro=!tok();$('#ro').textContent=ro?'只读（无 token）':'可写（带 token）';$('#ro').className='pill '+(ro?'off':'');
   if(sel.value&&(sel.value!==LAST_CH||!ws))connect();
+  else if(sel.value)lockRefresh(sel.value);
 }
 $('#reload').onclick=dashLoad;
 $('#ch').onchange=connect;
@@ -838,13 +918,19 @@ $('#clearBuf').onclick=async()=>{
 };
 $('#send').onclick=async()=>{
   const ch=$('#ch').value,data=$('#cmd').value+'\r';if(!ch)return;
+  if(TERM_LOCK){
+    const msg='Agent 操作中：'+ch+' 被 '+(TERM_LOCK.owner||'agent')+' 持有，请先人工接管。';
+    $('#hint').textContent=msg;toast(msg,'error');return;
+  }
   const r=await api('/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,data})});
+  if(r.status===423){$('#hint').textContent='写入被 Agent 锁拦截';toast('通道被 Agent 锁住，请先人工接管','error');lockRefresh(ch);return}
   if(!r.r.ok){$('#hint').textContent='写入失败：'+r.status+' '+r.t;toast('发送失败','error')}
   else{$('#hint').textContent='已写入 '+ch;$('#cmd').value=''}
 };
 $('#cmd').onkeydown=e=>{if(e.key==='Enter')$('#send').click()};
+$('#takeLock').onclick=takeLock;
 applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10));
-setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){LAST=r.j;renderChannels(r.j);renderServices(r.j)}},5000);
+setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){LAST=r.j;renderChannels(r.j);renderServices(r.j)}const ch=$('#ch').value;if(ch)lockRefresh(ch)},5000);
 dashLoad();
 )JS";
     }
@@ -942,7 +1028,7 @@ loadChannels();
     }
     if (page == "agent") {
         return R"JS(
-let AG_CFG=null, AG_LAST=null;
+let AG_CFG=null, AG_LAST=null, DEV_LAST=null;
 const AG_HELP=[
  ['GET','/ping','存活与协议版本'],
  ['GET','/capabilities','动作白名单与端口'],
@@ -952,6 +1038,20 @@ const AG_HELP=[
  ['POST','/action','{id,action,text,value}；一次只允许一个'],
  ['GET','/logs?since=N','环形动作日志']
 ];
+const DEV_HELP=[
+ ['GET','/health','发现入口：版本、构建、18081/18096 边界'],
+ ['GET','/api/help','机器契约；后续只调用 operations 公布的路径'],
+ ['GET','/agent/scan','统一通道对象：运行态、终端探测、按钮、features'],
+ ['GET','/agent/probe','被动探测终端类型；不写串口、不发 Enter'],
+ ['POST','/lock','按通道获取/续租租约；写路由先过锁'],
+ ['POST','/command','异步下发命令；202 + job_id，进度与输出走 /jobs'],
+ ['GET','/jobs','作业列表；支持 state/channel/limit/before_id'],
+ ['GET','/log','尾部/增量日志；增量需 since + epoch'],
+ ['POST','/action','板控按钮；backend 可校验；返回 job 与审计 id'],
+ ['GET','/tftp/files','TFTP 工件面：列表/上传/下载/MD5'],
+ ['GET','/send_file/progress','最近一次上传/下载的 sent/total/state'],
+ ['POST','/unlock','只释放自己的租约；人工接管走 /lock/takeover']
+];
 function agBase(){return ($('#agBase').value||'http://127.0.0.1:18096').trim().replace(/\/+$/,'')}
 function agHeaders(){const h={};const t=($('#agToken').value||'').trim();if(t)h['X-Ui-Token']=t;return h}
 async function agFetch(path,opt){
@@ -960,15 +1060,84 @@ async function agFetch(path,opt){
   catch(e){return {status:0,j:null,text:String(e)}}
 }
 function agMetric(id,v){const e=$('#'+id);if(e)e.textContent=v}
-function agRenderHelp(){
-  const box=$('#agentHelp');if(!box)return;box.innerHTML='';
-  AG_HELP.forEach(row=>{const d=document.createElement('div');d.className='help-item';d.innerHTML='<code></code><div class="card-sub" style="margin-top:5px"></div><div class="tiny" style="margin-top:4px"></div>';d.querySelector('code').textContent=row[1];d.querySelector('.card-sub').textContent=row[0]+' · '+row[2];d.querySelector('.tiny').textContent=row[0]==='POST'?'需要 X-Ui-Token（若 agent.token 非空）':'只读，无 body';box.appendChild(d)})
+function helpCards(box,rows,label){
+  if(!box)return;box.innerHTML='';
+  rows.forEach(row=>{const d=document.createElement('div');d.className='help-item';d.innerHTML='<code></code><div class="card-sub" style="margin-top:5px"></div><div class="tiny" style="margin-top:4px"></div>';d.querySelector('code').textContent=row[0]+' '+row[1];d.querySelector('.card-sub').textContent=row[2];d.querySelector('.tiny').textContent=label||'';box.appendChild(d)})
+}
+function agRenderHelp(){helpCards($('#agentHelp'),AG_HELP.map(r=>[r[0],r[1],r[2]]),'仅桌面调试；需 X-Ui-Token（若 agent.token 非空）')}
+function devRenderHelp(ops){
+  const wanted=['health.get','api.help.get','agent.scan.get','agent.probe.get','lock.post','command.post','jobs.list.get','log.get','action.post','tftp.files.get','sendfile.progress.get','unlock.post'];
+  const byId={};(ops||[]).forEach(o=>byId[o.id]=o);
+  const rows=DEV_HELP.map(r=>{
+    const o=byId[wanted.find(id=>{const x=byId[id];return x&&x.path===r[1]})];
+    return [r[0],r[1],r[2]+(o&&o.auth==='token'?' · 需要 Bearer token':'')];
+  });
+  helpCards($('#deviceHelp'),rows,'18081 唯一板控路径；18096 不参与');
+}
+function devCell(row,text,mono){
+  const td=document.createElement('td');td.textContent=text==null?'':text;if(mono)td.className='mono';row.appendChild(td);return td
+}
+function devRenderChannels(scan,leases){
+  const box=$('#deviceChannels');if(!box)return;box.innerHTML='';
+  const list=(scan&&scan.channels)||[];
+  if(!list.length){box.innerHTML='<div class="empty"><strong>没有通道</strong><p>先到通道管理新增。</p></div>';return}
+  const lockBy={};(leases||[]).forEach(l=>lockBy[l.channel]=l);
+  const table=document.createElement('table');table.className='agent-table';
+  table.innerHTML='<thead><tr><th>通道</th><th>类型</th><th>运行 / 状态</th><th>终端探测</th><th>Agent 锁</th><th>按钮 / 工件</th></tr></thead>';
+  const tb=document.createElement('tbody');
+  list.forEach(c=>{
+    const tr=document.createElement('tr');
+    devCell(tr,c.name,true);
+    devCell(tr,c.kind==='ssh'?'SSH Link':'串口');
+    const st=devCell(tr,(c.running?'running':'offline')+' · '+(c.state||'-'));
+    const term=(c.terminal&&c.terminal.state)||'-', conf=(c.terminal&&c.terminal.confidence)||'';
+    devCell(tr,term+(conf?' / '+conf:''));
+    const l=lockBy[c.name];
+    const lock=devCell(tr,l?((l.owner||'?')+' · '+(Math.round((l.expires_in_ms||0)/1000))+'s'):'无锁');
+    if(l)lock.style.color='#9a5b00';
+    const btnCount=(c.buttons||[]).length;
+    const f=c.features||{};
+    devCell(tr,'按钮 '+btnCount+' · TFTP '+(f.tftp_artifacts?'on':'off')+' · 串口控制 '+(f.serial_control?'on':'off'));
+    tb.appendChild(tr);
+  });
+  table.appendChild(tb);box.appendChild(table);
+}
+function devRenderLocks(scan){
+  const box=$('#deviceLocks');if(!box)return;
+  const leases=(scan&&scan.locks&&scan.locks.leases)||[];
+  if(!leases.length){box.innerHTML='<div class="empty" style="padding:14px"><strong>无锁</strong><p>所有通道可写；长任务前建议先 POST /lock。</p></div>';return}
+  const table=document.createElement('table');table.className='agent-table';
+  table.innerHTML='<thead><tr><th>通道</th><th>owner</th><th>TTL</th><th>剩余</th></tr></thead>';
+  const tb=document.createElement('tbody');
+  leases.forEach(l=>{const tr=document.createElement('tr');devCell(tr,l.channel,true);devCell(tr,l.owner||'-');devCell(tr,Math.round((l.ttl_ms||0)/1000)+'s');devCell(tr,Math.round((l.expires_in_ms||0)/1000)+'s');tb.appendChild(tr)});
+  table.appendChild(tb);box.appendChild(table);
+}
+async function devLoad(){
+  const btn=$('#devRefresh');if(btn)setBusy(btn,true,'刷新中…');
+  const [scan,jobsResp,tftp,help,health]=await Promise.all([api('/agent/scan'),api('/jobs?limit=100'),api('/tftp/status'),api('/api/help'),api('/health')]);
+  const ok=scan.status===200&&help.status===200&&health.status===200;
+  const s=scan.j||{}, jb=jobsResp.j||{}, tf=tftp.j||{}, hp=help.j||{}, hh=health.j||{};
+  const channels=s.channels||[], leases=(s.locks&&s.locks.leases)||[];
+  const online=channels.filter(c=>c.running).length;
+  const jobs=(jb.jobs||[]), running=jobs.filter(j=>j.state==='running'||j.state==='queued').length;
+  agMetric('devChannels',channels.length+' / '+online);
+  agMetric('devJobs',running+' / '+(jb.count==null?jobs.length:jb.count));
+  agMetric('devLocks',leases.length);
+  agMetric('devTftp',tf.running?'运行 '+(tf.port||'')+' · '+(tf.root||''):'未启动 · 工件可用');
+  agMetric('devOps',(hp.operations||[]).length);
+  agMetric('devBoundary',(s.features&&s.features.tftp_artifacts)?'18081 全能力':'18081 基础');
+  const chip=$('#deviceChip');if(chip){chip.textContent=ok?'设备面正常':'部分读取失败';chip.className='chip '+(ok?'on':'warn')}
+  $('#devNote').textContent='协议 '+(s.protocol||hp.protocol||'-')+' · 服务 '+(hh.service||s.service||'-')+' · 18096 '+(hh.ui_bridge&&hh.ui_bridge.enabled?'启用':'关闭（不影响）');
+  devRenderChannels(s,leases);devRenderLocks(s);devRenderHelp(hp.operations);
+  DEV_LAST={scan:s,jobs:jb,tftp:tf,help:hp,health:hh};setBusy(btn,false);
 }
 async function agProbe(){
   const btn=$('#agProbe');setBusy(btn,true,'自检中…');$('#agNote').textContent='正在请求 '+agBase()+' …';
   const caps=await agFetch('/capabilities'),tree=await agFetch('/ui-tree'),state=await agFetch('/state'),logs=await agFetch('/logs?since=0');
+  const cfgOn=AG_CFG&&(AG_CFG.ui_bridge?AG_CFG.ui_bridge.enabled:AG_CFG.enable);
   const ok=caps.status===200&&tree.status===200&&state.status===200&&logs.status===200;
-  $('#agentChip').textContent=ok?'自检通过':'自检失败';$('#agentChip').className='chip '+(ok?'on':'danger');
+  $('#agentChip').textContent=ok?'UI 桥自检通过':(cfgOn===false?'UI 桥未启用':'UI 桥自检失败');
+  $('#agentChip').className='chip '+(ok?'on':(cfgOn===false?'off':'danger'));
   agMetric('agProto',caps.j?caps.j.protocol:'--');agMetric('agTree',tree.j?tree.j.count:'--');
   const ch=(state.j&&state.j.state&&Array.isArray(state.j.state.channels))?state.j.state.channels.length:'--';
   agMetric('agChannels',ch);agMetric('agActions',state.j?state.j.action_count:'--');
@@ -983,15 +1152,21 @@ async function agCaps(){
 }
 async function agLoadCfg(){
   const r=await api('/api/agent/status');
-  if(!r.j||!r.j.ok){$('#agentChip').textContent='需要 Web token';$('#agentChip').className='chip warn';$('#agNote').textContent='读取 Agent 配置需要右上角 web token；可手动填地址自检。';return}
-  AG_CFG=r.j;if(!$('#agBase').value)$('#agBase').value=r.j.base_url;
-  $('#agentChip').textContent=r.j.enable?'已启用':'已关闭';$('#agentChip').className='chip '+(r.j.enable?'on':'off');
-  $('#agNote').textContent='端口 '+r.j.port+' · '+(r.j.token_required?'需要 X-Ui-Token':'无 token')+' · '+r.j.base_url;
+  if(!r.j||!r.j.ok){
+    $('#agentChip').textContent='需要 Web token';$('#agentChip').className='chip warn';
+    $('#agNote').textContent='读取 18096 配置需要右上角 web token；设备面不受影响。';return
+  }
+  AG_CFG=r.j;const ui=r.j.ui_bridge||r.j;
+  if(!$('#agBase').value)$('#agBase').value=ui.base_url||r.j.base_url||'http://127.0.0.1:18096';
+  $('#agentChip').textContent=ui.enabled?'已启用':'未启用（不影响设备面）';
+  $('#agentChip').className='chip '+(ui.enabled?'on':'off');
+  $('#agNote').textContent='端口 '+(ui.port||r.j.port)+' · '+(ui.token_required?'需要 X-Ui-Token':'无 token')+' · '+(ui.base_url||r.j.base_url||'');
 }
+$('#devRefresh').onclick=devLoad;
 $('#agProbe').onclick=agProbe;
 $('#agCaps').onclick=agCaps;
 $('#agReloadCfg').onclick=agLoadCfg;
-agRenderHelp();agLoadCfg();
+agRenderHelp();devLoad();agLoadCfg();
 )JS";
     }
     if (page == "config") {

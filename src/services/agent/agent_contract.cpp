@@ -287,8 +287,19 @@ std::string help_text(AppCore* core, int web_port, const UiBridgeInfo& ui) {
     out += "base: http://<host>:" + std::to_string(web_port) + "\n";
     out += "protocol: " + std::string(kProtocol) + "  build: " + kBuild + "\n";
     out += "发现: GET /health -> GET /api/help -> GET /help/<channel>\n";
-    out += "闭环: /status -> /log?channel=.. -> /write -> /log?channel=..\n";
     out += "通道路由: board=串口, link=SSH Link, channel=任意；三选一，冲突 400。\n\n";
+    out += "闭环（短命令）:\n";
+    out += "  1. GET /agent/scan 或 GET /agent/probe?channel=.. 确认运行态与终端类型\n";
+    out += "  2. POST /lock {channel,session_id,ttl_ms} 占板；默认 1000ms，长任务自设 TTL\n";
+    out += "  3. POST /command 或 /command_block；异步 202 后用 GET /jobs/{id} 拉输出\n";
+    out += "  4. GET /log?channel=..&since=..&epoch=.. 增量读回显\n";
+    out += "  5. POST /unlock {channel,session_id} 释放；同 session 可续租\n";
+    out += "板控按钮: POST /action {channel,id}；不要用 18096 的 UI 点击代替。\n";
+    out += "工件: GET /tftp/files -> POST /tftp/upload(offset/md5) -> GET /tftp/download；进度 GET /send_file/progress。\n\n";
+    out += "危险 / 不进入 Agent 闭环:\n";
+    out += "  - Tunnel 启停、网络/服务全局配置：只允许人工或管理接口，不通过 Agent 帮助代做。\n";
+    out += "  - /boards/delete、/tftp/delete、/log/clear、配置保存：不可逆或影响共享状态，调用前必须显式确认。\n";
+    out += "  - 18096 桌面 UI 桥只做窗口调试；Agent 不得把它作为板控代理或 fallback。\n\n";
     out += "18096 UI 调试桥（独立系统，不用于板控）: " +
            (ui.enabled ? ("http://127.0.0.1:" + std::to_string(ui.port)) : std::string("disabled")) + "\n\n";
     out += "通道:\n";
@@ -300,9 +311,8 @@ std::string help_text(AppCore* core, int web_port, const UiBridgeInfo& ui) {
     } else {
         out += "  (core not ready)\n";
     }
-    out += "\n写操作需要 Authorization: Bearer <web.token>。\n";
-    out += "板控按钮请用 /action {channel,id}；不要用 18096 的 UI 点击代替。\n";
-    out += "Tunnel 启停不进入 Agent 帮助；危险配置只允许人工或管理接口。\n";
+    out += "\n写操作需要 Authorization: Bearer <web.token>。通道写还要过租约锁；他人持锁返回 423 agent_lock。\n";
+    out += "每通道的可复制 curl 见 GET /help/<channel>。\n";
     return out;
 }
 
@@ -317,11 +327,22 @@ std::string channel_help(AppCore* core, const std::string& channel, int web_port
     out += "base: http://<host>:" + std::to_string(web_port) + "\n";
     out += "\n读:\n";
     out += "  GET /log?channel=" + e->name + "&chars=8192\n";
+    out += "  GET /log?channel=" + e->name + "&since=..&epoch=..\n";
     out += "  GET /status\n";
     out += "\n写:\n";
     out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
     out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"data\":\"<text>\"}' \\\n";
     out += "    http://127.0.0.1:" + std::to_string(web_port) + "/write\n";
+    out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"command\":\"uname -a\"}' \\\n";
+    out += "    http://127.0.0.1:" + std::to_string(web_port) + "/command\n";
+    out += "\n占板与释放:\n";
+    out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"session_id\":\"$SID\",\"ttl_ms\":3600000}' \\\n";
+    out += "    http://127.0.0.1:" + std::to_string(web_port) + "/lock\n";
+    out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"session_id\":\"$SID\"}' \\\n";
+    out += "    http://127.0.0.1:" + std::to_string(web_port) + "/unlock\n";
     out += "\n按钮:\n";
     const std::vector<BoardActionConfig>* btns = core ? core->buttons_of(e->name) : nullptr;
     if (!btns || btns->empty()) {
@@ -335,7 +356,8 @@ std::string channel_help(AppCore* core, const std::string& channel, int web_port
                    json_escape(b.id) + "\"}' http://127.0.0.1:" + std::to_string(web_port) + "/action\n";
         }
     }
-    out += "\n注意: 18096 是桌面 UI 调试桥，不是本通道的板控路径。\n";
+    out += "\n危险项: /write、/command、/action 都会真实下发；/log/clear 不可恢复；先 /lock 再长任务，结束 /unlock。\n";
+    out += "注意: 18096 是桌面 UI 调试桥，不是本通道的板控路径。\n";
     return out;
 }
 

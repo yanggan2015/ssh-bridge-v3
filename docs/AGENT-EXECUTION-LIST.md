@@ -167,10 +167,21 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A9-1 | Agent 页双面展示 | 上：18081 设备面扫描/探测/作业/锁；下：18096 只读自检 | `web_pages.cpp` | 两面独立；18096 关闭不报设备错 | 计划 |
-| A9-2 | 帮助页 | `/help` 展示闭环、危险项、通道 curl | `agent_help.cpp` | 内容与当前配置一致 | 计划 |
-| A9-3 | Skill 对齐 | 更新 `skills/` 或文档，只使用 `/api/help` 公布的路径 | `skills/` | 无硬编码过期按钮 id | 计划 |
-| A9-4 | 锁提示 | Web 终端显示“Agent 操作中”；人工接管按钮 | `web_pages.cpp` | 不静默冲突；接管生效 | 计划 |
+| A9-1 | Agent 页双面展示 | 上：18081 设备面扫描/探测/作业/锁；下：18096 只读自检 | `web_pages.cpp` | 两面独立；18096 关闭不报设备错 | 已完成 |
+| A9-2 | 帮助页 | `/help` 展示闭环、危险项、通道 curl | `agent_contract.cpp`、`web_console.cpp` | 内容与当前配置一致 | 已完成 |
+| A9-3 | Skill 对齐 | 更新 `skills/` 或文档，只使用 `/api/help` 公布的路径 | `skills/ssh-bridge/SKILL.md` | 无硬编码过期按钮 id | 已完成 |
+| A9-4 | 锁提示 | Web 终端显示“Agent 操作中”；人工接管按钮 | `web_pages.cpp` | 不静默冲突；接管生效 | 已完成 |
+
+**C9 完成记录（2026-11-23）**
+
+- Agent 页重构为四段：上方 `18081 设备控制面`（通道/在线、作业、锁、TFTP、已公布操作 78、通道与终端态表、租约锁表），下方 `18096 桌面 UI 桥（只读自检）`，再接 18081 接口速查与 18096 调试接口。两套数据独立读取；18096 关闭时顶部设备面照常渲染。
+- 设备面 `devLoad()` 并行读取 `/agent/scan`、`/jobs?limit=100`、`/tftp/status`、`/api/help`、`/health`；只在地址栏同源 18081 取数，不代理 18096。
+- 帮助文本补齐：短命令闭环（scan/probe → lock → command/jobs → log → unlock）、危险项（Tunnel、delete、log clear、配置保存）、18096 边界、TFTP 工件、`/help/<channel>` 可复制 curl。`/help?format=text` 强制文本；浏览器 `Accept: text/html` 返回带导航的 `<pre>` 帮助页并做 HTML 转义。
+- 终端 meta 增加 `termLock` 芯片与 `lockBanner`；每 5 秒随 `/agent/scan` 刷新当前通道租约。持锁时显示 owner/剩余时间，发送前拦截并提示“Agent 操作中”，提供“人工接管”按钮；按钮调用 `/lock/takeover`，成功后清锁并恢复写入。
+- 新增 `skills/ssh-bridge/SKILL.md`：只走 18081，先 `/health`→`/api/help`，覆盖 discover/scan/probe/lock/command/jobs/log/action/TFTP/serial 与错误契约；明确禁止 18096、`/ui-tree`、`/control`、`X-Ui-Token`。
+- 验证：`output/webtest/agent-ui-smoke.js` 33/33，结果 `output/ux-audit/agent-ui-result.json`；截图 `output/ux-audit/c9-agent-device-page.png`、`c9-terminal-lock.png`；无 pageerror/console error。
+- 回归：C8 51/51、C7 49/49、C6 39/39、C5 51/51、C4 84/84、C2 73/73、C1 82/82、C3 59/59、api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120。
+- 提交：`feat(agent): show device surface help and terminal lock takeover`。
 
 ## 10. P0/P1 测试与隔离
 
