@@ -462,23 +462,175 @@ std::string html_escape(const std::string& s) {
     return out;
 }
 
+std::string trim_text(const std::string& s) {
+    std::size_t b = 0;
+    std::size_t e = s.size();
+    while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+    return s.substr(b, e - b);
+}
+
+std::string inline_md(const std::string& s) {
+    std::string out;
+    for (std::size_t i = 0; i < s.size();) {
+        if (s[i] == '`') {
+            std::size_t e = s.find('`', i + 1);
+            if (e != std::string::npos) {
+                out += "<code>" + html_escape(s.substr(i + 1, e - i - 1)) + "</code>";
+                i = e + 1;
+                continue;
+            }
+        }
+        if (s[i] == '*' && i + 1 < s.size() && s[i + 1] == '*') {
+            std::size_t e = s.find("**", i + 2);
+            if (e != std::string::npos) {
+                out += "<strong>" + html_escape(s.substr(i + 2, e - i - 2)) + "</strong>";
+                i = e + 2;
+                continue;
+            }
+        }
+        out += html_escape(std::string(1, s[i]));
+        ++i;
+    }
+    return out;
+}
+
+std::vector<std::string> split_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::string cur;
+    for (char c : text) {
+        if (c == '\n') {
+            if (!cur.empty() && cur.back() == '\r') cur.pop_back();
+            lines.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) lines.push_back(cur);
+    return lines;
+}
+
+std::vector<std::string> table_cells(const std::string& line) {
+    std::vector<std::string> cells;
+    std::string cur;
+    for (char c : line) {
+        if (c == '|') {
+            cells.push_back(trim_text(cur));
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    cells.push_back(trim_text(cur));
+    if (!cells.empty() && cells.front().empty()) cells.erase(cells.begin());
+    if (!cells.empty() && cells.back().empty()) cells.pop_back();
+    return cells;
+}
+
+bool table_separator(const std::string& line) {
+    if (line.find('|') == std::string::npos) return false;
+    for (char c : line) {
+        if (c != '|' && c != '-' && c != ':' && c != ' ') return false;
+    }
+    return line.find('-') != std::string::npos;
+}
+
+int list_kind(const std::string& line) {
+    if (line.rfind("- ", 0) == 0) return 1;
+    std::size_t i = 0;
+    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
+    if (i > 0 && i + 1 < line.size() && line[i] == '.' && line[i + 1] == ' ') return 2;
+    return 0;
+}
+
+std::string markdown_to_html(const std::string& text) {
+    std::vector<std::string> lines = split_lines(text);
+    std::string out;
+    bool code = false;
+    int list = 0;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string& line = lines[i];
+        if (line.rfind("```", 0) == 0) {
+            if (code) out += "</code></pre>\n";
+            else out += "<pre><code>";
+            code = !code;
+            continue;
+        }
+        if (code) {
+            out += html_escape(line) + "\n";
+            continue;
+        }
+        if (!line.empty() && line[0] == '|' && i + 1 < lines.size() && table_separator(lines[i + 1])) {
+            if (list) { out += list == 1 ? "</ul>\n" : "</ol>\n"; list = 0; }
+            out += "<table><thead><tr>";
+            for (const std::string& c : table_cells(line)) out += "<th>" + inline_md(c) + "</th>";
+            out += "</tr></thead><tbody>\n";
+            ++i;
+            while (i + 1 < lines.size() && !lines[i + 1].empty() && lines[i + 1][0] == '|') {
+                ++i;
+                out += "<tr>";
+                for (const std::string& c : table_cells(lines[i])) out += "<td>" + inline_md(c) + "</td>";
+                out += "</tr>\n";
+            }
+            out += "</tbody></table>\n";
+            continue;
+        }
+        if (!line.empty() && line[0] == '#') {
+            if (list) { out += list == 1 ? "</ul>\n" : "</ol>\n"; list = 0; }
+            std::size_t h = 0;
+            while (h < line.size() && h < 6 && line[h] == '#') ++h;
+            std::string body = trim_text(line.substr(h));
+            out += "<h" + std::to_string(h) + ">" + inline_md(body) + "</h" + std::to_string(h) + ">\n";
+            continue;
+        }
+        int kind = list_kind(line);
+        if (kind) {
+            if (list != kind) {
+                if (list) out += list == 1 ? "</ul>\n" : "</ol>\n";
+                out += kind == 1 ? "<ul>\n" : "<ol>\n";
+                list = kind;
+            }
+            out += "<li>" + inline_md(trim_text(line.substr(kind == 1 ? 2 : line.find(' ') + 1))) + "</li>\n";
+            continue;
+        }
+        if (line.empty()) {
+            if (list) { out += list == 1 ? "</ul>\n" : "</ol>\n"; list = 0; }
+            continue;
+        }
+        out += "<p>" + inline_md(line) + "</p>\n";
+    }
+    if (code) out += "</code></pre>\n";
+    if (list) out += list == 1 ? "</ul>\n" : "</ol>\n";
+    return out;
+}
+
 std::string help_page_html(const std::string& title, const std::string& text) {
     std::string h =
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>" + html_escape(title) + " · ssh-bridge</title><style>"
-        ":root{color-scheme:dark}body{margin:0;background:#08161a;color:#d9efe9;"
-        "font:14px/1.6 ui-sans-serif,Segoe UI,Arial,sans-serif}"
-        ".wrap{max-width:1080px;margin:0 auto;padding:24px 18px 48px}"
-        "nav a{color:#7ee0c8;text-decoration:none;margin-right:14px}"
-        "h1{font-size:22px;margin:14px 0 6px}p{color:#8fb9b4;margin:0 0 14px}"
-        "pre{white-space:pre-wrap;word-break:break-word;background:#0d2228;border:1px solid #1f3d43;"
-        "border-radius:12px;padding:16px;font:12.5px/1.55 ui-monospace,Consolas,monospace}"
+        "<title>" + html_escape(title) + " · ssh-bridge v3</title><style>"
+        ":root{color-scheme:light}body{margin:0;background:#fff;color:#1f2933;"
+        "font:15px/1.7 ui-sans-serif,Segoe UI,Arial,sans-serif}"
+        ".wrap{max-width:920px;margin:0 auto;padding:24px 24px 64px}"
+        "nav{display:flex;gap:16px;flex-wrap:wrap;padding:0 0 14px;border-bottom:1px solid #e5e7eb}"
+        "nav a{color:#0b6e4f;text-decoration:none;font-size:13px}"
+        "h1{font-size:26px;line-height:1.3;margin:22px 0 8px}h2{font-size:19px;margin:28px 0 8px;"
+        "padding-top:8px;border-top:1px solid #eef2f4}h3{font-size:15.5px;margin:20px 0 6px}"
+        "p{margin:8px 0}ul,ol{padding-left:24px;margin:8px 0}li{margin:3px 0}"
+        "code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font:12.5px/1.5 ui-monospace,Consolas,monospace}"
+        "pre{background:#f6f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:13px 15px;"
+        "overflow:auto;white-space:pre-wrap;word-break:break-word}"
+        "pre code{background:none;padding:0}"
+        "table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}"
+        "th,td{border:1px solid #e5e7eb;padding:7px 9px;text-align:left;vertical-align:top}"
+        "th{background:#f8fafc;font-weight:600}td code{white-space:nowrap}"
+        "th:first-child,td:first-child{white-space:nowrap}"
         "</style></head><body><div class=\"wrap\"><nav>"
-        "<a href=\"/\">仪表盘</a><a href=\"/channels\">通道</a><a href=\"/agent\">Agent</a>"
-        "<a href=\"/api/help\">机器契约</a></nav><h1>" + html_escape(title) + "</h1>"
-        "<p>只使用 /api/help 公布的接口；18081 是唯一板控路径，18096 仅桌面调试。</p>"
-        "<pre>" + html_escape(text) + "</pre></div></body></html>";
+        "<a href=\"/agent-help\">Agent 手册</a><a href=\"/channels\">通道</a>"
+        "<a href=\"/agent-status\">运行状态</a><a href=\"/api/help\">/api/help</a>"
+        "<a href=\"/agent-help?format=md\">Markdown 原文</a>"
+        "</nav>" + markdown_to_html(text) + "</div></body></html>";
     return h;
 }
 
@@ -4685,37 +4837,45 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         reply_json(c, 200, root);
         return;
     }
-    if (path == "/help") {
+    if (path == "/agent-help" || path == "/agent" || path == "/help" || path == "/docs") {
         if (!method_is(hm, "GET")) {
             reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
             return;
         }
         std::string text = agent::help_text(core, port, ui_info());
-        if (wants_html(hm) && query_var(hm, "format") != "text") {
-            reply_text(c, 200, help_page_html("Agent 设备面帮助", text), "text/html; charset=utf-8");
-        } else {
+        std::string fmt = query_var(hm, "format");
+        if (fmt == "md" || (!wants_html(hm) && fmt != "html")) {
             reply_text(c, 200, text, "text/plain; charset=utf-8");
+        } else {
+            reply_text(c, 200, help_page_html("Agent 控制手册", text), "text/html; charset=utf-8");
         }
         return;
     }
-    if (path.rfind("/help/", 0) == 0) {
+    if (path.rfind("/agent-help/", 0) == 0 || path.rfind("/help/", 0) == 0) {
         if (!method_is(hm, "GET")) {
             reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
             return;
         }
+        const bool long_prefix = path.rfind("/agent-help/", 0) == 0;
+        std::size_t plen = long_prefix ? std::strlen("/agent-help/") : std::strlen("/help/");
         char decoded[512] = "";
-        int n = mg_url_decode(path.c_str() + 6, path.size() - 6, decoded, sizeof(decoded), 0);
+        int n = mg_url_decode(path.c_str() + plen, path.size() - plen, decoded, sizeof(decoded), 0);
         std::string ch = n > 0 ? std::string(decoded, static_cast<std::size_t>(n)) : std::string();
         if (ch.empty() || !core || !core->find_shared(ch)) {
             reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
             return;
         }
         std::string text = agent::channel_help(core, ch, port);
-        if (wants_html(hm) && query_var(hm, "format") != "text") {
-            reply_text(c, 200, help_page_html("通道 " + ch + " 帮助", text), "text/html; charset=utf-8");
-        } else {
+        std::string fmt = query_var(hm, "format");
+        if (fmt == "md" || (!wants_html(hm) && fmt != "html")) {
             reply_text(c, 200, text, "text/plain; charset=utf-8");
+        } else {
+            reply_text(c, 200, help_page_html("通道 " + ch + " 手册", text), "text/html; charset=utf-8");
         }
+        return;
+    }
+    if (path == "/agent-status") {
+        reply_text(c, 200, page("agent"), "text/html; charset=utf-8");
         return;
     }
 
