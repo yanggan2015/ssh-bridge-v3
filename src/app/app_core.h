@@ -7,8 +7,11 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
+
+#include <cjson/cJSON.h>
 
 #include "core/bridge/bridge.h"
 #include "core/config/config.h"
@@ -99,6 +102,8 @@ public:
     std::string config_json_text() const { return config_export_json(cfg_); }
     // S9 网页配置表单保存：校验 JSON、落盘到当前 abs_path；UI 线程随后 reload_config。
     bool save_config_json(const std::string& text, std::string* err);
+    // 以磁盘最新配置为基准做读-改-写，串行化所有配置写，避免并发覆盖。
+    bool patch_config_json(const std::function<bool(cJSON*)>& apply, std::string* err);
     // UI 分屏布局（窗格数/各画框通道/激活画框）落盘，不改服务配置、不重建通道
     bool save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane);
     // 服务面板保存后同步内存配置，避免下一次面板采集用旧值覆盖
@@ -113,6 +118,7 @@ private:
     std::string project_root_;
     std::vector<Entry> entries_;
     std::function<void(std::size_t)> kick_fn_;
+    mutable std::mutex config_mu_;   // 配置读-改-写事务锁
 };
 
 }  // namespace sb3

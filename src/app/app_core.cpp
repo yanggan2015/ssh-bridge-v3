@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
 #include <string>
 
 #include "core/bridge/serial/serial_bridge.h"
@@ -444,7 +445,11 @@ bool AppCore::delete_channel(const std::string& name, std::string* err) {
 }
 
 bool AppCore::save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane) {
-    AppConfig next = cfg_;
+    std::lock_guard<std::mutex> g(config_mu_);
+    // 只改 UI 段：必须基于磁盘最新配置，否则会把并发写入的通道/动作覆盖回旧快照。
+    AppConfig next;
+    config_load(next, cfg_.abs_path);
+    if (next.abs_path.empty()) next = cfg_;
     next.ui.split = (split == 4) ? 4 : (split == 2 ? 2 : 1);
     next.ui.pane_channels = pane_channels;
     next.ui.pane_channels.resize(static_cast<std::size_t>(next.ui.split));
@@ -639,7 +644,60 @@ std::string AppCore::line_ending_for(const std::string& name) const {
     return "crlf";
 }
 
+bool AppCore::patch_config_json(const std::function<bool(cJSON*)>& apply, std::string* err) {
+    if (!apply) {
+        if (err) *err = "empty patch";
+        return false;
+    }
+    std::lock_guard<std::mutex> g(config_mu_);
+    if (cfg_.abs_path.empty()) {
+        if (err) *err = "当前配置没有落盘路径";
+        return false;
+    }
+    // 读磁盘最新内容，而不是尚未 reload 的内存 cfg_；否则连续写会互相覆盖。
+    std::string text = config_export_json(cfg_);
+    {
+        std::ifstream in(cfg_.abs_path, std::ios::binary);
+        if (in) {
+            std::string disk;
+            std::string line;
+            while (std::getline(in, line)) disk += line;
+            if (!disk.empty()) text = disk;
+        }
+    }
+    cJSON* root = cJSON_Parse(text.c_str());
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        if (err) *err = "当前配置无法解析";
+        return false;
+    }
+    if (!apply(root)) {
+        cJSON_Delete(root);
+        if (err && err->empty()) *err = "配置修改被拒绝";
+        return false;
+    }
+    char* dumped = cJSON_PrintUnformatted(root);
+    std::string out = dumped ? dumped : "";
+    if (dumped) cJSON_free(dumped);
+    cJSON_Delete(root);
+    if (out.empty()) {
+        if (err) *err = "配置序列化失败";
+        return false;
+    }
+    AppConfig next;
+    if (!config_parse_json(out, &next, err)) return false;
+    next.abs_path = cfg_.abs_path;
+    next.project_root = project_root_;
+    if (!config_save(next)) {
+        if (err) *err = "写配置文件失败";
+        return false;
+    }
+    if (err) err->clear();
+    return true;
+}
+
 bool AppCore::save_config_json(const std::string& text, std::string* err) {
+    std::lock_guard<std::mutex> g(config_mu_);
     if (cfg_.abs_path.empty()) {
         if (err) *err = "当前配置没有落盘路径";
         return false;

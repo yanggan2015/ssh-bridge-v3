@@ -980,19 +980,8 @@ bool WebConsole::Impl::patch_config(const std::function<bool(cJSON*)>& apply, st
         if (err) *err = "core 未就绪";
         return false;
     }
-    cJSON* root = cJSON_Parse(core->config_json_text().c_str());
-    if (!cJSON_IsObject(root)) {
-        cJSON_Delete(root);
-        if (err) *err = "当前配置无法解析";
-        return false;
-    }
-    if (!apply(root)) {
-        cJSON_Delete(root);
-        if (err && err->empty()) *err = "配置修改被拒绝";
-        return false;
-    }
-    std::string text = json_text(root, false);
-    if (!core->save_config_json(text, err)) return false;
+    // 配置读-改-写由 AppCore 的配置事务锁串行化，覆盖 Web 补丁与 UI 布局保存。
+    if (!core->patch_config_json(apply, err)) return false;
     if (notify) PostMessageW(static_cast<HWND>(notify), kMsgWebReload, 0, 0);
     return true;
 }

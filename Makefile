@@ -173,7 +173,7 @@ $(APP): $(OBJS) $(RC)
 > $(CXX) $(OBJS) $(RC) -o $@ $(LIBS)
 > @echo "built: $(APP)"
 
-$(RC): src/app/app.rc src/app/app.manifest
+$(RC): src/app/app.rc src/app/app.manifest | dirs
 > $(WINDRES) -O coff -o $@ $<
 
 clean:
