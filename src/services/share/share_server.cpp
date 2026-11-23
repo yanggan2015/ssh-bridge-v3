@@ -295,6 +295,31 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
         return;
     }
 
+    if (uri.rfind("/tools/", 0) == 0 || uri.rfind("/skills/", 0) == 0) {
+        std::string rel = uri.substr(1);
+        std::string abs;
+        std::error_code ec;
+        if (!safe_join(rel, &abs) || !fs::is_regular_file(fs::u8path(abs), ec)) {
+            mg_http_reply(c, 404, "Content-Type: text/plain; charset=utf-8\r\n", "文件不存在");
+            return;
+        }
+        auto sz = fs::file_size(fs::u8path(abs), ec);
+        if (ec || sz > 64ull * 1024 * 1024) {
+            mg_http_reply(c, 413, "Content-Type: text/plain; charset=utf-8\r\n", "文件过大");
+            return;
+        }
+        std::ifstream in(fs::u8path(abs), std::ios::binary);
+        std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::string ext = fs::u8path(abs).extension().u8string();
+        const char* ct = (ext == ".json") ? "application/json; charset=utf-8"
+                        : (ext == ".py" || ext == ".md" || ext == ".txt")
+                              ? "text/plain; charset=utf-8"
+                              : "application/octet-stream";
+        mg_http_reply(c, 200, ("Content-Type: " + std::string(ct) +
+                              "\r\nCache-Control: no-store\r\n").c_str(), "%s", data.c_str());
+        return;
+    }
+
     if (uri == "/files") {
         std::string abs;
         std::error_code ec;

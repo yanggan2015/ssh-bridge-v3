@@ -590,6 +590,7 @@ struct Task {
     std::string marker;                // exec 结束标记
     std::vector<std::string> keys;     // send_keys 已归一化字节序列
     int interval_ms = 50;
+    int repeat = 1;                    // send_keys 每个 token 重复次数（按住/连发）
     int timeout_ms = 2000;
     std::shared_ptr<IBridge> bridge;
 };
@@ -748,19 +749,23 @@ CaptureResult capture_after_write(IBridge* bridge, const std::string& payload,
 }
 
 std::uint64_t send_key_tokens(IBridge* bridge, const std::vector<std::string>& keys,
-                              int interval_ms, Job* job = nullptr, bool* cancelled = nullptr) {
+                              int interval_ms, int repeat, Job* job = nullptr,
+                              bool* cancelled = nullptr) {
     std::uint64_t sent = 0;
     if (!bridge) return sent;
-    if (job) job->progress_total.store(static_cast<int>(keys.size()));
-    for (const std::string& k : keys) {
-        if (job && job->cancel_requested.load()) {
-            if (cancelled) *cancelled = true;
-            break;
+    if (repeat < 1) repeat = 1;
+    if (job) job->progress_total.store(static_cast<int>(keys.size() * static_cast<std::size_t>(repeat)));
+    for (int r = 0; r < repeat; ++r) {
+        for (const std::string& k : keys) {
+            if (job && job->cancel_requested.load()) {
+                if (cancelled) *cancelled = true;
+                return sent;
+            }
+            if (k.empty()) continue;
+            sent += static_cast<std::uint64_t>(bridge->write(k.data(), k.size()));
+            if (job) job->progress_sent.fetch_add(1);
+            if (interval_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
         }
-        if (k.empty()) continue;
-        sent += static_cast<std::uint64_t>(bridge->write(k.data(), k.size()));
-        if (job) job->progress_sent.fetch_add(1);
-        if (interval_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
     }
     return sent;
 }
@@ -1272,7 +1277,8 @@ void WebConsole::Impl::worker_loop() {
             if (!task.bridge) {
                 message = "channel_down";
             } else {
-                bytes = send_key_tokens(task.bridge.get(), task.keys, task.interval_ms, job.get(), &cancelled);
+                bytes = send_key_tokens(task.bridge.get(), task.keys, task.interval_ms, task.repeat,
+                                        job.get(), &cancelled);
                 ok = !cancelled;
                 message = cancelled ? "cancelled" : "sent";
             }
@@ -1719,6 +1725,11 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         std::string ch = query_var(hm, "channel");
+        if (ch.empty()) {
+            cJSON* body = cJSON_Parse(body_string(hm).c_str());
+            ch = json_str(body, "channel");
+            cJSON_Delete(body);
+        }
         auto b = bridge(ch);
         if (!b) {
             reply_json_text(c, 404, "{\"ok\":false,\"error\":\"channel not found\"}");
@@ -2124,6 +2135,8 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         std::string session = json_str(body, "session");
         if (session.empty()) session = header_text(hm, "X-Agent-Session");
         int interval_ms = json_int(body, "interval_ms", 50);
+        int repeat = json_int(body, "repeat", 1);
+        int duration_ms = json_int(body, "duration_ms", 0);
         std::vector<std::string> keys;
         bool bad = false;
         cJSON* arr = cJSON_GetObjectItemCaseSensitive(body, "keys");
@@ -2158,6 +2171,14 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 400, agent::error_json("invalid_argument", "interval_ms must be 10..1000", request_id_of(hm)));
             return;
         }
+        if (duration_ms > 0) {
+            repeat = duration_ms / interval_ms;
+            if (repeat < 1) repeat = 1;
+        }
+        if (repeat < 1 || repeat > 6000) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "repeat must be 1..6000", request_id_of(hm)));
+            return;
+        }
         auto b = bridge(ch);
         std::string rid = request_id_of(hm);
         if (!b) {
@@ -2184,6 +2205,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         task.keys = std::move(keys);
         std::size_t key_count = task.keys.size();
         task.interval_ms = interval_ms;
+        task.repeat = repeat;
         task.bridge = b;
         int job_id = enqueue_task(std::move(task));
         if (job_id < 0) {
@@ -2194,7 +2216,8 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         }
         cJSON* root = cJSON_CreateObject();
         cJSON_AddBoolToObject(root, "ok", true);
-        cJSON_AddNumberToObject(root, "count", static_cast<double>(key_count));
+        cJSON_AddNumberToObject(root, "count", static_cast<double>(key_count * static_cast<std::size_t>(repeat)));
+        cJSON_AddNumberToObject(root, "repeat", repeat);
         cJSON_AddNumberToObject(root, "job_id", job_id);
         cJSON_AddStringToObject(root, "request_id", rid.c_str());
         reply_json(c, 202, root);
@@ -3489,6 +3512,43 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
     }
     if (path == "/services") {
         reply_json_text(c, 200, services ? services->state_json() : "{}");
+        return;
+    }
+    if (path.rfind("/share/tools/", 0) == 0 || path.rfind("/share/skills/", 0) == 0) {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        std::string rel = path.substr(7);  // 去掉 "/share/"
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_share_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        std::uintmax_t sz = std::filesystem::file_size(p, ec);
+        if (ec || sz > 64ull * 1024 * 1024) {
+            reply_json_text(c, 413, "{\"ok\":false,\"error\":\"file too large (max 64MB)\"}");
+            return;
+        }
+        std::ifstream in(p, std::ios::binary);
+        std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (!in && !data.empty()) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"read failed\"}");
+            return;
+        }
+        std::string ext = p.extension().u8string();
+        if (ext == ".py" || ext == ".md" || ext == ".txt" || ext == ".json") {
+            reply_text(c, 200, data, ext == ".json" ? "application/json; charset=utf-8"
+                                                   : "text/plain; charset=utf-8");
+        } else {
+            reply_file_bytes(c, data, p.filename().u8string());
+        }
         return;
     }
     if (path == "/api/files/download") {

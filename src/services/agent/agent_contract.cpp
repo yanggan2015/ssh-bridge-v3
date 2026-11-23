@@ -104,7 +104,7 @@ const OperationSpec kOperations[] = {
     {"command.post", "POST", "/command", "入队执行一条命令，只返回 job 不等待输出", "token", "channel,command,line_ending", "ok,job_id,queued,request_id"},
     {"command.block.post", "POST", "/command_block", "写入命令并等待回显/空闲，默认 2000ms 最大 60000ms", "token", "channel,command,line_ending,timeout_ms", "ok,output,timed_out,elapsed_ms,marker"},
     {"agent.exec.post", "POST", "/agent/exec", "仅 shell 态执行命令，追加结束标记并等待完成", "token", "channel,command,line_ending,timeout_ms", "ok,output,timed_out,elapsed_ms,marker"},
-    {"send.keys.post", "POST", "/send_keys", "按 key 数组发送按键/控制序列，间隔 10..1000ms", "token", "channel,keys,interval_ms", "ok,count,job_id,request_id"},
+    {"send.keys.post", "POST", "/send_keys", "按 key 数组发送按键/控制序列；间隔 10..1000ms；duration_ms/repeat 支持按住连发", "token", "channel,keys,interval_ms,duration_ms,repeat", "ok,count,repeat,job_id,request_id"},
     {"api.config.get", "GET", "/api/config", "完整配置 JSON（含密钥，需 token）", "token", "", "config"},
     {"config.save.post", "POST", "/api/config/save", "保存完整配置 JSON", "token", "body", "ok"},
     {"api.channels.get", "GET", "/api/channels", "串口/SSH 通道列表", "token", "", "channels"},

@@ -70,7 +70,7 @@ curl -s -X POST "$BASE/unlock" -H "Authorization: Bearer $TOKEN" \
 ```
 
 - `/write`：原始字节写入，202；`data` 自己负责 `\r\n`。
-- `/send_keys`：`<ctrl+c>`、`<enter>` 等按键序列，202。
+- `/send_keys`：`<ctrl+c>`、`<enter>` 等按键序列，202；可选 `duration_ms`（按住时长）与 `repeat`（1..6000），服务端按时长/间隔连发，不要用大量 HTTP 轮询。
 - `/action`：板控按钮 `{channel,id}`，202 + `job_id`；不要用 18096 点击代替。
 - `/command_block`：同步等命令结束，200；有超时上限，长任务用 `/command`。
 - `/agent/exec`：仅 shell 态；U-Boot/登录态返回 `409 state_mismatch`。
@@ -144,3 +144,11 @@ curl -s "$BASE/send_file/progress"
 - Tunnel 启停、网络/服务全局配置不进入 Agent 自动闭环；只允许人工或管理接口。
 - `/boards/delete`、`/tftp/delete`、`/log/clear`、配置保存属于不可逆/共享状态操作，必须显式确认。
 - 不把 `/api/help` 之外的旧路径写死；接口变化以 `/api/help` 为准。
+
+## 10. 板卡 CLI（eadk_board.py）
+
+- 分发：`GET /share/tools/eadk_board.py`、`GET /share/tools/eadk_board.md`；18082 共享服务也可 `GET /tools/eadk_board.py`。
+- 默认 Base `http://127.0.0.1:18081`；写接口用 `EADK_TOKEN` 或 `--token <web.token>`。
+- 键统一 `channel`；旧 `board/link` 由 CLI 自动映射到 `/agent/state?channel=`。
+- 典型闭环：`scan` → `-b CHANNEL list` → `health` → `clear` → `write/send/keys` → `log`；文件用 `put/ls/md5/rm`；Linux shell 用 `run`。
+- CLI 只是 `/agent/*` 的封装，动作后仍要读 `/log`、`/agent/state` 或 `/jobs` 验证业务结果。

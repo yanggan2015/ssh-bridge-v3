@@ -40,7 +40,17 @@ Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'ssh_bridge3.exe')
 $distConfigPath = Join-Path $here 'dist-config.json'
 if (-not (Test-Path -LiteralPath $distConfigPath)) { throw "缺少脱敏配置：$distConfigPath" }
 Copy-Item -LiteralPath $distConfigPath -Destination (Join-Path $stage 'ssh_bridge_config.json') -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $stage 'work') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'work\share') | Out-Null
+# share/tools（eadk_board.py/.md）与 share/skills 随包分发；运行期从 work\share 提供
+$shareSrc = Join-Path $root 'share'
+if (Test-Path -LiteralPath $shareSrc) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $stage 'share') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $shareSrc 'tools') -Destination (Join-Path $stage 'work\share') -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath (Join-Path $shareSrc 'skills') -Destination (Join-Path $stage 'work\share') -Recurse -Force -ErrorAction SilentlyContinue
+    # 同时保留包根 share/，便于直接取用脚本与 Skill 文档
+    Copy-Item -LiteralPath (Join-Path $shareSrc 'tools') -Destination (Join-Path $stage 'share') -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath (Join-Path $shareSrc 'skills') -Destination (Join-Path $stage 'share') -Recurse -Force -ErrorAction SilentlyContinue
+}
 $versionText = @(
     'product=ssh-bridge v3'
     "version=$Version"
