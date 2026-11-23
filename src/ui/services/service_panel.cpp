@@ -651,9 +651,32 @@ AppConfig ServicePanel::collect_config() const {
 
 void ServicePanel::save_config(bool) {
     if (!core_ || !mgr_) return;
-    AppConfig cfg = collect_config();
-    core_->set_service_config(cfg);
-    if (config_save(cfg)) mgr_->apply_config(cfg);
+    AppConfig desired = collect_config();
+    std::string err;
+
+    // 继电器：以磁盘最新配置为基准按设备名局部增改，避免整份旧快照覆盖通道/动作。
+    int idx = selected_relay_index();
+    RelayDeviceConfig dev = current_relay();
+    if (idx >= 0 || !dev.name.empty()) {
+        std::string old_name = idx >= 0 ? core_->config().relays[static_cast<std::size_t>(idx)].name : "";
+        if (!core_->upsert_relay(dev, old_name, &err)) {
+            if (!err.empty()) note(utf8_to_wide(err), true);
+            return;
+        }
+    }
+
+    // 服务段只替换 TFTP/共享/NFS，三块之外的字段保持磁盘最新值。
+    if (!core_->update_config([&](AppConfig& next, std::string* e) {
+            next.tftp = desired.tftp;
+            next.share = desired.share;
+            next.nfs = desired.nfs;
+            (void) e;
+            return true;
+        }, &err)) {
+        if (!err.empty()) note(utf8_to_wide(err), true);
+        return;
+    }
+    mgr_->apply_config(core_->config());
 }
 
 }  // namespace sb3

@@ -756,29 +756,15 @@ void RelayPanel::save_device() {
     if (dev.name.empty()) { note(L"设备名不能为空", true); return; }
     if (dev.windows_port.empty()) { note(L"Windows 串口不能为空", true); return; }
     int idx = selected_device_index();
+    std::string old_name = idx >= 0
+        ? core_->config().relays[static_cast<std::size_t>(idx)].name
+        : std::string();
+    std::string err;
+    if (!core_->upsert_relay(dev, old_name, &err)) {
+        note(L"配置落盘失败：" + utf8_to_wide(err), true);
+        return;
+    }
     AppConfig cfg = core_->config();
-    std::string old_name;
-    if (idx >= 0) {
-        old_name = cfg.relays[static_cast<std::size_t>(idx)].name;
-        cfg.relays[static_cast<std::size_t>(idx)] = dev;
-    } else {
-        for (const RelayDeviceConfig& r : cfg.relays) {
-            if (r.name == dev.name) { note(L"设备名已存在：" + utf8_to_wide(dev.name), true); return; }
-        }
-        cfg.relays.push_back(dev);
-    }
-    if (!old_name.empty() && old_name != dev.name) {
-        for (BoardConfig& b : cfg.boards) {
-            for (BoardActionConfig& a : b.buttons)
-                if (a.backend == "relay" && a.relay == old_name) a.relay = dev.name;
-        }
-        for (SSHLinkConfig& s : cfg.links) {
-            for (BoardActionConfig& a : s.buttons)
-                if (a.backend == "relay" && a.relay == old_name) a.relay = dev.name;
-        }
-    }
-    if (!config_save(cfg)) { note(L"配置落盘失败：" + utf8_to_wide(cfg.abs_path), true); return; }
-    core_->set_service_config(cfg);
     mgr_->apply_config(cfg);
     if (parent_) PostMessageW(parent_, kMsgBoardButtonsChanged, 0, 0);
     fill_devices();
@@ -789,25 +775,13 @@ void RelayPanel::delete_device() {
     if (!core_ || !mgr_) return;
     int idx = selected_device_index();
     if (idx < 0) { note(L"请先在列表中选择设备", true); return; }
+    std::string name = core_->config().relays[static_cast<std::size_t>(idx)].name;
+    std::string err;
+    if (!core_->delete_relay(name, &err)) {
+        note(utf8_to_wide(err), true);
+        return;
+    }
     AppConfig cfg = core_->config();
-    std::string name = cfg.relays[static_cast<std::size_t>(idx)].name;
-    for (const BoardConfig& b : cfg.boards) {
-        for (const BoardActionConfig& a : b.buttons)
-            if (a.backend == "relay" && a.relay == name) {
-                note(L"设备仍被通道 " + utf8_to_wide(b.name) + L" 的按钮绑定，不能删除", true);
-                return;
-            }
-    }
-    for (const SSHLinkConfig& s : cfg.links) {
-        for (const BoardActionConfig& a : s.buttons)
-            if (a.backend == "relay" && a.relay == name) {
-                note(L"设备仍被通道 " + utf8_to_wide(s.name) + L" 的按钮绑定，不能删除", true);
-                return;
-            }
-    }
-    cfg.relays.erase(cfg.relays.begin() + idx);
-    if (!config_save(cfg)) { note(L"配置落盘失败", true); return; }
-    core_->set_service_config(cfg);
     mgr_->apply_config(cfg);
     if (parent_) PostMessageW(parent_, kMsgBoardButtonsChanged, 0, 0);
     dev_index_ = -1;

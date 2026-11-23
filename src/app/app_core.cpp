@@ -76,6 +76,27 @@ void erase_named(std::vector<T>* vec, const std::string& name) {
                vec->end());
 }
 
+BoardConfig* find_board(AppConfig& cfg, const std::string& name) {
+    for (BoardConfig& b : cfg.boards) if (b.name == name) return &b;
+    return nullptr;
+}
+
+SSHLinkConfig* find_link(AppConfig& cfg, const std::string& name) {
+    for (SSHLinkConfig& s : cfg.links) if (s.name == name) return &s;
+    return nullptr;
+}
+
+RelayDeviceConfig* find_relay(AppConfig& cfg, const std::string& name) {
+    for (RelayDeviceConfig& r : cfg.relays) if (r.name == name) return &r;
+    return nullptr;
+}
+
+bool has_channel(const AppConfig& cfg, const std::string& name) {
+    for (const BoardConfig& b : cfg.boards) if (b.name == name) return true;
+    for (const SSHLinkConfig& s : cfg.links) if (s.name == name) return true;
+    return false;
+}
+
 }  // namespace
 
 bool AppCore::init(const std::string& project_root) {
@@ -309,47 +330,41 @@ bool AppCore::upsert_serial(const BoardConfig& board, const std::string& old_nam
         if (err) *err = "通道名不能为空";
         return false;
     }
-    if (old_name.empty() && (board_of(board.name) || link_of(board.name))) {
-        if (err) *err = "通道名已存在：" + board.name;
-        return false;
-    }
-    BoardConfig nb = board;
-    // 通道编辑对话框只编辑串口参数；保留对话框没有暴露的字段，避免编辑一次就丢密码/快捷指令/按钮
-    std::string src = old_name.empty() ? board.name : old_name;
-    const BoardConfig* oldBoard = board_of(src);
-    if (oldBoard) {
-        nb.username = oldBoard->username;
-        nb.password = oldBoard->password;
-        nb.password_present = oldBoard->password_present;
-        nb.buffer_size = oldBoard->buffer_size;
-        nb.log_dir = oldBoard->log_dir;
-        nb.timestamp = oldBoard->timestamp;
-        nb.buttons = oldBoard->buttons;
-        nb.quick_commands = oldBoard->quick_commands;
-    }
-    AppConfig next = cfg_;
-    if (!old_name.empty() && old_name != board.name) {
-        if (board_of(board.name) || link_of(board.name)) {
-            if (err) *err = "通道名已存在：" + board.name;
+    bool saved = update_config([&](AppConfig& next, std::string* e) {
+        if (old_name.empty() && has_channel(next, board.name)) {
+            if (e) *e = "通道名已存在：" + board.name;
             return false;
         }
-        erase_named(&next.boards, old_name);
-        erase_named(&next.links, old_name);
-        for (std::string& pane : next.ui.pane_channels)
-            if (pane == old_name) pane = board.name;
-    }
-    erase_named(&next.boards, board.name);
-    erase_named(&next.links, board.name);
-    next.boards.push_back(nb);
-    if (next.abs_path.empty()) {
-        next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
-    }
-    bool saved = config_save(next);
-
-    if (!saved) {
-        if (err) *err = "配置落盘失败：" + next.abs_path;
-        return false;
-    }
+        if (!old_name.empty() && old_name != board.name && has_channel(next, board.name)) {
+            if (e) *e = "通道名已存在：" + board.name;
+            return false;
+        }
+        BoardConfig nb = board;
+        // 通道编辑对话框只编辑串口参数；保留对话框没有暴露的字段，避免编辑一次就丢密码/快捷指令/按钮
+        std::string src = old_name.empty() ? board.name : old_name;
+        const BoardConfig* oldBoard = find_board(next, src);
+        if (oldBoard) {
+            nb.username = oldBoard->username;
+            nb.password = oldBoard->password;
+            nb.password_present = oldBoard->password_present;
+            nb.buffer_size = oldBoard->buffer_size;
+            nb.log_dir = oldBoard->log_dir;
+            nb.timestamp = oldBoard->timestamp;
+            nb.buttons = oldBoard->buttons;
+            nb.quick_commands = oldBoard->quick_commands;
+        }
+        if (!old_name.empty() && old_name != board.name) {
+            erase_named(&next.boards, old_name);
+            erase_named(&next.links, old_name);
+            for (std::string& pane : next.ui.pane_channels)
+                if (pane == old_name) pane = board.name;
+        }
+        erase_named(&next.boards, board.name);
+        erase_named(&next.links, board.name);
+        next.boards.push_back(nb);
+        return true;
+    }, err);
+    if (!saved) return false;
     ReloadResult r = reload_config();
 
     if (!r.ok()) {
@@ -366,43 +381,37 @@ bool AppCore::upsert_ssh(const SSHLinkConfig& link, const std::string& old_name,
         if (err) *err = "通道名不能为空";
         return false;
     }
-    if (old_name.empty() && (board_of(link.name) || link_of(link.name))) {
-        if (err) *err = "通道名已存在：" + link.name;
-        return false;
-    }
-    SSHLinkConfig nl = link;
-    std::string src = old_name.empty() ? link.name : old_name;
-    const SSHLinkConfig* oldLink = link_of(src);
-    if (oldLink) {
-        // 对话框不编辑按钮/快捷指令/日志缓冲；保留这些设置
-        nl.buttons = oldLink->buttons;
-        nl.quick_commands = oldLink->quick_commands;
-        nl.buffer_size = oldLink->buffer_size;
-        nl.log_dir = oldLink->log_dir;
-    }
-    AppConfig next = cfg_;
-    if (!old_name.empty() && old_name != link.name) {
-        if (board_of(link.name) || link_of(link.name)) {
-            if (err) *err = "通道名已存在：" + link.name;
+    bool saved = update_config([&](AppConfig& next, std::string* e) {
+        if (old_name.empty() && has_channel(next, link.name)) {
+            if (e) *e = "通道名已存在：" + link.name;
             return false;
         }
-        erase_named(&next.boards, old_name);
-        erase_named(&next.links, old_name);
-        for (std::string& pane : next.ui.pane_channels)
-            if (pane == old_name) pane = link.name;
-    }
-    erase_named(&next.boards, link.name);
-    erase_named(&next.links, link.name);
-    next.links.push_back(nl);
-    if (next.abs_path.empty()) {
-        next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
-    }
-    bool saved = config_save(next);
-
-    if (!saved) {
-        if (err) *err = "配置落盘失败：" + next.abs_path;
-        return false;
-    }
+        if (!old_name.empty() && old_name != link.name && has_channel(next, link.name)) {
+            if (e) *e = "通道名已存在：" + link.name;
+            return false;
+        }
+        SSHLinkConfig nl = link;
+        std::string src = old_name.empty() ? link.name : old_name;
+        const SSHLinkConfig* oldLink = find_link(next, src);
+        if (oldLink) {
+            // 对话框不编辑按钮/快捷指令/日志缓冲；保留这些设置
+            nl.buttons = oldLink->buttons;
+            nl.quick_commands = oldLink->quick_commands;
+            nl.buffer_size = oldLink->buffer_size;
+            nl.log_dir = oldLink->log_dir;
+        }
+        if (!old_name.empty() && old_name != link.name) {
+            erase_named(&next.boards, old_name);
+            erase_named(&next.links, old_name);
+            for (std::string& pane : next.ui.pane_channels)
+                if (pane == old_name) pane = link.name;
+        }
+        erase_named(&next.boards, link.name);
+        erase_named(&next.links, link.name);
+        next.links.push_back(nl);
+        return true;
+    }, err);
+    if (!saved) return false;
     ReloadResult r = reload_config();
 
     if (!r.ok()) {
@@ -417,24 +426,18 @@ bool AppCore::delete_channel(const std::string& name, std::string* err) {
         if (err) *err = "未选择通道";
         return false;
     }
-    AppConfig next = cfg_;
-    bool found = false;
-    for (const BoardConfig& b : next.boards) if (b.name == name) found = true;
-    for (const SSHLinkConfig& s : next.links) if (s.name == name) found = true;
-    if (!found) {
-        if (err) *err = "通道不存在：" + name;
-        return false;
-    }
-    erase_named(&next.boards, name);
-    erase_named(&next.links, name);
-    for (std::string& pane : next.ui.pane_channels)
-        if (pane == name) pane.clear();   // 删除后不要再把画框绑回不存在的通道
-    bool saved = config_save(next);
-
-    if (!saved) {
-        if (err) *err = "配置落盘失败：" + next.abs_path;
-        return false;
-    }
+    bool saved = update_config([&](AppConfig& next, std::string* e) {
+        if (!has_channel(next, name)) {
+            if (e) *e = "通道不存在：" + name;
+            return false;
+        }
+        erase_named(&next.boards, name);
+        erase_named(&next.links, name);
+        for (std::string& pane : next.ui.pane_channels)
+            if (pane == name) pane.clear();   // 删除后不要再把画框绑回不存在的通道
+        return true;
+    }, err);
+    if (!saved) return false;
     ReloadResult r = reload_config();
 
     if (!r.ok()) {
@@ -442,6 +445,69 @@ bool AppCore::delete_channel(const std::string& name, std::string* err) {
         return false;
     }
     return true;
+}
+
+bool AppCore::upsert_relay(const RelayDeviceConfig& relay, const std::string& old_name,
+                           std::string* err) {
+    if (relay.name.empty()) {
+        if (err) *err = "设备名不能为空";
+        return false;
+    }
+    return update_config([&](AppConfig& next, std::string* e) {
+        if (old_name.empty()) {
+            if (find_relay(next, relay.name)) {
+                if (e) *e = "设备名已存在：" + relay.name;
+                return false;
+            }
+            next.relays.push_back(relay);
+        } else {
+            RelayDeviceConfig* old = find_relay(next, old_name);
+            if (!old) {
+                if (e) *e = "继电器设备不存在：" + old_name;
+                return false;
+            }
+            *old = relay;
+            if (old_name != relay.name) {
+                for (BoardConfig& b : next.boards)
+                    for (BoardActionConfig& a : b.buttons)
+                        if (a.backend == "relay" && a.relay == old_name) a.relay = relay.name;
+                for (SSHLinkConfig& s : next.links)
+                    for (BoardActionConfig& a : s.buttons)
+                        if (a.backend == "relay" && a.relay == old_name) a.relay = relay.name;
+            }
+        }
+        return true;
+    }, err);
+}
+
+bool AppCore::delete_relay(const std::string& name, std::string* err) {
+    if (name.empty()) {
+        if (err) *err = "未选择设备";
+        return false;
+    }
+    return update_config([&](AppConfig& next, std::string* e) {
+        RelayDeviceConfig* old = find_relay(next, name);
+        if (!old) {
+            if (e) *e = "继电器设备不存在：" + name;
+            return false;
+        }
+        for (const BoardConfig& b : next.boards) {
+            for (const BoardActionConfig& a : b.buttons)
+                if (a.backend == "relay" && a.relay == name) {
+                    if (e) *e = "设备仍被通道 " + b.name + " 的按钮绑定，不能删除";
+                    return false;
+                }
+        }
+        for (const SSHLinkConfig& s : next.links) {
+            for (const BoardActionConfig& a : s.buttons)
+                if (a.backend == "relay" && a.relay == name) {
+                    if (e) *e = "设备仍被通道 " + s.name + " 的按钮绑定，不能删除";
+                    return false;
+                }
+        }
+        erase_named(&next.relays, name);
+        return true;
+    }, err);
 }
 
 bool AppCore::save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane) {
@@ -458,16 +524,6 @@ bool AppCore::save_ui_layout(int split, const std::vector<std::string>& pane_cha
     if (!config_save(next)) return false;
     cfg_.ui = next.ui;
     return true;
-}
-
-void AppCore::set_service_config(const AppConfig& cfg) {
-    cfg_.relays = cfg.relays;
-    cfg_.tftp = cfg.tftp;
-    cfg_.share = cfg.share;
-    cfg_.nfs = cfg.nfs;
-    // 继电器改名会同步按钮里的 relay 字段；这里把按钮一起带回内存，避免重启前状态不一致
-    cfg_.boards = cfg.boards;
-    cfg_.links = cfg.links;
 }
 
 const BoardConfig* AppCore::board_of(const std::string& name) const {
@@ -503,29 +559,19 @@ const std::vector<BoardActionConfig>* AppCore::buttons_of(const std::string& nam
 
 bool AppCore::set_buttons(const std::string& name,
                           const std::vector<BoardActionConfig>& buttons, std::string* err) {
-    AppConfig next = cfg_;
-    bool found = false;
-    for (BoardConfig& b : next.boards) {
-        if (b.name == name) { b.buttons = buttons; found = true; break; }
-    }
-    if (!found) {
-        for (SSHLinkConfig& s : next.links) {
-            if (s.name == name) { s.buttons = buttons; found = true; break; }
+    bool saved = update_config([&](AppConfig& next, std::string* e) {
+        if (BoardConfig* b = find_board(next, name)) {
+            b->buttons = buttons;
+            return true;
         }
-    }
-    if (!found) {
-        if (err) *err = "通道不存在：" + name;
+        if (SSHLinkConfig* s = find_link(next, name)) {
+            s->buttons = buttons;
+            return true;
+        }
+        if (e) *e = "通道不存在：" + name;
         return false;
-    }
-    if (next.abs_path.empty()) {
-        next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
-    }
-    if (!config_save(next)) {
-        if (err) *err = "配置落盘失败：" + next.abs_path;
-        return false;
-    }
-    cfg_ = next;
-    return true;
+    }, err);
+    return saved;
 }
 
 const std::vector<QuickCommandConfig>* AppCore::quick_commands_of(const std::string& name) const {
@@ -537,28 +583,19 @@ const std::vector<QuickCommandConfig>* AppCore::quick_commands_of(const std::str
 bool AppCore::set_quick_commands(const std::string& name,
                                  const std::vector<QuickCommandConfig>& commands,
                                  std::string* err) {
-    AppConfig next = cfg_;
-    bool found = false;
-    for (BoardConfig& b : next.boards) {
-        if (b.name == name) { b.quick_commands = commands; found = true; break; }
-    }
-    if (!found) {
-        for (SSHLinkConfig& s : next.links) {
-            if (s.name == name) { s.quick_commands = commands; found = true; break; }
+    bool saved = update_config([&](AppConfig& next, std::string* e) {
+        if (BoardConfig* b = find_board(next, name)) {
+            b->quick_commands = commands;
+            return true;
         }
-    }
-    if (!found) {
-        if (err) *err = "通道不存在：" + name;
+        if (SSHLinkConfig* s = find_link(next, name)) {
+            s->quick_commands = commands;
+            return true;
+        }
+        if (e) *e = "通道不存在：" + name;
         return false;
-    }
-    if (next.abs_path.empty())
-        next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
-    if (!config_save(next)) {
-        if (err) *err = "配置落盘失败：" + next.abs_path;
-        return false;
-    }
-    cfg_ = next;
-    return true;
+    }, err);
+    return saved;
 }
 
 IBridge* AppCore::find(const std::string& name) {
@@ -642,6 +679,28 @@ std::string AppCore::line_ending_for(const std::string& name) const {
         if (b.name == name && !b.line_ending.empty()) return b.line_ending;
     }
     return "crlf";
+}
+
+bool AppCore::update_config(const std::function<bool(AppConfig&, std::string*)>& apply, std::string* err) {
+    if (!apply) {
+        if (err) *err = "empty patch";
+        return false;
+    }
+    std::lock_guard<std::mutex> g(config_mu_);
+    AppConfig next;
+    if (!cfg_.abs_path.empty()) config_load(next, cfg_.abs_path);
+    if (next.abs_path.empty()) next = cfg_;
+    next.project_root = project_root_;
+    if (next.abs_path.empty())
+        next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
+    if (!apply(next, err)) return false;
+    if (!config_save(next)) {
+        if (err) *err = "配置落盘失败：" + next.abs_path;
+        return false;
+    }
+    cfg_ = next;
+    if (err) err->clear();
+    return true;
 }
 
 bool AppCore::patch_config_json(const std::function<bool(cJSON*)>& apply, std::string* err) {

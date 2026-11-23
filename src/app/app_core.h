@@ -69,6 +69,10 @@ public:
     bool upsert_ssh(const SSHLinkConfig& link, const std::string& old_name,
                     std::string* err);
     bool delete_channel(const std::string& name, std::string* err);
+    // 继电器设备增改删：同样以磁盘最新配置为基准，改名同步按钮引用
+    bool upsert_relay(const RelayDeviceConfig& relay, const std::string& old_name,
+                      std::string* err);
+    bool delete_relay(const std::string& name, std::string* err);
 
     const BoardConfig*   board_of(const std::string& name) const;
     const SSHLinkConfig* link_of(const std::string& name) const;
@@ -104,10 +108,10 @@ public:
     bool save_config_json(const std::string& text, std::string* err);
     // 以磁盘最新配置为基准做读-改-写，串行化所有配置写，避免并发覆盖。
     bool patch_config_json(const std::function<bool(cJSON*)>& apply, std::string* err);
+    // AppConfig 版配置事务：读磁盘最新、应用局部修改、落盘并同步内存。
+    bool update_config(const std::function<bool(AppConfig&, std::string*)>& apply, std::string* err);
     // UI 分屏布局（窗格数/各画框通道/激活画框）落盘，不改服务配置、不重建通道
     bool save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane);
-    // 服务面板保存后同步内存配置，避免下一次面板采集用旧值覆盖
-    void set_service_config(const AppConfig& cfg);
 
 private:
     void build_entries();
