@@ -377,6 +377,65 @@ dialog input{width:100%;margin-top:11px}
   .terminal-foot input{flex:1 1 100%}
   .footer-note{text-align:left}
 }
+/* 桌面工作台布局：左侧通道栏常驻，右侧会话区吃满剩余空间。
+   顶部导航压到 44px，页面标题不再占行；token 改为“令牌”浮层。 */
+@media(min-width:1021px){
+  body.pg-dashboard .layout{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:0}
+  body.pg-dashboard aside.sidebar{flex:0 0 auto;min-height:44px;padding:3px 10px;gap:8px}
+  body.pg-dashboard .brand{padding:0;gap:7px}
+  body.pg-dashboard .brand-mark{width:24px;height:24px;border-radius:7px;font-size:11px}
+  body.pg-dashboard .brand strong{font-size:14px}
+  body.pg-dashboard .brand small{font-size:10px}
+  body.pg-dashboard nav{gap:2px;padding:0;align-items:center}
+  body.pg-dashboard nav a{padding:4px 7px;font-size:12px;border-radius:7px;line-height:1.25}
+  body.pg-dashboard #tokenMenuBtn{display:inline-flex;align-items:center;min-height:26px;padding:2px 8px;
+    border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;border-radius:7px;font-size:12px}
+  body.pg-dashboard main{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;padding:6px 8px 8px}
+  body.pg-dashboard .shell{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;width:100%;max-width:none;margin:0}
+  body.pg-dashboard header.page-head{display:none}
+  body.pg-dashboard.token-open header.page-head{display:flex;position:fixed;z-index:95;top:48px;right:8px;
+    width:min(430px,calc(100vw - 16px));margin:0;padding:8px 9px;background:var(--surface);
+    border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 32px rgba(2,18,22,.22)}
+  body.pg-dashboard.token-open header.page-head .title-wrap,
+  body.pg-dashboard.token-open header.page-head .nav-toggle-global{display:none}
+  body.pg-dashboard.token-open header.page-head .header-tools{width:100%;margin:0;justify-content:flex-end}
+  body.pg-dashboard .dash{flex:1 1 auto;height:auto;min-height:0;grid-template-columns:196px minmax(0,1fr);gap:8px}
+  body.pg-dashboard .dash.nav-collapsed{grid-template-columns:0 minmax(0,1fr);gap:0}
+  body.pg-dashboard .channel-card{height:auto;min-height:0;margin:0;padding:8px 8px 7px;border-radius:10px}
+  body.pg-dashboard .channel-card .card-head{align-items:center;margin-bottom:5px}
+  body.pg-dashboard .channel-card h2{font-size:14px;line-height:1.2}
+  body.pg-dashboard .channel-card .card-sub{display:none}
+  body.pg-dashboard .channel-card #onlineCount{font-size:10px;padding:1px 6px}
+  body.pg-dashboard .channel-card .channel-list{flex:1 1 auto;min-height:0;align-content:start;grid-auto-rows:max-content}
+  body.pg-dashboard .channel-list{gap:3px}
+  body.pg-dashboard .channel-item{flex-wrap:nowrap;gap:7px;padding:6px;border-radius:8px}
+  body.pg-dashboard .channel-item .ch-name{font-size:12px;line-height:1.25}
+  body.pg-dashboard .channel-item .ch-detail{font-size:10px;line-height:1.25;margin-top:1px}
+  body.pg-dashboard .channel-item .ch-num{display:none}
+  body.pg-dashboard .terminal-card{height:auto;min-height:0;margin:0;padding:3px 4px 4px;border-radius:10px}
+  body.pg-dashboard .terminal-card .card-head{min-height:22px;margin:0 0 1px;align-items:center;gap:6px}
+  body.pg-dashboard .terminal-card .card-title h2,
+  body.pg-dashboard .terminal-card .card-title .card-sub{display:none}
+  body.pg-dashboard .terminal-card .terminal-meta{margin:0;gap:4px}
+  body.pg-dashboard .terminal-card .terminal-meta .chip{padding:1px 5px;font-size:11px;line-height:1.3}
+  body.pg-dashboard .terminal-card .row-end{gap:3px}
+  body.pg-dashboard .terminal-card .row-end .btn,
+  body.pg-dashboard .terminal-card .row-end .nav-toggle{padding:2px 6px;min-height:22px;font-size:11px;line-height:1.2}
+  body.pg-dashboard .terminal-card #ch{width:104px;min-height:22px;padding:1px 4px;font-size:11px}
+  body.pg-dashboard .terminal-card #ro{display:none}
+  body.pg-dashboard .terminal-bar{gap:5px;margin:0 0 2px;min-height:22px}
+  body.pg-dashboard .terminal-bar .pane-strip{gap:3px}
+  body.pg-dashboard .pane-strip .pane-label{font-size:11px}
+  body.pg-dashboard .pane-chip{padding:2px 5px;min-height:20px;font-size:11px;border-radius:6px}
+  body.pg-dashboard .terminal-tools{gap:3px}
+  body.pg-dashboard .terminal-tools .btn{padding:2px 5px;min-height:21px;font-size:11px;line-height:1.2;border-radius:6px}
+  body.pg-dashboard #termFind{flex:1 1 110px;min-height:22px;padding:1px 5px;font-size:11px}
+  body.pg-dashboard .hint{display:none}
+  body.pg-dashboard .lock-banner{margin:0 0 2px;padding:3px 7px;font-size:10px}
+  body.pg-dashboard .terminal-shell{border-radius:8px}
+  body.pg-dashboard .terminal-shell .terminal{padding:7px 9px}
+  body.pg-dashboard .xterm-host{padding:3px 5px 2px}
+}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 )CSS";
 
@@ -905,7 +964,7 @@ std::string page_script(const std::string& page) {
 let ws=null, WS_GEN=0, WS_RETRY=0, WS_TIMER=0, TERM_RAF=0;
 let LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[], TERM_LOCK=null, TERM_TAKE_SID='web-'+Date.now().toString(36);
 const FONT_KEY='sb3_term_font';
-const NAV_KEY='sb3_dash_nav_collapsed';
+const NAV_KEY='sb3_dash_nav_collapsed_v2';
 const KEY_SEQ={
   esc:'\x1b',tab:'\t','ctrl-c':'\x03','ctrl-d':'\x04','ctrl-z':'\x1a','ctrl-l':'\x0c',
   'ctrl-u':'\x15','ctrl-r':'\x12',up:'\x1b[A',down:'\x1b[B',left:'\x1b[D',right:'\x1b[C',
@@ -1111,7 +1170,8 @@ function applyNav(collapsed){
 }
 $('#toggleNav').onclick=()=>applyNav(!$('#dash').classList.contains('nav-collapsed'));
 const NAV_SAVED=localStorage.getItem(NAV_KEY);
-applyNav(NAV_SAVED===null?true:NAV_SAVED==='1');
+const NAV_NARROW=matchMedia('(max-width:1020px)').matches;
+applyNav(NAV_SAVED===null?NAV_NARROW:NAV_SAVED==='1');
 const GNAV_KEY='sb3_dash_page_nav_hidden';
 function applyGlobalNav(hidden){
   document.body.classList.toggle('nav-hidden',!!hidden);
@@ -1150,7 +1210,7 @@ document.addEventListener('keydown',e=>{
 function chType(c){return c.kind==='ssh'?'SSH':(c.kind==='powershell'?'PowerShell':(c.kind==='telnet'?'Telnet':'串口'))}
 function renderChannels(st){
   const box=$('#channelList'), sel=$('#ch'); if(!box||!st||!st.channels)return;
-  box.innerHTML=''; const active=sel?sel.value:LAST_CH;
+  box.innerHTML=''; const active=LAST_CH||(sel?sel.value:'');
   st.channels.forEach(c=>{
     const b=document.createElement('button');b.type='button';b.className='channel-item'+(c.name===active?' active':'');
     b.innerHTML='<span class="status-dot '+(isOnline(c)?'on':'off')+'"></span><span class="ch-main"><span class="ch-name"></span><span class="ch-detail"></span></span><span class="ch-num"></span>';
@@ -1305,6 +1365,7 @@ async function connect(){
   if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();
   lockRefresh(ch);
   $('#activeName').textContent=ch;
+  if(LAST)renderChannels(LAST);
   updateRxBadge(ch);
   $('#hint').textContent='正在连接 '+ch+' …';
   const dl=$('#dlTerm');if(dl)dl.href='/log/download?channel='+encodeURIComponent(ch);
