@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "app/app_core.h"
+#include "services/agent/agent_lock.h"
 #include "services/service_manager.h"
 
 namespace sb3 {
@@ -227,8 +228,8 @@ void add_buttons(cJSON* o, AppCore* core, const std::string& channel) {
         cJSON_AddStringToObject(b, "kind", a.backend.c_str());
         cJSON_AddBoolToObject(b, "enable", a.enable);
         cJSON_AddBoolToObject(b, "enabled", a.enable);
-        cJSON_AddBoolToObject(b, "requires_lock", false);
-        cJSON_AddBoolToObject(b, "lock_enforced", false);
+        cJSON_AddBoolToObject(b, "requires_lock", true);
+        cJSON_AddBoolToObject(b, "lock_enforced", true);
         cJSON_AddItemToArray(arr, b);
     }
 }
@@ -245,7 +246,7 @@ void add_features(cJSON* o, const AppCore::Entry& e, AppCore* core) {
     cJSON_AddBoolToObject(f, "incremental_log", true);
     cJSON_AddBoolToObject(f, "log_disk", true);
     cJSON_AddBoolToObject(f, "command", true);
-    cJSON_AddBoolToObject(f, "lock", false);
+    cJSON_AddBoolToObject(f, "lock", true);
     cJSON_AddBoolToObject(f, "jobs", false);
     cJSON_AddBoolToObject(f, "tftp_artifacts", false);
 }
@@ -302,11 +303,48 @@ cJSON* services_json(ServiceManager* services) {
     return cJSON_IsObject(o) ? o : (cJSON_Delete(o), cJSON_CreateObject());
 }
 
+void add_takeover_json(cJSON* o, const LeaseInfo& li) {
+    if (li.last_takeover_ms <= 0) return;
+    cJSON* t = cJSON_AddObjectToObject(o, "last_takeover");
+    cJSON_AddStringToObject(t, "reason", li.last_takeover_reason.c_str());
+    cJSON_AddStringToObject(t, "actor", li.last_takeover_actor.c_str());
+    cJSON_AddStringToObject(t, "previous_owner", li.last_takeover_previous_owner.c_str());
+    cJSON_AddNumberToObject(t, "at_ms", static_cast<double>(li.last_takeover_ms));
+}
+
+cJSON* lock_json(const std::string& channel) {
+    LeaseInfo li = lease_locks().get(channel);
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "enforced", true);
+    cJSON_AddStringToObject(o, "channel", channel.c_str());
+    cJSON_AddBoolToObject(o, "held", li.active);
+    cJSON_AddBoolToObject(o, "can_takeover", true);
+    if (li.active) {
+        cJSON_AddStringToObject(o, "owner", li.owner.c_str());
+        cJSON_AddNumberToObject(o, "ttl_ms", static_cast<double>(li.ttl_ms));
+        cJSON_AddNumberToObject(o, "expires_in_ms", static_cast<double>(li.remaining_ms));
+        cJSON_AddNumberToObject(o, "acquired_ms", static_cast<double>(li.acquired_ms));
+    } else {
+        cJSON_AddStringToObject(o, "owner", "");
+        cJSON_AddNumberToObject(o, "expires_in_ms", 0);
+    }
+    add_takeover_json(o, li);
+    return o;
+}
+
 cJSON* locks_json() {
     cJSON* o = cJSON_CreateObject();
-    cJSON_AddBoolToObject(o, "enforced", false);
-    cJSON_AddStringToObject(o, "note", "lease lock lands in C5");
-    cJSON_AddItemToObject(o, "leases", cJSON_CreateArray());
+    cJSON_AddBoolToObject(o, "enforced", true);
+    cJSON_AddStringToObject(o, "note", "per-channel lease lock");
+    cJSON* arr = cJSON_AddArrayToObject(o, "leases");
+    for (const LeaseInfo& li : lease_locks().list()) {
+        cJSON* e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "channel", li.channel.c_str());
+        cJSON_AddStringToObject(e, "owner", li.owner.c_str());
+        cJSON_AddNumberToObject(e, "ttl_ms", static_cast<double>(li.ttl_ms));
+        cJSON_AddNumberToObject(e, "expires_in_ms", static_cast<double>(li.remaining_ms));
+        cJSON_AddItemToArray(arr, e);
+    }
     return o;
 }
 
@@ -320,7 +358,7 @@ void add_global_features(cJSON* root) {
     cJSON_AddBoolToObject(f, "incremental_log", true);
     cJSON_AddBoolToObject(f, "log_disk", true);
     cJSON_AddBoolToObject(f, "command", true);
-    cJSON_AddBoolToObject(f, "lock", false);
+    cJSON_AddBoolToObject(f, "lock", true);
     cJSON_AddBoolToObject(f, "jobs", false);
     cJSON_AddBoolToObject(f, "serial_control", false);
     cJSON_AddBoolToObject(f, "tftp_artifacts", false);
@@ -386,9 +424,9 @@ std::string state_json(AppCore* core, ServiceManager* services, const std::strin
     cJSON_AddStringToObject(root, "protocol", kProtocol);
     cJSON_AddNumberToObject(root, "scanned_at_ms", static_cast<double>(now_ms()));
     cJSON_AddStringToObject(root, "channel", e->name.c_str());
-    cJSON_AddItemToObject(root, "lock", locks_json());
+    cJSON_AddItemToObject(root, "lock", lock_json(e->name));
     cJSON_AddNullToObject(root, "last_action");
-    cJSON_AddStringToObject(root, "last_action_note", "action audit lands in C4/C6");
+    cJSON_AddStringToObject(root, "last_action_note", "job audit is available via /job?id=; last_action summary lands in C6");
     return json_text(root);
 }
 
@@ -440,8 +478,8 @@ std::string actions_agent_json(AppCore* core, const std::string& channel) {
                 cJSON_AddStringToObject(o, "run", a.run.c_str());
                 cJSON_AddBoolToObject(o, "enable", a.enable);
                 cJSON_AddBoolToObject(o, "enabled", a.enable);
-                cJSON_AddBoolToObject(o, "requires_lock", false);
-                cJSON_AddBoolToObject(o, "lock_enforced", false);
+                cJSON_AddBoolToObject(o, "requires_lock", true);
+                cJSON_AddBoolToObject(o, "lock_enforced", true);
                 cJSON_AddNumberToObject(o, "delay_ms", a.delay_ms);
                 cJSON_AddStringToObject(o, "relay", a.relay.c_str());
                 cJSON_AddItemToArray(items, o);

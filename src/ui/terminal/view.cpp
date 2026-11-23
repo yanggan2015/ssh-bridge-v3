@@ -13,6 +13,7 @@
 #include <cjson/cJSON.h>
 
 #include "core/util/util.h"
+#include "services/agent/agent_lock.h"
 #include "ui/terminal/input.h"
 #include "ui/terminal/term_types.h"
 #include "ui/ui_messages.h"
@@ -543,6 +544,7 @@ bool TerminalView::mouse_event_slot(int slot, int col, int row, int button, bool
     std::string out = term::encode_mouse(b, col, row, release, scr.mouse_sgr());
     IBridge* br = core_ ? core_->find(s.channel) : nullptr;
     if (!br) return false;
+    agent::lease_locks().human_input(s.channel, "local-mouse");
     br->write(out.data(), out.size());
     return true;
 }
@@ -676,11 +678,16 @@ bool TerminalView::paste_text(const std::string& utf8) {
 }
 
 void TerminalView::send_active(const std::string& bytes) {
+    send_bytes(bytes, true);
+}
+
+void TerminalView::send_bytes(const std::string& bytes, bool human) {
     if (bytes.empty() || slots_.empty()) return;
     Slot& slot = slots_[static_cast<std::size_t>(active_)];
     if (slot.channel.empty()) return;
     IBridge* b = core_ ? core_->find(slot.channel) : nullptr;
     if (!b) return;
+    if (human) agent::lease_locks().human_input(slot.channel, "local-keyboard");
     b->write(bytes.data(), bytes.size());
 }
 
@@ -701,14 +708,14 @@ bool TerminalView::type_text(const std::string& utf8, bool submit) {
     }
     if (submit) bytes += line_ending_bytes();
     if (bytes.empty()) return false;
-    send_active(bytes);
+    send_bytes(bytes, false);
     invalidate();
     return true;
 }
 
 bool TerminalView::send_raw(const std::string& bytes) {
     if (slots_.empty() || bytes.empty()) return false;
-    send_active(bytes);
+    send_bytes(bytes, false);
     invalidate();
     return true;
 }

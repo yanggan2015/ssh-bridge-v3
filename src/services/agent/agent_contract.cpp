@@ -135,6 +135,9 @@ const OperationSpec kOperations[] = {
     {"tunnel.config.post", "POST", "/api/tunnel/config", "保存隧道配置", "token", "config", "ok"},
     {"service.post", "POST", "/service", "启停服务", "token", "name,on", "ok,running"},
     {"action.post", "POST", "/action", "执行板控动作；backend 可选校验，返回 job 与审计 id", "token", "channel,id,backend,session", "ok,job,job_id,queued,request_id"},
+    {"lock.post", "POST", "/lock", "按通道获取/续租租约锁，默认 1000ms 最大 86400000ms", "token", "channel,session_id,ttl_ms", "ok,channel,owner,ttl_ms,expires_in_ms,renewed"},
+    {"unlock.post", "POST", "/unlock", "只释放自己的通道锁；错误 session 不释放", "token", "channel,session_id", "ok,channel,released,owner"},
+    {"lock.takeover.post", "POST", "/lock/takeover", "人工显式接管：清旧锁并记录 last_takeover 审计", "token", "channel,reason,session_id", "ok,channel,previous_owner,reason,at_ms"},
     {"job.get", "GET", "/job", "查询 job 状态、输出与审计摘要；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,done,ok,timed_out,output,audit"},
 };
 

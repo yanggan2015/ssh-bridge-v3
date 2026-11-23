@@ -65,7 +65,7 @@
 
 - 实现位置：`src/services/web/web_console.cpp`。统一的 `Job`/`Task` 队列按 `Action/Command/CommandBlock/Exec/SendKeys` 分发；`/command_block` 与 `/agent/exec` 使用 pending HTTP + `MG_EV_WAKEUP` 回写，poll 线程不 sleep。
 - `/api/help` operations 由 50 增至 54，新增 `command.post`、`command.block.post`、`agent.exec.post`、`send.keys.post`；`write.post`、`action.post`、`job.get` 返回字段同步更新。
-- `agent_scan` 的 `features.command` 在完整/全局视图均改为 `true`；`lock` 仍为 `false`，留给 C5。
+- `agent_scan` 的 `features.command` 在完整/全局视图均改为 `true`；C4 时 `lock` 仍为 `false`，C5 已改为 `true`。
 - 测试：`output/webtest/agent-command-smoke.js` 84/84，结果 `output/ux-audit/agent-command-result.json`；18096 关闭隔离 7/7，`output/ux-audit/agent-command-ui-disabled.json`。
 - 回归：C1 82/82、C2 73/73、C3 59/59、api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120。
 - 提交：`feat(agent): add command jobs and action audit`。
@@ -74,11 +74,21 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A5-1 | 锁表 | 按 channel；owner/session/expires/ttl | `agent_lock.cpp` | 不同通道互不影响 | 计划 |
-| A5-2 | `/lock` `/unlock` | 默认 1000ms；最大 86400000ms；续租；错 session 不释放 | `agent_lock.cpp` | 423/续租/过期/错误 owner 全通过 | 计划 |
-| A5-3 | 写路由统一拦截 | 先锁、再通道态、再入队 | 所有 Agent 写路由 | 锁定时 command/write/keys/action 全 423 | 计划 |
-| A5-4 | 人工接管 | `/lock/takeover` + 本地键盘信号；清锁并 audit | `agent_lock.cpp`、UI/WS | 人工接管后 Agent 写 423；不锁死用户 | 计划 |
-| A5-5 | 状态可见 | `/agent/state`、`/status?view=agent` 显示锁 | `agent_scan.cpp` | owner/expires 正确 | 计划 |
+| A5-1 | 锁表 | 按 channel；owner/session/expires/ttl | `agent_lock.cpp` | 不同通道互不影响 | 已完成 |
+| A5-2 | `/lock` `/unlock` | 默认 1000ms；最大 86400000ms；续租；错 session 不释放 | `agent_lock.cpp` | 423/续租/过期/错误 owner 全通过 | 已完成 |
+| A5-3 | 写路由统一拦截 | 先锁、再通道态、再入队 | 所有 Agent 写路由 | 锁定时 command/write/keys/action 全 423 | 已完成 |
+| A5-4 | 人工接管 | `/lock/takeover` + 本地键盘信号；清锁并 audit | `agent_lock.cpp`、UI/WS | 人工接管后 Agent 写 423；不锁死用户 | 已完成 |
+| A5-5 | 状态可见 | `/agent/state`、`/status?view=agent` 显示锁 | `agent_scan.cpp` | owner/expires 正确 | 已完成 |
+
+**C5 完成记录（2026-11-23）**
+
+- 新增 `src/services/agent/agent_lock.{h,cpp}`：进程内单例 `LeaseLocks`，按 channel 保存 owner/session/ttl/expires 与上次接管审计；TTL 惰性过期，同 session 续租，不同 session 423。
+- `web_console.cpp` 新增 `POST /lock`、`POST /unlock`、`POST /lock/takeover`；所有写路由经 `allow_channel_write()`，顺序为鉴权→通道存在→锁→running→入队；读接口不受影响。
+- `agent_scan.cpp`：`features.lock=true`；`state.lock`、`scan/status.locks`、`actions.requires_lock` 全部反映真实锁态；`agent_contract.cpp` operations 54→57。
+- 本地人工接管：`view.cpp` 的 `send_active/send_bytes` 区分 human；WM_CHAR/WM_KEYDOWN/粘贴/鼠标上报调用 `human_input`，18096 `type_text/send_raw` 不清锁。
+- 测试：`agent-lock-smoke.js` 51/51；锁核心单测 `agent-lock-unit.cpp` 19/19；结果 `output/ux-audit/agent-lock-result.json`、`output/ux-audit/agent-lock-unit.json`。
+- 回归：C1 82/82、C2 73/73、C3 59/59、C4 84/84；api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120。
+- 提交：`feat(agent): add per-channel leases and human takeover`。
 
 ## 6. P0-F：作业治理
 

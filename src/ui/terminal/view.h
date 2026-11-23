@@ -100,6 +100,7 @@ private:
     std::string selection_text() const;
     bool copy_to_clipboard(const std::string& utf8);
     void send_active(const std::string& bytes);
+    void send_bytes(const std::string& bytes, bool human);
     std::string line_ending_bytes() const;   // 按当前通道配置生成回车字节
     void on_wheel(POINT pt, int delta);
     void show_menu(POINT pt);

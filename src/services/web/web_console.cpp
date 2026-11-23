@@ -38,6 +38,7 @@
 #include "core/util/key_chars.h"
 #include "core/util/util.h"
 #include "services/agent/agent_contract.h"
+#include "services/agent/agent_lock.h"
 #include "services/agent/agent_scan.h"
 #include "services/board_actions/board_action_runner.h"
 #include "services/service_manager.h"
@@ -687,6 +688,8 @@ struct WebConsole::Impl {
     void flush_job_reply(int id);
     void drop_pending(mg_connection* c);
     bool hold_job(mg_connection* c, const std::shared_ptr<Job>& job, std::string* done_body);
+    bool allow_channel_write(mg_connection* c, const std::string& channel,
+                             const std::string& session, const std::string& rid);
     std::string job_reply_json(const Job& j) const;
     int spawn_action(const std::string& channel, const std::string& id,
                      const std::string& request_id, const std::string& session);
@@ -898,6 +901,23 @@ bool WebConsole::Impl::hold_job(mg_connection* c, const std::shared_ptr<Job>& jo
     pending_conn_job[c] = job->id;
     pending_job_conn[job->id] = c;
     return true;
+}
+
+bool WebConsole::Impl::allow_channel_write(mg_connection* c, const std::string& channel,
+                                           const std::string& session, const std::string& rid) {
+    agent::LeaseInfo blocker;
+    if (agent::lease_locks().check(channel, session, &blocker) == 0) return true;
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", false);
+    cJSON* err = cJSON_AddObjectToObject(root, "error");
+    cJSON_AddStringToObject(err, "code", "agent_lock");
+    cJSON_AddStringToObject(err, "message", "channel is locked by another session");
+    cJSON_AddStringToObject(err, "owner", blocker.owner.c_str());
+    cJSON_AddNumberToObject(err, "expires_in_ms", static_cast<double>(blocker.remaining_ms));
+    cJSON_AddBoolToObject(err, "can_takeover", true);
+    cJSON_AddStringToObject(root, "request_id", rid.c_str());
+    reply_json(c, 423, root);
+    return false;
 }
 
 std::string WebConsole::Impl::page(const std::string& name) const {
@@ -1441,24 +1461,132 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         std::string ch = json_str(body, "channel");
         std::string data = json_str(body, "data");
         if (data.empty()) data = json_str(body, "text");
+        std::string session = json_str(body, "session");
+        if (session.empty()) session = header_text(hm, "X-Agent-Session");
         cJSON_Delete(body);
+        std::string rid = request_id_of(hm);
         auto b = bridge(ch);
         if (!b) {
-            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", request_id_of(hm)));
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", rid));
             return;
         }
+        if (!allow_channel_write(c, ch, session, rid)) return;
         if (!b->running()) {
-            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", request_id_of(hm)));
+            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", rid));
             return;
         }
         std::size_t n = b->write(data.data(), data.size());
         cJSON* root = cJSON_CreateObject();
         cJSON_AddBoolToObject(root, "ok", true);
         cJSON_AddNumberToObject(root, "bytes", static_cast<double>(n));
-        cJSON_AddStringToObject(root, "request_id", request_id_of(hm).c_str());
+        cJSON_AddStringToObject(root, "request_id", rid.c_str());
         reply_json(c, 202, root);
         return;
     }
+    if (path == "/lock" || path == "/unlock" || path == "/lock/takeover") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", request_id_of(hm)));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", request_id_of(hm)));
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string ch = json_str(body, "channel");
+        std::string sid = json_str(body, "session_id");
+        std::string reason = json_str(body, "reason");
+        int ttl = json_int(body, "ttl_ms", 1000);
+        cJSON_Delete(body);
+        if (sid.empty()) sid = header_text(hm, "X-Agent-Session");
+        if (ch.empty()) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "channel required", request_id_of(hm)));
+            return;
+        }
+        if (!bridge(ch)) {
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", request_id_of(hm)));
+            return;
+        }
+        std::string rid = request_id_of(hm);
+        if (path == "/lock") {
+            if (sid.empty()) {
+                reply_json_text(c, 400, agent::error_json("session_required", "session_id or X-Agent-Session required", rid));
+                return;
+            }
+            if (ttl == 0) ttl = 1000;
+            if (ttl < 100 || ttl > 86400000) {
+                reply_json_text(c, 400, agent::error_json("invalid_ttl", "ttl_ms must be 100..86400000", rid));
+                return;
+            }
+            agent::LeaseInfo before = agent::lease_locks().get(ch);
+            bool renewed = before.active && before.owner == sid;
+            agent::LeaseInfo lease, blocker;
+            if (!agent::lease_locks().acquire(ch, sid, ttl, &lease, &blocker)) {
+                cJSON* root = cJSON_CreateObject();
+                cJSON_AddBoolToObject(root, "ok", false);
+                cJSON* err = cJSON_AddObjectToObject(root, "error");
+                cJSON_AddStringToObject(err, "code", "agent_lock");
+                cJSON_AddStringToObject(err, "message", "channel is locked by another session");
+                cJSON_AddStringToObject(err, "owner", blocker.owner.c_str());
+                cJSON_AddNumberToObject(err, "expires_in_ms", static_cast<double>(blocker.remaining_ms));
+                cJSON_AddBoolToObject(err, "can_takeover", true);
+                cJSON_AddStringToObject(root, "request_id", rid.c_str());
+                reply_json(c, 423, root);
+                return;
+            }
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", true);
+            cJSON_AddStringToObject(root, "channel", ch.c_str());
+            cJSON_AddStringToObject(root, "owner", sid.c_str());
+            cJSON_AddNumberToObject(root, "ttl_ms", ttl);
+            cJSON_AddNumberToObject(root, "expires_in_ms", ttl);
+            cJSON_AddBoolToObject(root, "renewed", renewed);
+            cJSON_AddStringToObject(root, "request_id", rid.c_str());
+            reply_json(c, 200, root);
+            return;
+        }
+        if (path == "/unlock") {
+            if (sid.empty()) {
+                reply_json_text(c, 400, agent::error_json("session_required", "session_id or X-Agent-Session required", rid));
+                return;
+            }
+            agent::LeaseInfo blocker;
+            if (agent::lease_locks().check(ch, sid, &blocker) != 0) {
+                if (!allow_channel_write(c, ch, sid, rid)) return;
+            }
+            bool released = false;
+            bool ok = agent::lease_locks().release(ch, sid, &released, &blocker);
+            if (!ok) {
+                if (!allow_channel_write(c, ch, sid, rid)) return;
+                reply_json_text(c, 423, agent::error_json("agent_lock", "unlock failed", rid));
+                return;
+            }
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", true);
+            cJSON_AddStringToObject(root, "channel", ch.c_str());
+            cJSON_AddBoolToObject(root, "released", released);
+            cJSON_AddStringToObject(root, "request_id", rid.c_str());
+            reply_json(c, 200, root);
+            return;
+        }
+        // /lock/takeover：人工显式接管，必须说明 reason。
+        if (reason.empty()) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "reason required", rid));
+            return;
+        }
+        agent::LeaseInfo previous;
+        agent::lease_locks().takeover(ch, sid.empty() ? "human" : sid, reason, &previous);
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "channel", ch.c_str());
+        cJSON_AddStringToObject(root, "previous_owner", previous.active ? previous.owner.c_str() : "");
+        cJSON_AddStringToObject(root, "reason", reason.c_str());
+        cJSON_AddNumberToObject(root, "at_ms", static_cast<double>(now_ms()));
+        cJSON_AddStringToObject(root, "request_id", rid.c_str());
+        reply_json(c, 200, root);
+        return;
+    }
+
     if (path == "/command" || path == "/command_block") {
         const bool block = (path == "/command_block");
         if (!method_is(hm, "POST")) {
@@ -1490,15 +1618,16 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             if (timeout_ms > 60000) timeout_ms = 60000;
         }
         auto b = bridge(ch);
-        if (!b) {
-            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", request_id_of(hm)));
-            return;
-        }
-        if (!b->running()) {
-            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", request_id_of(hm)));
-            return;
-        }
         std::string rid = request_id_of(hm);
+        if (!b) {
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", rid));
+            return;
+        }
+        if (!allow_channel_write(c, ch, session, rid)) return;
+        if (!b->running()) {
+            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", rid));
+            return;
+        }
         Task task;
         task.job = make_job(block ? "command_block" : "command", ch, rid, session);
         auto job = task.job;
@@ -1561,12 +1690,14 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         if (timeout_ms == 0) timeout_ms = 10000;
         if (timeout_ms > 60000) timeout_ms = 60000;
         auto b = bridge(ch);
+        std::string rid = request_id_of(hm);
         if (!b) {
-            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", request_id_of(hm)));
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", rid));
             return;
         }
+        if (!allow_channel_write(c, ch, session, rid)) return;
         if (!b->running()) {
-            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", request_id_of(hm)));
+            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", rid));
             return;
         }
         std::string probe = agent::probe_json(core, ch, 4096);
@@ -1577,7 +1708,6 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             cJSON_Delete(pj);
         }
         if (term != "shell") {
-            std::string rid = request_id_of(hm);
             cJSON* root = cJSON_CreateObject();
             cJSON_AddBoolToObject(root, "ok", false);
             cJSON* err = cJSON_AddObjectToObject(root, "error");
@@ -1588,7 +1718,6 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json(c, 409, root);
             return;
         }
-        std::string rid = request_id_of(hm);
         Task task;
         task.job = make_job("exec", ch, rid, session);
         auto job = task.job;
@@ -1625,6 +1754,8 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         }
         cJSON* body = cJSON_Parse(body_string(hm).c_str());
         std::string ch = json_str(body, "channel");
+        std::string session = json_str(body, "session");
+        if (session.empty()) session = header_text(hm, "X-Agent-Session");
         int interval_ms = json_int(body, "interval_ms", 50);
         std::vector<std::string> keys;
         bool bad = false;
@@ -1661,17 +1792,18 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         auto b = bridge(ch);
-        if (!b) {
-            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", request_id_of(hm)));
-            return;
-        }
-        if (!b->running()) {
-            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", request_id_of(hm)));
-            return;
-        }
         std::string rid = request_id_of(hm);
+        if (!b) {
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", rid));
+            return;
+        }
+        if (!allow_channel_write(c, ch, session, rid)) return;
+        if (!b->running()) {
+            reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", rid));
+            return;
+        }
         Task task;
-        task.job = make_job("send_keys", ch, rid, header_text(hm, "X-Agent-Session"));
+        task.job = make_job("send_keys", ch, rid, session);
         auto job = task.job;
         task.kind = TaskKind::SendKeys;
         task.cfg = core ? core->config() : AppConfig{};
@@ -2222,6 +2354,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 400, agent::error_json("backend_mismatch", "requested backend does not match config", rid));
             return;
         }
+        if (!allow_channel_write(c, ch, session, rid)) return;
         if (!found->enable) {
             reply_json_text(c, 409, agent::error_json("action_disabled", "action disabled", rid));
             return;

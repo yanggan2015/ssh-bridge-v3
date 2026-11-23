@@ -80,6 +80,7 @@ SOURCES := \
   src/services/web/web_console.cpp \
   src/services/web/web_pages.cpp \
   src/services/agent/agent_contract.cpp \
+  src/services/agent/agent_lock.cpp \
   src/services/agent/agent_scan.cpp \
   src/services/service_manager.cpp
 
