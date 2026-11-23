@@ -578,7 +578,7 @@ std::string page_body(const std::string& page) {
     <div class="terminal-shell">
       <div class="terminal-input">
         <span class="prompt" id="termPrompt">›</span>
-        <input id="cmd" placeholder="输入到当前通道，Enter 发送；特殊键用上方键条" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <input id="cmd" placeholder="直通输入：按键即发送，Enter 执行；方向键/Tab/退格原样下发" aria-label="终端直通输入" autocomplete="off" spellcheck="false" autocapitalize="off">
         <button class="btn" id="send" type="button">发送</button>
         <button class="btn ghost" id="clear" type="button">清屏</button>
       </div>
@@ -1022,6 +1022,7 @@ async function initXterm(){
     XTERM.onData(data=>{if(data)queueXtermData(data)});
     window.__sb3term={mode:()=>XTERM_MODE,cols:()=>XTERM?XTERM.cols:0,rows:()=>XTERM?XTERM.rows:0,
       fit:()=>{try{FIT.fit();return {cols:XTERM.cols,rows:XTERM.rows}}catch(e){return {err:String(e)}}},
+      cursor:()=>(XTERM?{x:XTERM.buffer.active.cursorX,y:XTERM.buffer.active.cursorY,baseY:XTERM.buffer.active.baseY}:null),
       text:()=>{if(!XTERM)return '';const b=XTERM.buffer.active,out=[];for(let i=0;i<b.length;i++){const l=b.getLine(i);out.push(l?l.translateToString(true):'')}return out.join('\n')}};
     XTERM.attachCustomKeyEventHandler(ev=>{
       if(ev.type!=='keydown')return true;
@@ -1375,30 +1376,64 @@ async function sendRawBytes(data,label){
   $('#hint').textContent='已写入 '+ch+(label?' · '+label:'');
   return true;
 }
+const INPUT_NAV={ArrowUp:'\x1b[A',ArrowDown:'\x1b[B',ArrowRight:'\x1b[C',ArrowLeft:'\x1b[D',
+  Home:'\x1b[H',End:'\x1b[F',Insert:'\x1b[2~',Delete:'\x1b[3~',PageUp:'\x1b[5~',PageDown:'\x1b[6~'};
+let IN_BUF='',IN_LABEL='键盘',IN_TIMER=0,IN_CHAIN=Promise.resolve();
+function flushInput(){
+  if(!IN_BUF)return;
+  const data=IN_BUF,label=IN_LABEL;IN_BUF='';IN_LABEL='键盘';
+  IN_CHAIN=IN_CHAIN.then(()=>sendRawBytes(data,label)).catch(()=>{});
+}
+function queueInputData(data,label){
+  if(!data)return;
+  IN_BUF+=data;if(label)IN_LABEL=label;
+  if(IN_TIMER)return;
+  IN_TIMER=setTimeout(()=>{IN_TIMER=0;flushInput()},8);
+}
+function inputNow(data,label){if(IN_TIMER){clearTimeout(IN_TIMER);IN_TIMER=0}flushInput();if(data)IN_CHAIN=IN_CHAIN.then(()=>sendRawBytes(data,label||'按键')).catch(()=>{})}
 async function sendTermText(){
   const input=$('#cmd');if(!input)return;
-  const value=input.value;
-  input.value='';
-  const ok=await sendRawBytes(value+'\r','Enter');
-  if(!ok)input.value=value;
-  input.focus();
+  const value=input.value;input.value='';
+  if(value)queueInputData(value,'发送');queueInputData('\r','Enter');input.focus();
 }
 $('#send').onclick=sendTermText;
 $('#cmd').onkeydown=e=>{
-  if(e.key==='Enter'){e.preventDefault();sendTermText();return}
-  if(e.key==='Tab'){e.preventDefault();sendRawBytes('\t','Tab');return}
-  if(e.key==='Escape'){e.preventDefault();sendRawBytes('\x1b','Esc');return}
-  if(e.ctrlKey&&!e.altKey&&!e.metaKey){
+  if(e.isComposing||e.keyCode===229)return;
+  if(e.ctrlKey||e.metaKey){
     const key=String(e.key||'').toLowerCase();
-    if(key==='c'&&$('#cmd').selectionStart!==$('#cmd').selectionEnd)return;
+    if(key==='c'&&e.shiftKey){e.preventDefault();copyTerm();return}
+    if(key==='v'){e.preventDefault();pasteTerm();return}
     const seq={c:'\x03',d:'\x04',z:'\x1a',l:'\x0c',u:'\x15',r:'\x12'}[key];
-    if(seq){e.preventDefault();if(key==='c')$('#cmd').value='';sendRawBytes(seq,'Ctrl+'+key.toUpperCase())}
+    if(seq){e.preventDefault();inputNow(seq,'Ctrl+'+key.toUpperCase())}
+    return;
   }
+  if(e.altKey&&e.key.length===1){e.preventDefault();queueInputData('\x1b'+e.key,'Alt+'+e.key);return}
+  if(e.key==='Enter'){e.preventDefault();queueInputData('\r','Enter');return}
+  if(e.key==='Tab'){e.preventDefault();queueInputData('\t','Tab');return}
+  if(e.key==='Escape'){e.preventDefault();queueInputData('\x1b','Esc');return}
+  if(e.key==='Backspace'){e.preventDefault();queueInputData('\x7f','退格');return}
+  if(INPUT_NAV[e.key]){e.preventDefault();queueInputData(INPUT_NAV[e.key],e.key);return}
+  if(e.key.length===1){e.preventDefault();queueInputData(e.key,'输入')}
 };
+$('#cmd').addEventListener('beforeinput',e=>{
+  if(e.isComposing)return;
+  if(e.inputType==='deleteContentBackward'){e.preventDefault();queueInputData('\x7f','退格')}
+  else if(e.inputType==='insertText'&&e.data){e.preventDefault();queueInputData(e.data,'输入')}
+});
+$('#cmd').addEventListener('paste',e=>{
+  e.preventDefault();const t=(e.clipboardData||window.clipboardData).getData('text');
+  if(t)queueInputData(t,'粘贴');
+});
+$('#cmd').addEventListener('input',e=>{
+  if(e.isComposing)return;
+  const v=e.target.value;if(!v)return;e.target.value='';
+  if(IN_TIMER){clearTimeout(IN_TIMER);IN_TIMER=0}inputNow(v,'输入法');
+});
 $$('#keyBar [data-key]').forEach(b=>{
-  b.onclick=async()=>{const seq=KEY_SEQ[b.dataset.key];if(seq===undefined)return;await sendRawBytes(seq,b.textContent.trim());$('#cmd').focus()};
+  b.onclick=()=>{const seq=KEY_SEQ[b.dataset.key];if(seq===undefined)return;queueInputData(seq,b.textContent.trim());$('#cmd').focus()};
 });
 $('#term').onclick=()=>$('#cmd').focus();
+if($('#xtermHost'))$('#xtermHost').addEventListener('mousedown',()=>setTimeout(()=>{if(XTERM)XTERM.focus()},0));
 $('#takeLock').onclick=takeLock;
 applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10));
 initXterm().catch(()=>{XTERM_FAIL=true});
