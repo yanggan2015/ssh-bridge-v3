@@ -132,10 +132,6 @@ const OperationSpec kOperations[] = {
     {"tcp.forward.get", "GET", "/api/tcp-forward", "TCP 转发运行状态", "public", "", "running"},
     {"tcp.forward.config.get", "GET", "/api/tcp-forward/config", "TCP 转发配置", "public", "", "config"},
     {"tcp.forward.config.post", "POST", "/api/tcp-forward/config", "保存 TCP 转发配置", "token", "config", "ok"},
-    {"tunnel.get", "GET", "/api/tunnel", "隧道运行状态", "public", "", "running"},
-    {"tunnel.config.get", "GET", "/api/tunnel/config", "隧道配置", "public", "", "config"},
-    {"tunnel.config.post", "POST", "/api/tunnel/config", "保存隧道配置", "token", "config", "ok"},
-    {"service.post", "POST", "/service", "启停服务", "token", "name,on", "ok,running"},
     {"action.post", "POST", "/action", "执行板控动作；backend 可选校验，返回 job 与审计 id", "token", "channel,id,backend,session", "ok,job,job_id,queued,request_id"},
     {"lock.post", "POST", "/lock", "按通道获取/续租租约锁，默认 1000ms 最大 86400000ms", "token", "channel,session_id,ttl_ms", "ok,channel,owner,ttl_ms,expires_in_ms,renewed"},
     {"unlock.post", "POST", "/unlock", "只释放自己的通道锁；错误 session 不释放", "token", "channel,session_id", "ok,channel,released,owner"},
@@ -227,7 +223,7 @@ std::string help_json(AppCore* core, int web_port, const UiBridgeInfo& ui, bool 
 
     cJSON* pages = cJSON_AddArrayToObject(root, "pages");
     for (const char* p : {"dashboard", "channels", "actions", "button-script", "relay", "tftp",
-                          "nfs", "share", "tcp-forward", "tunnel", "agent", "config"})
+                          "nfs", "share", "tcp-forward", "agent", "config"})
         cJSON_AddItemToArray(pages, cJSON_CreateString(p));
     cJSON* channels = cJSON_AddArrayToObject(root, "channels");
     if (core) {

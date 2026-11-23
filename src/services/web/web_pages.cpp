@@ -121,10 +121,32 @@ pre.terminal{white-space:pre-wrap;word-break:break-word;background:#081820;color
   border:1px solid #12343a;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 pre.terminal mark{background:#f7d774;color:#173033;border-radius:3px;padding:0 1px}
 pre.terminal mark.active{background:#7ee0c8;color:#05332e;box-shadow:0 0 0 2px rgba(126,224,200,.45)}
-.terminal-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:11px 0 8px}
+.terminal-shell{display:flex;flex-direction:column;flex:1;min-height:0;border:1px solid #12343a;border-radius:13px;
+  overflow:hidden;background:#081820;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.terminal-shell .terminal{border:0;border-radius:0;box-shadow:none;margin:0;padding:14px 16px;
+  min-height:0;max-height:none;flex:1}
+.xterm-host{display:flex;flex:1;min-height:0;padding:8px 10px 4px;background:#081820;overflow:hidden}
+.xterm-host[hidden]{display:none}
+.xterm-host .xterm{width:100%;height:100%}
+.xterm-host .xterm-viewport{overflow-y:auto!important;scrollbar-width:thin}
+.xterm-host .xterm-screen{width:100%}
+.terminal-keybar{display:flex;gap:4px;align-items:center;flex-wrap:nowrap;overflow-x:auto;padding:6px 8px;
+  background:#0c2028;border-top:1px solid #16383f;flex:0 0 auto;scrollbar-width:thin}
+.terminal-keybar button{flex:0 0 auto;border:1px solid #24525a;background:#102c34;color:#b9ded6;
+  border-radius:7px;padding:4px 8px;font:11px/1.2 ui-monospace,Consolas,monospace;cursor:pointer;min-height:26px}
+.terminal-keybar button:hover{background:#17424b;border-color:#3c7c84;color:#e9fbf7}
+.terminal-input{display:flex;align-items:center;gap:7px;padding:7px 9px 8px;background:#0a1a20;
+  border-top:1px solid #16383f;flex:0 0 auto}
+.terminal-input .prompt{color:#69d8c4;font:600 12px/1 ui-monospace,Consolas,monospace;max-width:140px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.terminal-input input{flex:1;min-width:0;background:#07151b;border:1px solid #24525a;color:#e2f6f1;
+  border-radius:8px;padding:8px 10px;font:13px/1.35 ui-monospace,Consolas,monospace;outline:none}
+.terminal-input input:focus{border-color:#51b3a4;box-shadow:0 0 0 3px rgba(81,179,164,.14)}
+.terminal-input .btn{min-height:34px;padding:5px 11px;font-size:12px}
+.terminal-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 7px}
 .terminal-tools input{flex:1 1 150px;min-width:110px;font-size:12px}
 .terminal-tools .btn{padding:5px 9px;min-height:30px;font-size:11px}
-.pane-strip{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:10px 0 0}
+.pane-strip{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:8px 0 0}
 .pane-strip .pane-label{font-size:11px;color:var(--muted);white-space:nowrap}
 .pane-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface-2);
   color:var(--ink);border-radius:10px;padding:5px 9px;font-size:11px;min-height:29px}
@@ -136,13 +158,20 @@ pre.terminal mark.active{background:#7ee0c8;color:#05332e;box-shadow:0 0 0 2px r
 .terminal-card:fullscreen .terminal{max-height:none;min-height:0;flex:1}
 pre{white-space:pre-wrap;word-break:break-word;background:#0c1820;color:#dcefe9;border-radius:10px;padding:12px;
   font:12px/1.5 ui-monospace,Consolas,monospace;max-height:300px;overflow:auto}
-.terminal-card{display:flex;flex-direction:column;min-height:480px}
+.terminal-card{display:flex;flex-direction:column;min-height:540px;height:calc(100vh - 205px);padding:14px 14px 12px}
+.dash .terminal-card{grid-column:2}
 .terminal-card .terminal{flex:1}
 .terminal-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:4px}
 .terminal-foot{display:flex;gap:8px;align-items:center;margin-top:11px}
 .terminal-foot input{flex:1;font-family:ui-monospace,Consolas,monospace}
-.dash{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;align-items:start}
-.channel-card{padding:15px}
+.dash{display:grid;grid-template-columns:244px minmax(0,1fr);gap:14px;align-items:stretch;min-height:540px}
+.dash.nav-collapsed{grid-template-columns:0 minmax(0,1fr);gap:0}
+.dash.nav-collapsed .channel-card{display:none}
+.nav-toggle{border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2);border-radius:8px;
+  padding:5px 9px;font-size:11px;cursor:pointer;white-space:nowrap}
+.nav-toggle:hover{border-color:#9fd6cc;background:var(--accent-soft);color:var(--accent)}
+.channel-card{padding:13px;height:calc(100vh - 205px);min-height:540px;overflow:hidden;display:flex;flex-direction:column}
+.channel-card .channel-list{flex:1;overflow:auto;min-height:0}
 .channel-list{display:grid;gap:6px}
 .channel-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:1px solid transparent;
   background:transparent;border-radius:10px;padding:9px;color:var(--ink);min-height:0;
@@ -255,23 +284,41 @@ dialog input{width:100%;margin-top:11px}
 @media(max-width:760px){
   :root{--sidebar:0px}
   .layout{display:block}
-  aside.sidebar{position:static;height:auto;padding:14px}
-  .brand{padding-bottom:10px}
-  nav{display:flex;flex-wrap:wrap;gap:5px;padding-bottom:3px}
-  nav a{flex:0 0 auto;padding:6px 8px;font-size:11px}
+  aside.sidebar{position:static;height:auto;padding:8px 10px}
+  .brand{padding-bottom:6px}
+  .brand small{display:none}
+  nav{display:flex;flex-wrap:nowrap;gap:5px;padding-bottom:2px;overflow-x:auto;scrollbar-width:thin}
+  nav a{flex:0 0 auto;padding:5px 8px;font-size:11px}
   .nav-title{display:none}
   .sidebar-foot{display:none}
-  main{padding:16px 12px 34px}
-  header.page-head{display:block}
-  h1{font-size:23px}
-  .header-tools{margin-top:12px;justify-content:flex-start}
-  .token-box{width:100%}.token-box input{width:100%;flex:1}
+  main{padding:10px 12px 24px}
+  header.page-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  header.page-head .sub{display:none}
+  header.page-head .header-tools .chip{display:none}
+  h1{font-size:18px}
+  .header-tools{margin-top:0;justify-content:flex-end}
+  .token-box{width:190px}.token-box input{width:100%;flex:1}
   .card{padding:14px;border-radius:13px}
   .card-head{flex-direction:column;align-items:stretch;gap:10px}
   .card-head>.row-end{justify-content:flex-start}
   .form-grid,.grid-2,.grid-3{grid-template-columns:1fr}
-  .terminal-card{min-height:390px}
-  pre.terminal{min-height:280px;max-height:46vh}
+  .dash{min-height:0}
+  .dash .terminal-card .card-head{flex-direction:column;gap:6px;margin-bottom:7px}
+  .dash .terminal-card .card-title h2,.dash .terminal-card .card-sub{display:none}
+  .dash .terminal-card .terminal-meta{margin-top:0}
+  .dash .terminal-card #reload,.dash .terminal-card #ro{display:none}
+  .pane-strip{flex-wrap:nowrap;overflow-x:auto;margin-top:3px;scrollbar-width:thin}
+  .terminal-tools{flex-wrap:nowrap;overflow-x:auto;margin:5px 0;scrollbar-width:thin}
+  .terminal-tools input{flex:1 1 105px;min-width:95px}
+  .terminal-tools .btn{flex:0 0 auto}
+  .terminal-card{min-height:0;height:calc(100vh - 190px);padding:12px}
+  .terminal-shell .terminal{min-height:0;max-height:none;padding:10px 11px}
+  .terminal-keybar{padding:5px 6px;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+  .terminal-keybar button{flex:0 0 auto;padding:4px 7px;scroll-snap-align:start}
+  .terminal-input{padding:6px;gap:5px}
+  .terminal-input .prompt{display:none}
+  .terminal-input input{font-size:12px}
+  .channel-card{height:auto;min-height:0;max-height:42vh}
   .channel-list{grid-template-columns:1fr}
   .channel-cards,.agent-grid{grid-template-columns:1fr}
   .svc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -311,6 +358,7 @@ async function api(path,opt){
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function bytesText(buf){try{return new TextDecoder('utf-8').decode(buf)}catch(e){return ''}}
 function fmtBytes(n){n=Number(n||0);if(n<1024)return n+' B';if(n<1024*1024)return (n/1024).toFixed(1)+' KB';if(n<1024*1024*1024)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(1)+' GB'}
+function isOnline(c){return !!c&&(c.state==='ready'||c.state==='online'||c.state==='connected')}
 function toast(msg,kind){
   let box=$('#toast');if(!box){box=document.createElement('div');box.id='toast';box.className='toast';box.setAttribute('aria-live','polite');document.body.appendChild(box)}
   const d=document.createElement('div');d.className='toast-item '+(kind||'ok');d.textContent=String(msg);box.appendChild(d);
@@ -440,15 +488,15 @@ function fileInit(){
 std::string page_body(const std::string& page) {
     if (page == "dashboard") {
         return R"HTML(
-<div class="dash">
-  <aside class="card channel-card">
+<div class="dash" id="dash">
+  <aside class="card channel-card" id="channelCard">
     <div class="card-head"><div class="card-title"><div><h2>通道</h2><div class="card-sub">点击切换终端</div></div></div><span class="chip" id="onlineCount">--</span></div>
     <div class="channel-list" id="channelList"></div>
   </aside>
   <section class="card terminal-card">
     <div class="card-head">
       <div class="card-title"><div><h2>终端</h2><div class="terminal-meta"><span class="chip accent" id="activeName">未选择</span><span class="chip" id="wsState">WS 未连接</span><span class="chip" id="termLock">无 Agent 锁</span></div></div></div>
-      <div class="row-end"><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><span class="pill" id="ro">只读</span></div>
+      <div class="row-end"><button class="nav-toggle" id="toggleNav" type="button" title="显示/隐藏左侧通道面板">通道面板</button><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><span class="pill" id="ro">只读</span></div>
     </div>
     <div class="pane-strip" id="paneStrip"><span class="pane-label">分屏</span><span class="form-status">正在读取画框…</span></div>
     <div class="terminal-tools">
@@ -462,8 +510,34 @@ std::string page_body(const std::string& page) {
       <button class="btn ghost" id="clearBuf" type="button">清空缓冲</button>
     </div>
     <div class="lock-banner" id="lockBanner" hidden><span id="lockText"></span><button class="btn" id="takeLock" type="button">人工接管</button></div>
-    <pre class="terminal" id="term" aria-live="polite"></pre>
-    <div class="terminal-foot"><input id="cmd" placeholder="输入到当前通道，Enter 发送" autocomplete="off" spellcheck="false"><button class="btn" id="send" type="button">发送</button><button class="btn ghost" id="clear" type="button">清屏</button></div>
+    <div class="terminal-shell">
+      <div class="xterm-host" id="xtermHost" hidden></div>
+      <pre class="terminal" id="term" aria-live="polite"></pre>
+      <div class="terminal-keybar" id="keyBar" role="toolbar" aria-label="特殊键">
+        <button type="button" data-key="esc" title="ESC">Esc</button>
+        <button type="button" data-key="tab" title="Tab">Tab</button>
+        <button type="button" data-key="ctrl-c" title="中断当前命令">Ctrl+C</button>
+        <button type="button" data-key="up" title="上箭头">↑</button>
+        <button type="button" data-key="down" title="下箭头">↓</button>
+        <button type="button" data-key="left" title="左箭头">←</button>
+        <button type="button" data-key="right" title="右箭头">→</button>
+        <button type="button" data-key="home" title="Home">Home</button>
+        <button type="button" data-key="end" title="End">End</button>
+        <button type="button" data-key="pgup" title="Page Up">PgUp</button>
+        <button type="button" data-key="pgdn" title="Page Down">PgDn</button>
+        <button type="button" data-key="ctrl-d" title="EOF / 退出">Ctrl+D</button>
+        <button type="button" data-key="ctrl-z" title="挂起">Ctrl+Z</button>
+        <button type="button" data-key="ctrl-l" title="清屏">Ctrl+L</button>
+        <button type="button" data-key="ctrl-u" title="删除整行">Ctrl+U</button>
+        <button type="button" data-key="ctrl-r" title="历史搜索">Ctrl+R</button>
+      </div>
+      <div class="terminal-input">
+        <span class="prompt" id="termPrompt">›</span>
+        <input id="cmd" placeholder="输入到当前通道，Enter 发送；特殊键用上方键条" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <button class="btn" id="send" type="button">发送</button>
+        <button class="btn ghost" id="clear" type="button">清屏</button>
+      </div>
+    </div>
     <div class="hint" id="hint"></div>
   </section>
 </div>
@@ -776,11 +850,182 @@ std::string page_body(const std::string& page) {
 std::string page_script(const std::string& page) {
     if (page == "dashboard") {
         return R"JS(
-let ws=null, WS_GEN=0, WS_RETRY=0, WS_TIMER=0;
+let ws=null, WS_GEN=0, WS_RETRY=0, WS_TIMER=0, TERM_RAF=0;
 let LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[], TERM_LOCK=null, TERM_TAKE_SID='web-'+Date.now().toString(36);
 const FONT_KEY='sb3_term_font';
+const NAV_KEY='sb3_dash_nav_collapsed';
+const KEY_SEQ={
+  esc:'\x1b',tab:'\t','ctrl-c':'\x03','ctrl-d':'\x04','ctrl-z':'\x1a','ctrl-l':'\x0c',
+  'ctrl-u':'\x15','ctrl-r':'\x12',up:'\x1b[A',down:'\x1b[B',left:'\x1b[D',right:'\x1b[C',
+  home:'\x1b[H',end:'\x1b[F',pgup:'\x1b[5~',pgdn:'\x1b[6~'
+};
+let XTERM=null,FIT=null,XTERM_MODE=false,XTERM_FAIL=false,XTERM_PROMISE=null,TERM_FIT_RAF=0;
+let XKEY_BUF='',XKEY_TIMER=0;
+const XTERM_CSS='https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css';
+const XTERM_JS='https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
+const XTERM_FIT='https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js';
+function loadCssOnce(href){
+  return new Promise((resolve,reject)=>{
+    if(document.querySelector('link[data-sb3="'+href+'"]')){resolve();return}
+    const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.dataset.sb3=href;
+    l.onload=()=>resolve();l.onerror=()=>reject(new Error('css'));document.head.appendChild(l);
+  });
+}
+function loadJsOnce(src){
+  return new Promise((resolve,reject)=>{
+    const old=document.querySelector('script[data-sb3="'+src+'"]');
+    if(old){if(old.dataset.loaded==='1')resolve();else{old.addEventListener('load',()=>resolve(),{once:true});old.addEventListener('error',()=>reject(new Error('js')),{once:true})}return}
+    const s=document.createElement('script');s.src=src;s.async=true;s.dataset.sb3=src;
+    s.onload=()=>{s.dataset.loaded='1';resolve()};s.onerror=()=>reject(new Error('js'));document.head.appendChild(s);
+  });
+}
+function ensureXterm(){
+  if(XTERM_PROMISE)return XTERM_PROMISE;
+  XTERM_PROMISE=(async()=>{
+    if(window.Terminal&&window.FitAddon&&window.FitAddon.FitAddon)return true;
+    try{
+      await loadCssOnce(XTERM_CSS);
+      await loadJsOnce(XTERM_JS);
+      await loadJsOnce(XTERM_FIT);
+      return !!(window.Terminal&&window.FitAddon&&window.FitAddon.FitAddon);
+    }catch(e){return false}
+  })();
+  return XTERM_PROMISE;
+}
+function queueXtermData(data){
+  if(!data)return;
+  XKEY_BUF+=data;
+  if(XKEY_TIMER)return;
+  XKEY_TIMER=setTimeout(async()=>{
+    XKEY_TIMER=0;const buf=XKEY_BUF;XKEY_BUF='';
+    if(buf)await sendRawBytes(buf,'键盘');
+  },12);
+}
+function fitXterm(){
+  if(!XTERM||!FIT)return;
+  const apply=()=>{try{FIT.fit()}catch(e){}};
+  apply();
+  if(TERM_FIT_RAF)return;
+  TERM_FIT_RAF=setTimeout(()=>{TERM_FIT_RAF=0;apply()},16);
+}
+function xtermPaintAll(){
+  if(!XTERM_MODE||!XTERM)return false;
+  try{XTERM.reset();if(TERM_TEXT)XTERM.write(TERM_TEXT);XTERM.scrollToBottom()}catch(e){}
+  return true;
+}
+function xtermFindNext(advance){
+  if(!XTERM_MODE||!XTERM)return false;
+  const q=TERM_FIND.trim();if(!q)return true;
+  const buf=XTERM.buffer.active;let hits=[];
+  for(let r=0;r<buf.length&&hits.length<500;r++){
+    const line=buf.getLine(r);if(!line)continue;
+    const text=line.translateToString(true);const lower=text.toLowerCase();const ql=q.toLowerCase();
+    let at=lower.indexOf(ql);while(at>=0&&hits.length<500){hits.push({row:r,col:at,len:q.length});at=lower.indexOf(ql,at+ql.length)}
+  }
+  if(!hits.length){toast('没有匹配内容');return true}
+  if(advance)TERM_HIT=(TERM_HIT+1)%hits.length;else TERM_HIT=0;
+  const h=hits[TERM_HIT];try{XTERM.select(h.col,h.row,h.len);XTERM.scrollToLine(h.row)}catch(e){}
+  $('#hint').textContent='匹配 '+hits.length+' 处 · 第 '+(TERM_HIT+1)+' 处';
+  return true;
+}
+async function initXterm(){
+  const host=$('#xtermHost'),fb=$('#term');if(!host||!fb)return;
+  if(!await ensureXterm()){XTERM_FAIL=true;return}
+  try{
+    const storedFont=parseInt(localStorage.getItem(FONT_KEY)||'13',10);
+    const initialFont=window.innerWidth<760?Math.min(storedFont,12):storedFont;
+    XTERM=new Terminal({
+      cursorBlink:true,fontSize:initialFont,
+      fontFamily:'Cascadia Mono, Consolas, "Courier New", monospace',
+      theme:{background:'#081820',foreground:'#dcefe9',cursor:'#7ee0c8',cursorAccent:'#081820',
+        selectionBackground:'#1d5a5a',black:'#0b1c22',red:'#ff7b72',green:'#7ee787',yellow:'#e3b341',
+        blue:'#79c0ff',magenta:'#d2a8ff',cyan:'#56d4dd',white:'#dcefe9',
+        brightBlack:'#6e8b92',brightRed:'#ffa198',brightGreen:'#9be9a8',brightYellow:'#f2cc60',
+        brightBlue:'#a5d6ff',brightMagenta:'#e2c5ff',brightCyan:'#8ce8ef',brightWhite:'#ffffff'},
+      convertEol:false,scrollback:5000
+    });
+    FIT=new FitAddon.FitAddon();XTERM.loadAddon(FIT);XTERM.open(host);
+    host.hidden=false;fb.hidden=true;XTERM_MODE=true;
+    XTERM.onData(data=>{if(data)queueXtermData(data)});
+    window.__sb3term={mode:()=>XTERM_MODE,cols:()=>XTERM?XTERM.cols:0,rows:()=>XTERM?XTERM.rows:0,
+      fit:()=>{try{FIT.fit();return {cols:XTERM.cols,rows:XTERM.rows}}catch(e){return {err:String(e)}}},
+      text:()=>{if(!XTERM)return '';const b=XTERM.buffer.active,out=[];for(let i=0;i<b.length;i++){const l=b.getLine(i);out.push(l?l.translateToString(true):'')}return out.join('\n')}};
+    XTERM.attachCustomKeyEventHandler(ev=>{
+      if(ev.type!=='keydown')return true;
+      if(ev.ctrlKey&&ev.shiftKey&&(ev.key==='C'||ev.key==='c')){
+        if(XTERM.hasSelection()){copyTerm();return false}
+      }
+      if(ev.ctrlKey&&ev.shiftKey&&(ev.key==='V'||ev.key==='v')){pasteTerm();return false}
+      return true;
+    });
+    fitXterm();
+    setTimeout(fitXterm,60);setTimeout(fitXterm,350);setTimeout(fitXterm,900);
+    window.addEventListener('resize',fitXterm);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)fitXterm()});
+    if(typeof ResizeObserver!=='undefined'){new ResizeObserver(()=>fitXterm()).observe(host)}
+    xtermPaintAll();
+    $('#hint').textContent='xterm 5.3 已启用 · 点会话区可直接输入，键条可左右滑动查看更多特殊键';
+  }catch(e){XTERM_FAIL=true;XTERM_MODE=false;host.hidden=true;fb.hidden=false}
+}
+function copyTerm(){
+  let text='';
+  if(XTERM_MODE&&XTERM&&XTERM.hasSelection())text=XTERM.getSelection();
+  if(!text)text=cleanTerm(TERM_TEXT);
+  const done=()=>toast('回显已复制');
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(()=>legacyCopy(text,done))}
+  else legacyCopy(text,done);
+}
+function legacyCopy(text,done){
+  const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();
+  try{document.execCommand('copy')}catch(e){}
+  t.remove();done();
+}
+function pasteTerm(){
+  if(navigator.clipboard&&navigator.clipboard.readText){
+    navigator.clipboard.readText().then(t=>{if(t)sendRawBytes(t,'粘贴')}).catch(()=>toast('浏览器拒绝读取剪贴板，请用底部输入框粘贴','error'));
+  }else toast('请用底部输入框粘贴','error');
+}
+function cleanTerm(raw){
+  let out='',i=0;
+  while(i<raw.length){
+    const c=raw[i];
+    if(c==='\x1b'){
+      i++;
+      if(raw[i]==='['){
+        i++;
+        while(i<raw.length&&!(raw[i]>='@'&&raw[i]<='~'))i++;
+        if(i<raw.length)i++;
+      }else if(raw[i]===']'){
+        i++;
+        while(i<raw.length&&raw[i]!=='\x07'&&!(raw[i]==='\x1b'&&raw[i+1]==='\\'))i++;
+        if(raw[i]==='\x07')i++;else i+=2;
+      }else i++;
+      continue;
+    }
+    if(c==='\r'){
+      if(raw[i+1]==='\n'){i++;continue}
+      const nl=out.lastIndexOf('\n');out=out.slice(0,nl+1);i++;continue;
+    }
+    if(c==='\b'){
+      if(out.length&&out[out.length-1]!=='\n')out=out.slice(0,-1);
+      i++;continue;
+    }
+    if(c==='\n'||c==='\t'||c>='\x20')out+=c;
+    i++;
+  }
+  return out;
+}
 const SVC_DEFS=[['tftp','TFTP','/tftp'],['share','共享','/share'],['nfs','NFS','/nfs'],['inbound','入站 SSH','/tunnel'],['tcp_forward','TCP','/tcp-forward'],['tunnel','隧道','/tunnel'],['discovery','发现','/tcp-forward']];
-function isOnline(c){return c.state==='ready'||c.state==='online'}
+function applyNav(collapsed){
+  const dash=$('#dash'),btn=$('#toggleNav');if(!dash)return;
+  dash.classList.toggle('nav-collapsed',!!collapsed);
+  if(btn)btn.textContent=collapsed?'显示通道':'隐藏通道';
+  localStorage.setItem(NAV_KEY,collapsed?'1':'0');
+  if(TERM_RAF===0)scheduleTermRender();
+}
+$('#toggleNav').onclick=()=>applyNav(!$('#dash').classList.contains('nav-collapsed'));
+const NAV_SAVED=localStorage.getItem(NAV_KEY);
+applyNav(NAV_SAVED===null?true:NAV_SAVED==='1');
 function chType(c){return c.kind==='ssh'?'SSH':'串口'}
 function renderChannels(st){
   const box=$('#channelList'), sel=$('#ch'); if(!box||!st||!st.channels)return;
@@ -810,24 +1055,35 @@ function renderServices(st){
   });
 }
 function renderTerm(){
+  if(XTERM_MODE&&XTERM){
+    if(TERM_FIND.trim())xtermFindNext(false);
+    else{try{XTERM.clearSelection()}catch(e){}}
+    return;
+  }
   const p=$('#term');if(!p)return;
+  const display=cleanTerm(TERM_TEXT);
   const q=TERM_FIND.trim();
-  if(!q){p.textContent=TERM_TEXT;TERM_MARKS=[];TERM_HIT=0;return}
-  let html='',lower=TERM_TEXT.toLowerCase(),ql=q.toLowerCase(),pos=0,hits=0;
-  while(pos<TERM_TEXT.length&&hits<500){
+  if(!q){p.textContent=display;TERM_MARKS=[];TERM_HIT=0;return}
+  let html='',lower=display.toLowerCase(),ql=q.toLowerCase(),pos=0,hits=0;
+  while(pos<display.length&&hits<500){
     const idx=lower.indexOf(ql,pos);if(idx<0)break;
-    html+=esc(TERM_TEXT.slice(pos,idx));
-    html+='<mark class="'+(hits===TERM_HIT?'active':'')+'" data-hit="'+hits+'">'+esc(TERM_TEXT.slice(idx,idx+q.length))+'</mark>';
+    html+=esc(display.slice(pos,idx));
+    html+='<mark class="'+(hits===TERM_HIT?'active':'')+'" data-hit="'+hits+'">'+esc(display.slice(idx,idx+q.length))+'</mark>';
     pos=idx+q.length;hits++;
   }
-  html+=esc(TERM_TEXT.slice(pos));
+  html+=esc(display.slice(pos));
   p.innerHTML=html;TERM_MARKS=Array.from(p.querySelectorAll('mark'));
-  if(!TERM_MARKS.length)p.textContent=TERM_TEXT;
+  if(!TERM_MARKS.length)p.textContent=display;
   else if(TERM_MARKS[TERM_HIT])TERM_MARKS[TERM_HIT].scrollIntoView({block:'nearest'});
+}
+function scheduleTermRender(){
+  if(TERM_RAF)return;
+  TERM_RAF=requestAnimationFrame(()=>{TERM_RAF=0;renderTerm();const p=$('#term');if(p&&!TERM_FIND.trim())p.scrollTop=p.scrollHeight});
 }
 function appendTerm(t){
   TERM_TEXT+=t;if(TERM_TEXT.length>180000)TERM_TEXT=TERM_TEXT.slice(-120000);
-  renderTerm();const p=$('#term');if(p&&!TERM_FIND.trim())p.scrollTop=p.scrollHeight;
+  if(XTERM_MODE&&XTERM){try{XTERM.write(t)}catch(e){};return}
+  scheduleTermRender();
 }
 function renderTermLock(){
   const chip=$('#termLock'),banner=$('#lockBanner'),text=$('#lockText'),take=$('#takeLock');
@@ -871,6 +1127,7 @@ async function takeLock(){
 function applyFont(px){
   px=Math.max(10,Math.min(22,px||13));localStorage.setItem(FONT_KEY,String(px));
   const card=$('.terminal-card');if(card)card.style.setProperty('--term-font',px+'px');
+  if(XTERM_MODE&&XTERM){try{XTERM.options.fontSize=px}catch(e){}fitXterm()}
 }
 function setWsState(text,cls){const b=$('#wsState');if(b){b.textContent=text;b.className='chip '+cls}}
 async function syncTermLog(ch){
@@ -879,7 +1136,9 @@ async function syncTermLog(ch){
   const err=r.j&&(r.j.error||(r.j.error&&r.j.error.code));
   if(r.status===404||err==='channel not found')return 'missing';
   if(r.j&&typeof r.j.text==='string'){
-    TERM_TEXT=r.j.text;renderTerm();const p=$('#term');if(p)p.scrollTop=p.scrollHeight;
+    TERM_TEXT=r.j.text;
+    if(XTERM_MODE&&XTERM)xtermPaintAll();
+    else{renderTerm();const p=$('#term');if(p)p.scrollTop=p.scrollHeight}
   }
   return 'ok';
 }
@@ -921,9 +1180,11 @@ async function connect(){
   WS_RETRY=0;
   if(ws){try{ws.close()}catch(e){};ws=null}
   const ch=$('#ch').value; if(!ch){$('#term').textContent='没有通道';return}
-  LAST_CH=ch;TERM_TEXT='';TERM_FIND='';TERM_HIT=0;renderTerm();
+  LAST_CH=ch;TERM_TEXT='';TERM_FIND='';TERM_HIT=0;
+  if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();
   lockRefresh(ch);
-  $('#activeName').textContent=ch;$('#hint').textContent='正在连接 '+ch+' …';
+  $('#activeName').textContent=ch;$('#termPrompt').textContent=ch.length>18?ch.slice(-18):ch;
+  $('#hint').textContent='正在连接 '+ch+' …';
   const dl=$('#dlTerm');if(dl)dl.href='/log/download?channel='+encodeURIComponent(ch);
   const st=await syncTermLog(ch);
   if(gen!==WS_GEN)return;
@@ -970,35 +1231,63 @@ async function dashLoad(){
 }
 $('#reload').onclick=dashLoad;
 $('#ch').onchange=connect;
-$('#clear').onclick=()=>{TERM_TEXT='';renderTerm();$('#hint').textContent='已清屏'};
+$('#clear').onclick=()=>{TERM_TEXT='';if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();$('#hint').textContent='已清屏'};
 $('#termFind').oninput=e=>{TERM_FIND=e.target.value;TERM_HIT=0;renderTerm()};
-$('#findNext').onclick=()=>{if(!TERM_MARKS.length){toast('没有匹配内容');return}TERM_HIT=(TERM_HIT+1)%TERM_MARKS.length;renderTerm()};
-$('#copyTerm').onclick=async()=>{
-  try{await navigator.clipboard.writeText(TERM_TEXT);toast('回显已复制')}
-  catch(e){const t=document.createElement('textarea');t.value=TERM_TEXT;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('回显已复制')}
+$('#findNext').onclick=()=>{
+  if(XTERM_MODE&&XTERM){xtermFindNext(true);return}
+  if(!TERM_MARKS.length){toast('没有匹配内容');return}
+  TERM_HIT=(TERM_HIT+1)%TERM_MARKS.length;renderTerm();
 };
+$('#copyTerm').onclick=()=>copyTerm();
 $('#fontMinus').onclick=()=>{applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10)-1)};
 $('#fontPlus').onclick=()=>{applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10)+1)};
 $('#fullTerm').onclick=async()=>{const c=$('.terminal-card');if(!document.fullscreenElement){if(c.requestFullscreen)await c.requestFullscreen()}else await document.exitFullscreen()};
-document.addEventListener('fullscreenchange',()=>{const b=$('#fullTerm');if(b)b.textContent=document.fullscreenElement?'退出全屏':'全屏'});
+document.addEventListener('fullscreenchange',()=>{const b=$('#fullTerm');if(b)b.textContent=document.fullscreenElement?'退出全屏':'全屏';setTimeout(fitXterm,80)});
 $('#clearBuf').onclick=async()=>{
   const ch=$('#ch').value;if(!ch)return;if(!await askConfirm('清空通道缓冲','将清空 '+ch+' 的共享 ring，所有终端/网页都会看不到旧回显。','清空',true))return;
-  const r=await api('/log/clear?channel='+encodeURIComponent(ch),{method:'POST'});if(r.status===200){TERM_TEXT='';renderTerm();toast('缓冲已清空')}else toast('清空失败：'+r.status+' '+r.t,'error');
+  const r=await api('/log/clear?channel='+encodeURIComponent(ch),{method:'POST'});if(r.status===200){TERM_TEXT='';if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();toast('缓冲已清空')}else toast('清空失败：'+r.status+' '+r.t,'error');
 };
-$('#send').onclick=async()=>{
-  const ch=$('#ch').value,data=$('#cmd').value+'\r';if(!ch)return;
+async function sendRawBytes(data,label){
+  const ch=$('#ch').value;
+  if(!ch)return false;
   if(TERM_LOCK){
     const msg='Agent 操作中：'+ch+' 被 '+(TERM_LOCK.owner||'agent')+' 持有，请先人工接管。';
-    $('#hint').textContent=msg;toast(msg,'error');return;
+    $('#hint').textContent=msg;toast(msg,'error');return false;
   }
   const r=await api('/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,data})});
-  if(r.status===423){$('#hint').textContent='写入被 Agent 锁拦截';toast('通道被 Agent 锁住，请先人工接管','error');lockRefresh(ch);return}
-  if(!r.r.ok){$('#hint').textContent='写入失败：'+r.status+' '+r.t;toast('发送失败','error')}
-  else{$('#hint').textContent='已写入 '+ch;$('#cmd').value=''}
+  if(r.status===423){$('#hint').textContent='写入被 Agent 锁拦截';toast('通道被 Agent 锁住，请先人工接管','error');lockRefresh(ch);return false}
+  if(r.status===401){$('#hint').textContent='写入需要 Bearer token';toast('只读模式：先设置 token','error');return false}
+  if(!r.r.ok){$('#hint').textContent='写入失败：'+r.status+' '+r.t;toast('发送失败','error');return false}
+  $('#hint').textContent='已写入 '+ch+(label?' · '+label:'');
+  return true;
+}
+async function sendTermText(){
+  const input=$('#cmd');if(!input)return;
+  const value=input.value;
+  input.value='';
+  const ok=await sendRawBytes(value+'\r','Enter');
+  if(!ok)input.value=value;
+  input.focus();
+}
+$('#send').onclick=sendTermText;
+$('#cmd').onkeydown=e=>{
+  if(e.key==='Enter'){e.preventDefault();sendTermText();return}
+  if(e.key==='Tab'){e.preventDefault();sendRawBytes('\t','Tab');return}
+  if(e.key==='Escape'){e.preventDefault();sendRawBytes('\x1b','Esc');return}
+  if(e.ctrlKey&&!e.altKey&&!e.metaKey){
+    const key=String(e.key||'').toLowerCase();
+    if(key==='c'&&$('#cmd').selectionStart!==$('#cmd').selectionEnd)return;
+    const seq={c:'\x03',d:'\x04',z:'\x1a',l:'\x0c',u:'\x15',r:'\x12'}[key];
+    if(seq){e.preventDefault();if(key==='c')$('#cmd').value='';sendRawBytes(seq,'Ctrl+'+key.toUpperCase())}
+  }
 };
-$('#cmd').onkeydown=e=>{if(e.key==='Enter')$('#send').click()};
+$$('#keyBar [data-key]').forEach(b=>{
+  b.onclick=async()=>{const seq=KEY_SEQ[b.dataset.key];if(seq===undefined)return;await sendRawBytes(seq,b.textContent.trim());$('#cmd').focus()};
+});
+$('#term').onclick=()=>$('#cmd').focus();
 $('#takeLock').onclick=takeLock;
 applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10));
+initXterm().catch(()=>{XTERM_FAIL=true});
 setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){LAST=r.j;renderChannels(r.j);renderServices(r.j)}const ch=$('#ch').value;if(ch)lockRefresh(ch)},5000);
 dashLoad();
 )JS";

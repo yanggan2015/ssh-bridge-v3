@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -1550,12 +1551,19 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         }
         cJSON* body = cJSON_Parse(body_string(hm).c_str());
         cJSON* idx = body ? cJSON_GetObjectItemCaseSensitive(body, "index") : nullptr;
-        if (!cJSON_IsNumber(idx) || !core) {
+        const double raw_index = cJSON_IsNumber(idx) ? idx->valuedouble : -1.0;
+        if (!cJSON_IsNumber(idx) || !core || !std::isfinite(raw_index) ||
+            std::floor(raw_index) != raw_index) {
             if (body) cJSON_Delete(body);
             reply_json_text(c, 400, agent::error_json("invalid_argument", "integer index required", new_request_id()));
             return;
         }
-        int index = static_cast<int>(idx->valuedouble);
+        if (raw_index < 0.0 || raw_index > static_cast<double>(std::numeric_limits<int>::max())) {
+            if (body) cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("pane_out_of_range", "pane index out of range", new_request_id()));
+            return;
+        }
+        int index = static_cast<int>(raw_index);
         std::string err;
         bool ok = core->set_active_pane(index, &err);
         cJSON_Delete(body);
@@ -2707,114 +2715,109 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         if (!cJSON_IsObject(ch) || (kind != "serial" && kind != "ssh") ||
             !valid_channel_name(name, &err)) {
             cJSON_Delete(body);
-            cJSON_Delete(root);
             cJSON* e = cJSON_CreateObject();
             cJSON_AddBoolToObject(e, "ok", false);
             cJSON_AddStringToObject(e, "error", err.empty() ? "kind/channel/name invalid" : err.c_str());
             reply_json(c, 400, e);
             return;
         }
-        ensure_channel_array(root, "boards");
-        ensure_channel_array(root, "ssh");
-        if (channel_object(root, name) && name != old_name) {
-            cJSON_Delete(body);
-            cJSON_Delete(root);
-            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"通道名已存在\"}");
-            return;
-        }
-        cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
-        int idx = -1;
-        cJSON* target = find_named_in_array(arr, old_name.empty() ? name : old_name, &idx);
-        if (!target && !old_name.empty()) {
-            cJSON_Delete(body);
-            cJSON_Delete(root);
-            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"通道不存在\"}");
-            return;
-        }
-        bool created = false;
-        if (!target) {
-            target = cJSON_CreateObject();
-            cJSON_AddItemToArray(arr, target);
-            created = true;
-        }
-        if (!name.empty()) {
-            cJSON_DeleteItemFromObjectCaseSensitive(target, "name");
-            cJSON_AddStringToObject(target, "name", name.c_str());
-        }
-        if (kind == "serial") {
-            std::string dev = util::trim(json_str(ch, "serial_device"));
-            if (dev.empty()) {
-                cJSON_Delete(body);
-                cJSON_Delete(root);
-                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"串口设备不能为空\"}");
-                return;
+        // 以磁盘最新配置为基准做局部修改，避免与按钮/继电器/并发通道写入互相覆盖。
+        bool saved = core && core->patch_config_json([&](cJSON* root) -> bool {
+            ensure_channel_array(root, "boards");
+            ensure_channel_array(root, "ssh");
+            if (channel_object(root, name) && name != old_name) {
+                err = "通道名已存在";
+                return false;
             }
-            copy_str_field(target, ch, "serial_device");
-            copy_int_field(target, ch, "baudrate", 115200, 50, 4000000);
-            copy_int_field(target, ch, "databits", 8, 5, 8);
-            copy_str_field(target, ch, "parity");
-            copy_int_field(target, ch, "stopbits_x10", 10, 10, 20);
-            copy_str_field(target, ch, "flowcontrol");
-            copy_bool_field(target, ch, "dtr", true);
-            copy_bool_field(target, ch, "rts", true);
-            copy_str_field(target, ch, "line_ending");
-            copy_str_field(target, ch, "encoding");
-            copy_bool_field(target, ch, "auto_open", true);
-            copy_bool_field(target, ch, "timestamp", false);
-            copy_bool_field(target, ch, "discoverable", false);
-            copy_str_field(target, ch, "username");
-            copy_str_field(target, ch, "password");
-            copy_bool_field(target, ch, "log_enabled", true);
-        } else {
-            std::string host = util::trim(json_str(ch, "host"));
-            if (host.empty()) {
-                cJSON_Delete(body);
-                cJSON_Delete(root);
-                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"SSH 主机不能为空\"}");
-                return;
+            cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
+            int idx = -1;
+            cJSON* target = find_named_in_array(arr, old_name.empty() ? name : old_name, &idx);
+            if (!target && !old_name.empty()) {
+                err = "通道不存在";
+                return false;
             }
-            copy_str_field(target, ch, "host");
-            copy_int_field(target, ch, "port", 22, 1, 65535);
-            copy_str_field(target, ch, "username");
-            copy_str_field(target, ch, "password");
-            copy_str_field(target, ch, "term");
-            copy_int_field(target, ch, "width", 120, 40, 500);
-            copy_int_field(target, ch, "height", 32, 10, 200);
-            copy_int_field(target, ch, "connect_timeout_ms", 5000, 100, 120000);
-            const cJSON* ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive");
-            if (!cJSON_IsNumber(ka)) ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive_s");
-            copy_int_field(target, ch, "keepalive", cJSON_IsNumber(ka) ? static_cast<int>(ka->valuedouble) : 3,
-                          0, 3600);
-            copy_bool_field(target, ch, "discoverable", false);
-            copy_bool_field(target, ch, "log_enabled", true);
-        }
-        // 改名时同步分屏画框里保存的通道名。
-        if (!old_name.empty() && old_name != name) {
-            cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
-            cJSON* panes = ui ? cJSON_GetObjectItemCaseSensitive(ui, "pane_channels") : nullptr;
-            if (cJSON_IsArray(panes)) {
-                std::vector<int> hit;
-                int i = 0;
-                for (cJSON* p = panes->child; p; p = p->next, ++i) {
-                    if (cJSON_IsString(p) && p->valuestring && old_name == p->valuestring) hit.push_back(i);
+            bool created = false;
+            if (!target) {
+                target = cJSON_CreateObject();
+                cJSON_AddItemToArray(arr, target);
+                created = true;
+            }
+            if (!name.empty()) {
+                cJSON_DeleteItemFromObjectCaseSensitive(target, "name");
+                cJSON_AddStringToObject(target, "name", name.c_str());
+            }
+            if (kind == "serial") {
+                std::string dev = util::trim(json_str(ch, "serial_device"));
+                if (dev.empty()) {
+                    err = "串口设备不能为空";
+                    return false;
                 }
-                for (int h : hit) cJSON_ReplaceItemInArray(panes, h, cJSON_CreateString(name.c_str()));
+                copy_str_field(target, ch, "serial_device");
+                copy_int_field(target, ch, "baudrate", 115200, 50, 4000000);
+                copy_int_field(target, ch, "databits", 8, 5, 8);
+                copy_str_field(target, ch, "parity");
+                copy_int_field(target, ch, "stopbits_x10", 10, 10, 20);
+                copy_str_field(target, ch, "flowcontrol");
+                copy_bool_field(target, ch, "dtr", true);
+                copy_bool_field(target, ch, "rts", true);
+                copy_str_field(target, ch, "line_ending");
+                copy_str_field(target, ch, "encoding");
+                copy_bool_field(target, ch, "auto_open", true);
+                copy_bool_field(target, ch, "timestamp", false);
+                copy_bool_field(target, ch, "discoverable", false);
+                copy_str_field(target, ch, "username");
+                copy_str_field(target, ch, "password");
+                copy_bool_field(target, ch, "log_enabled", true);
+            } else {
+                std::string host = util::trim(json_str(ch, "host"));
+                if (host.empty()) {
+                    err = "SSH 主机不能为空";
+                    return false;
+                }
+                copy_str_field(target, ch, "host");
+                copy_int_field(target, ch, "port", 22, 1, 65535);
+                copy_str_field(target, ch, "username");
+                copy_str_field(target, ch, "password");
+                copy_str_field(target, ch, "term");
+                copy_int_field(target, ch, "width", 120, 40, 500);
+                copy_int_field(target, ch, "height", 32, 10, 200);
+                copy_int_field(target, ch, "connect_timeout_ms", 5000, 100, 120000);
+                const cJSON* ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive");
+                if (!cJSON_IsNumber(ka)) ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive_s");
+                copy_int_field(target, ch, "keepalive", cJSON_IsNumber(ka) ? static_cast<int>(ka->valuedouble) : 3,
+                              0, 3600);
+                copy_bool_field(target, ch, "discoverable", false);
+                copy_bool_field(target, ch, "log_enabled", true);
             }
-        }
-        if (created) {
-            const cJSON* buttons = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
-            if (buttons) cJSON_AddItemToObject(target, "buttons", cJSON_Duplicate(buttons, 1));
-            const cJSON* quick = cJSON_GetObjectItemCaseSensitive(ch, "quick_commands");
-            if (quick) cJSON_AddItemToObject(target, "quick_commands", cJSON_Duplicate(quick, 1));
-        }
-        std::string text = json_text(root, false), save_err;
-        bool saved = core->save_config_json(text, &save_err);
+            // 改名时同步分屏画框里保存的通道名。
+            if (!old_name.empty() && old_name != name) {
+                cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
+                cJSON* panes = ui ? cJSON_GetObjectItemCaseSensitive(ui, "pane_channels") : nullptr;
+                if (cJSON_IsArray(panes)) {
+                    std::vector<int> hit;
+                    int i = 0;
+                    for (cJSON* p = panes->child; p; p = p->next, ++i) {
+                        if (cJSON_IsString(p) && p->valuestring && old_name == p->valuestring) hit.push_back(i);
+                    }
+                    for (int h : hit) cJSON_ReplaceItemInArray(panes, h, cJSON_CreateString(name.c_str()));
+                }
+            }
+            if (created) {
+                const cJSON* buttons = cJSON_GetObjectItemCaseSensitive(ch, "buttons");
+                if (buttons) cJSON_AddItemToObject(target, "buttons", cJSON_Duplicate(buttons, 1));
+                const cJSON* quick = cJSON_GetObjectItemCaseSensitive(ch, "quick_commands");
+                if (quick) cJSON_AddItemToObject(target, "quick_commands", cJSON_Duplicate(quick, 1));
+            }
+            return true;
+        }, &err);
         cJSON_Delete(body);
         if (!saved) {
+            const int code = (err == "通道名已存在") ? 409 : (err == "通道不存在") ? 404 :
+                             (err.rfind("写配置", 0) == 0 || err.rfind("当前配置", 0) == 0) ? 500 : 400;
             cJSON* e = cJSON_CreateObject();
             cJSON_AddBoolToObject(e, "ok", false);
-            cJSON_AddStringToObject(e, "error", save_err.c_str());
-            reply_json(c, 500, e);
+            cJSON_AddStringToObject(e, "error", err.c_str());
+            reply_json(c, code, e);
             return;
         }
         cJSON* out = cJSON_CreateObject();
@@ -2842,41 +2845,36 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 400, "{\"ok\":false,\"error\":\"kind/name required\"}");
             return;
         }
-        cJSON* root = cJSON_Parse(core ? core->config_json_text().c_str() : "{}");
-        if (!cJSON_IsObject(root)) {
-            cJSON_Delete(body);
-            cJSON_Delete(root);
-            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"config parse failed\"}");
-            return;
-        }
-        cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
-        int idx = -1;
-        cJSON* target = find_named_in_array(arr, name, &idx);
-        if (!target) {
-            cJSON_Delete(body);
-            cJSON_Delete(root);
-            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"通道不存在\"}");
-            return;
-        }
-        cJSON_DeleteItemFromArray(arr, idx);
-        cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
-        cJSON* panes = ui ? cJSON_GetObjectItemCaseSensitive(ui, "pane_channels") : nullptr;
-        if (cJSON_IsArray(panes)) {
-            std::vector<int> hit;
-            int i = 0;
-            for (cJSON* p = panes->child; p; p = p->next, ++i) {
-                if (cJSON_IsString(p) && p->valuestring && name == p->valuestring) hit.push_back(i);
+        std::string err;
+        bool saved = core && core->patch_config_json([&](cJSON* root) -> bool {
+            cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
+            int idx = -1;
+            cJSON* target = find_named_in_array(arr, name, &idx);
+            if (!target) {
+                err = "通道不存在";
+                return false;
             }
-            for (int h : hit) cJSON_ReplaceItemInArray(panes, h, cJSON_CreateString(""));
-        }
+            cJSON_DeleteItemFromArray(arr, idx);
+            cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
+            cJSON* panes = ui ? cJSON_GetObjectItemCaseSensitive(ui, "pane_channels") : nullptr;
+            if (cJSON_IsArray(panes)) {
+                std::vector<int> hit;
+                int i = 0;
+                for (cJSON* p = panes->child; p; p = p->next, ++i) {
+                    if (cJSON_IsString(p) && p->valuestring && name == p->valuestring) hit.push_back(i);
+                }
+                for (int h : hit) cJSON_ReplaceItemInArray(panes, h, cJSON_CreateString(""));
+            }
+            return true;
+        }, &err);
         cJSON_Delete(body);
-        std::string text = json_text(root, false), save_err;
-        bool saved = core->save_config_json(text, &save_err);
         if (!saved) {
+            const int code = (err == "通道不存在") ? 404 :
+                             (err.rfind("写配置", 0) == 0 || err.rfind("当前配置", 0) == 0) ? 500 : 400;
             cJSON* e = cJSON_CreateObject();
             cJSON_AddBoolToObject(e, "ok", false);
-            cJSON_AddStringToObject(e, "error", save_err.c_str());
-            reply_json(c, 500, e);
+            cJSON_AddStringToObject(e, "error", err.c_str());
+            reply_json(c, code, e);
             return;
         }
         cJSON* out = cJSON_CreateObject();
