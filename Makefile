@@ -179,7 +179,11 @@ $(RC): src/app/app.rc src/app/app.manifest | dirs
 clean:
 > rm -rf "$(BUILDDIR)"
 
-rebuild: clean all
+.NOTPARALLEL: rebuild
+
+rebuild:
+> $(MAKE) clean
+> $(MAKE) all
 
 run: all
 > "$(APP)"
