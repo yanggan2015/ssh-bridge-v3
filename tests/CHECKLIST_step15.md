@@ -6,7 +6,7 @@
 
 | 编号 | 项目 | 期望 | 方式 |
 |---|---|---|---|
-| CFG-1 | 功能配置加载 | `powerShell`、`telnet` 数组被解析，字段默认值正确 | [AUTO] |
+| CFG-1 | 功能配置加载 | `powershell`、`telnet` 数组被解析，字段默认值正确 | [AUTO] |
 | CFG-2 | 配置往返 | 保存重载后四类通道与未知键都不丢 | [AUTO] |
 | CFG-3 | 配置拆分 | 新字段只写 `ssh_bridge_config.json`，不写 `ssh_bridge_ui.json` | [AUTO] |
 | CFG-4 | 通道名唯一 | 四类之间重名被拒绝，改名同步分屏绑定 | [AUTO] |
@@ -56,7 +56,7 @@
 
 | 编号 | 项目 | 期望 | 方式 |
 |---|---|---|---|
-| WEB-1 | 通道 API GET | 返回 `powerShell`、`telnet` 数组 | [AUTO] |
+| WEB-1 | 通道 API GET | 返回 `powershell`、`telnet` 数组 | [AUTO] |
 | WEB-2 | 通道 API POST | 可新建/编辑两种通道，保存后重载 | [AUTO] |
 | WEB-3 | 通道 API 删除 | 两种 kind 均可删除 | [AUTO] |
 | WEB-4 | 网页通道页 | 新增按钮、字段组、卡片正常渲染 | [AUTO] + 截图 |
