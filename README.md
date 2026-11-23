@@ -1,4 +1,4 @@
-﻿# ssh-bridge v3
+# ssh-bridge v3
 
 原生 Win32 单进程终端工作台：串口 / SSH / SFTP / 继电器 / 板控按钮 / 文件服务，
 界面直读同一份环形日志；附带只监听 `127.0.0.1` 的 AI 控件桥。
@@ -40,7 +40,8 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 | `docs/架构总览.md` | 三层结构、RX 单写多读数据面、进程边界、端口、文档地图 |
 | `docs/详细设计.md` | 每一步的模块、接口签名、行为细则、验收编号 |
 | `docs/阶梯架构图.md` | 14 张阶梯图，相邻两张只差颜色（橙=本步新增） |
-| `docs/功能清单.md` | 119 条功能（本体 68 / 扩展 45），标注来源与所属步骤 |
+| `docs/功能清单.md` | 141 条功能（本体 68 / 扩展 73），标注来源、所属步骤与已知缺口 |
+| `docs/设计初衷与实现对照.md` | 每个功能组的初衷、源码落点、已修问题与未实现项（2026-11-23 审计基线） |
 | `docs/每步测试闸门.md` | 每步的出口条件（清单全 PASS + 代码整理） |
 | `docs/编程规范.md` | 提交粒度、提交信息四段、warning 清零 |
 | `docs/执行记录.md` | 时间线、关键决策、踩坑表、接手清单（**换会话先读这个**） |
@@ -72,11 +73,11 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 
 0. **形态铁律**：desktop 是**原生 Win32 应用本体**（自绘窗口、消息循环），**不是给网页套壳**；串口桥、SSH 出站桥、环形日志跑在**同一个 desktop.exe 进程**内，界面直接读同一份内存。禁止“界面 → 本地 HTTP → 桥”的绕行；端口只对进程外的浏览器 / ssh 客户端 / Agent 开放。
 1. **单向依赖**：`ui → core`，`services → core`，`core` 不反依赖任何上层；`app` 是唯一装配层，只有它可以同时碰三者。
-2. **数据面只有一条路**：`Bridge` 写自己的 ring；所有读者（终端窗格、SSH 入站会话、网页 WS、Agent 快照）各自持游标读**同一份** ring，不做数据复制、不新开缓冲。
+2. **数据面只有一条路**：`Bridge` 写自己的 ring；所有读者（终端窗格、SSH 入站会话、网页 WS、Agent 快照）各自持游标读**同一份** ring，不做数据复制、不新开缓冲。当前实现以短锁完成一致性拷贝，读者仍只推进自己的游标。
 3. **服务可插拔**：每个服务实现 `IService`（`start/stop/running`），由 `app` 按配置启停；S8–S13 每步只往 `src/services/` 加一个目录，不动已有代码。
 4. **扩展只准加、不准改本体**：扩展只能用本体已有的能力面（读 ring、写队列、按钮 id、状态快照）；要改本体接口就先停下改设计。
-5. **单进程生命周期**：一个 `desktop.exe` 同时是界面与后端。窗口 X = 隐藏到托盘，服务继续；托盘"退出" = 逆序停服务、释放串口、结束进程。
-6. **界面不走网络**：同进程直读 ring（先比 `notify_seq`，无新数据直接跳过），不占端口。
+5. **单进程生命周期**：一个 `desktop.exe` 同时是界面与后端。关闭行为由 `ui.close_to_tray` 决定：默认隐藏到托盘、服务继续；设为 false 时关闭即退出并停服务。托盘“退出”始终逆序停服务、释放串口、结束进程。
+6. **界面不走网络**：同进程直读 ring，不占端口。
 
 ## 目录
 
@@ -120,17 +121,12 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 
 ## 当前状态
 
-- 步骤 0：骨架已可编译运行。`src/core/bridge/bridge.h`、`src/services/service.h` 已落下接口契约（无实现）。
-- 步骤 1：**已完成并验收**。`--selftest ring|config|serial|all` 自检 + `tests\step1_check.ps1` 18 项全 PASS。已有能力：配置读写（原子替换、单板 patch/delete、三级密码）、环形日志（单写多读游标、时间戳、CR-hold、可选落盘）、串口桥（overlap 读泵、写队列、重连、`loop:` 内置回环端点）。
-- 步骤 2：**已完成并验收**。SSH 出站链路（libssh 静态链接）：PTY+shell、非阻塞读、保活、指数退避重连、双链路隔离；`tests\step2_check.ps1` 11 项全 PASS（自带 paramiko 测试服务器）。
-- 步骤 3：**已完成并验收**。原生窗口壳（菜单/工具栏/通道树/状态栏）、托盘（X=隐藏、双击恢复、菜单退出）、单实例、退出序列停通道并释放串口；`tests\step3_check.ps1` 14 项全 PASS。
-- 步骤 5：**已完成并验收（AI 可控桥接）**。`agent.enable=true` 时监听 `127.0.0.1:18096`，暴露 `/capabilities /ui-tree /control /state /action /logs`；72–73 个控件/动作（随配置）全部可读可写（含菜单、托盘、关于窗、终端输入/原始发送/无剪贴板粘贴/鼠标事件/搜索/绝对回滚/分屏），`tests\ui_bridge_check.ps1` 41 项全 PASS；关掉开关则一个端口都不监听。
-- 设计文档 §9 / S8：**已完成并验收（入站 SSH 共享网关）**。`inbound_ssh.enable=true` 时单口监听 `0.0.0.0:2222`，用户名=通道名，密码按三级规则解析，空密码允许 none；入站会话读写该通道同一份 ring/cmdq，支持多会话、配置重载启停和 `/state.services.inbound`；16 项自动化矩阵覆盖 none、默认密码继承、SSH 通道自身密码、错误/未知用户、双会话和热关闭重开。详见 `docs\S8-入站SSH验收报告.md`。
-- 设计文档 §10 / S9：**已完成并验收（Web 控制台）**。`web.enable=true` 时单端口同时提供 HTTP + WS；10 个页面、REST、`/ws/log` BINARY、token 鉴权、静态 304、配置页两 Tab 表单保存后热重载。板控动作走单后台队列，`MG_EV_WAKEUP` 回写完成状态，避免并发抢串口；页面资产已拆到 `web_pages.cpp`。TCP 转发/隧道页面已由 S12 接上真实状态。详见 `docs\S9-Web控制台验收报告.md`。
-- 设计文档 §13 / S12：**已完成并验收（TCP 转发 / 隧道 / UDP 发现）**。`tcp_forward.enable` 按 `port_base + 板 IP 末段` 一次绑定 256 个监听口，`WSAPoll(500ms)` 统一 accept，双向 relay 不阻塞 UI；`tunnel.enable` 拉起 `eadk-tunnel.exe -c runtime.json`，HTTP 映射 18xxx、入站 SSH 映射 28xxx，进程退出自动重启；`discovery.enable` 在 UDP 18071 应答 `EADK1 q`，只返回 `enable && discoverable` 的通道。配置保存后热重载即时生效，Web `/api/tcp-forward`、`/api/tunnel`、`/api/discovery` 与 `/state.services` 同步暴露状态。详见 `docs\S12-TCP隧道发现验收报告.md`。
-- 设计文档 §14 / S13：**已完成并验收（自更新 / 打包 / 全量回归）**。`scripts\package.ps1` 生成 `output\dist\ssh-bridge-v3-3.0-s13-r19-win64.zip`（含 exe、脱敏配置、README、`tools\smoke.ps1`、`tools\update.ps1`、`tools\ui_probe.py`）；`update.ps1` 校验 zip 与 exe SHA-256、白名单替换、失败回滚、更新后自动重启，安装目录只停自身实例。r12 → r13 在线升级、r13 → r14 本地升级、r14 → r15 在线升级、r15 → r16 在线升级、r15 → r16 本地升级、坏包拒绝、TFTP/共享/NFS 三开关、独立包冒烟、S0–S12 回归均已通过。r17 新增 `term.paste_text`，r18 增加 SSH PTY 尺寸联动并重新打包，r19 增加终端鼠标上报；发布页：<https://github.com/yanggan2015/ssh-bridge-v3-releases/releases/tag/v3.0-s13-r19>。详见 `docs\S13-自更新打包全量回归验收报告.md`。
-- 步骤 4：**已完成并验收**。终端窗格（`SB3_TermView`）：每通道回看 5000 行、ANSI/256 色、中文与宽字符、1/2/4 分屏独立游标、选区复制/右键粘贴、Ctrl+滚轮字号、搜索框输入即定位；界面直读内存、无端口。`tests\step4_check.ps1` 19 项全 PASS（含 110k 行灌流不丢字节、隐藏不耗 CPU）。
-- 终端输入/回显加固：修复 BMP 外字符被 16 位截断、满最后一列覆盖末格、真实串口 TX 正常但 RX 恒 0 三个缺陷；串口读泵改为持续 overlapped `ReadFile`。新增 `tests\terminal_echo_matrix.py`，两条真实 SSH 各 13 项、COM3 13 项、COM5 ASCII 7 项、串口回环 12 项通过；COM5 在干净提示符下 `echo 中文_OK` 复测通过；内置自测新增 `T4U-11`。`term.send` 改为原样字节发送，新增 `tests\terminal_key_matrix.py`：回环 11 项、两条 SSH 与 COM3/COM5 各 5 项控制键/方向键/Tab/退格通过，自测新增 `T4U-12`。r16 增加 bracketed paste：解析 `ESC[?2004h/l`，粘贴用 `ESC[200~…ESC[201~` 包裹，多行内容按 Enter 才执行；`T4U-13` 与 `tests\terminal_bracketed_paste.py` 覆盖。r17 增加桥动作 `term.paste_text`，AI 可直接提交文本并由应用按活动窗格 bracketed 状态包装，不依赖系统剪贴板。r18 增加 SSH PTY 尺寸联动：窗口/分屏变化发送 `change_pty_size`，重连沿用当前目标尺寸，远端 `stty size` 与窗格一致。r19 增加终端鼠标上报：解析 `?1000/1002/1003/1006`，点击/释放/滚轮/拖动编码为 SGR 或 X10 发给远端，Shift 保留本地选词；UI 桥新增 `term.mouse`，`/state` 暴露 `mouse_mode`/`mouse_sgr`，`tests\terminal_mouse_report.ps1` 在两条真实 SSH 各 16 项通过，`nano -m` 点击第 20 行输入后远端文件为 `LINE-20X`。发布前按 `tests\CHECKLIST_terminal-keys.md` 对真实端点复跑；`tests\terminal_physical_key_check.ps1` 验证 `WM_KEYDOWN` 到终端的窗口消息路径，`tests\terminal_pane_routing_check.ps1` 验证分屏按键只落到活动窗格。详见 `docs\终端回显与特殊字符测试报告.md`。
+- **当前基线（2026-11-23）**：分支 `feature/web-console-complete-20261123`；P6 分屏 Web 化已提交（`b467a8e` + 文档 `415a77e`），完整回归连续两轮 17/17 套件、970/970 断言，P6 专项 32/32，期望矩阵 39/39，构建 0 warning / 0 error。
+- **本体**：原生 Win32 单进程终端工作台，串口/SSH 出站、共享 ring、ANSI 终端、1/2/4 分屏、SFTP、板控按钮、Lua/DSL、快捷指令、托盘与单实例均已落地。
+- **网页端**：单端口 18081，HTTP + `/ws/log` BINARY；当前 12 页（仪表盘、通道、动作、按钮脚本、继电器、TFTP/NFS/共享、TCP 转发、隧道、Agent、配置）。仪表盘按旧版 `webui_static` 的终端体验重建：xterm 5.3.0 + FitAddon，一张深色会话框内放回显、16 个特殊键、底部输入；通道面板默认折叠，1440×960 实测 138×28，移动端 390×844 实测 42×22（首次字号上限 12px，关键键首屏可见，其余键可横向滑动）；CDN 不可用时回退到 ANSI/CR/退格净化后的 `<pre>`。
+- **Agent**：18081 是唯一设备控制面；`/api/help` 当前公布 **76** 项操作，Tunnel 与 `/service` 已移出 Agent 发现面（M7/Q18 边界）；18096 仅本机 UI 调试，不参与板控。
+- **已知缺口**：C6 串口自动发现、C9 自动跟随、D4 XMODEM/YMODEM、D5/D6 上传到板目录/common、F1 主题、F3 快捷键冲突检测、F4 多窗口、G5 崩溃日志、H6 开机自启、L7 双网段、N5 180 天 API 门禁，以及 P7 全部；A10/L6/M8 为部分实现。逐项证据与修复记录见 `docs/设计初衷与实现对照.md`。
+- **仍需硬件复核**：真实 COM5/COM3 电气链路、断网级 WS 重连、NFS/入站 SSH/TCP/隧道跨服务重复启停矩阵。
 
 ```powershell
 # S1 验收（构建 + 8 条自检 + 窗口/进程/整理/git 共 18 项）
