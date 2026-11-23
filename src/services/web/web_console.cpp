@@ -1513,6 +1513,70 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         reply_json_text(c, 200, status());
         return;
     }
+    if (path == "/api/panes") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
+            return;
+        }
+        AppCore::PaneSnapshot snap = core ? core->pane_snapshot() : AppCore::PaneSnapshot{};
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddNumberToObject(out, "split", snap.split);
+        cJSON_AddNumberToObject(out, "active", snap.active);
+        cJSON_AddNumberToObject(out, "count", snap.split);
+        cJSON* arr = cJSON_AddArrayToObject(out, "panes");
+        for (int i = 0; i < snap.split; ++i) {
+            cJSON* p = cJSON_CreateObject();
+            const std::string& name = snap.channels[static_cast<std::size_t>(i)];
+            cJSON_AddNumberToObject(p, "index", i);
+            cJSON_AddStringToObject(p, "channel", name.c_str());
+            cJSON_AddBoolToObject(p, "bound", !name.empty());
+            cJSON_AddBoolToObject(p, "active", i == snap.active);
+            std::shared_ptr<IBridge> b = name.empty() ? nullptr : bridge(name);
+            cJSON_AddBoolToObject(p, "running", b && b->running());
+            cJSON_AddItemToArray(arr, p);
+        }
+        reply_json(c, 200, out);
+        return;
+    }
+    if (path == "/api/panes/active") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", new_request_id()));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", new_request_id()));
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        cJSON* idx = body ? cJSON_GetObjectItemCaseSensitive(body, "index") : nullptr;
+        if (!cJSON_IsNumber(idx) || !core) {
+            if (body) cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "integer index required", new_request_id()));
+            return;
+        }
+        int index = static_cast<int>(idx->valuedouble);
+        std::string err;
+        bool ok = core->set_active_pane(index, &err);
+        cJSON_Delete(body);
+        if (!ok) {
+            const int code = (err == "pane is empty" || err == "pane channel no longer exists") ? 409 : 400;
+            reply_json_text(c, code, agent::error_json(err == "pane is empty" ? "pane_empty" :
+                (err == "pane channel no longer exists" ? "pane_unbound" :
+                 (err == "save config failed" ? "save_failed" : "pane_out_of_range")), err, new_request_id()));
+            return;
+        }
+        bool live = notify != nullptr;
+        if (live) PostMessageW(static_cast<HWND>(notify), kMsgActivatePane, index, 0);
+        AppCore::PaneSnapshot snap = core->pane_snapshot();
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddNumberToObject(out, "active", snap.active);
+        cJSON_AddStringToObject(out, "channel", snap.channels[static_cast<std::size_t>(snap.active)].c_str());
+        cJSON_AddBoolToObject(out, "live", live);
+        reply_json(c, 200, out);
+        return;
+    }
     if (path == "/log") {
         if (!method_is(hm, "GET")) {
             reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));

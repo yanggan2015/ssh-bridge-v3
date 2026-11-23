@@ -112,6 +112,15 @@ public:
     bool update_config(const std::function<bool(AppConfig&, std::string*)>& apply, std::string* err);
     // UI 分屏布局（窗格数/各画框通道/激活画框）落盘，不改服务配置、不重建通道
     bool save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane);
+    // Web 分屏只读快照（锁内复制，避免与 UI 自动保存竞态）
+    struct PaneSnapshot {
+        int split = 1;
+        int active = 0;
+        std::vector<std::string> channels;
+    };
+    PaneSnapshot pane_snapshot() const;
+    // Web 受保护激活：只允许切到已绑定且仍存在的通道；落盘后由 UI 线程联动
+    bool set_active_pane(int index, std::string* err);
 
 private:
     void build_entries();

@@ -95,6 +95,7 @@ void term_click(void* user) {
 void term_split_click(void* user) {
     if (!g_view) return;
     g_view->split(static_cast<int>(reinterpret_cast<intptr_t>(user)));
+    if (g_main) PostMessageW(g_main, kMsgPaneLayoutChanged, 0, 0);
     ui_bridge_set_virtual_slider("term.pane", 0, std::max(0, g_view->split_count() - 1),
                                  term_active_value, nullptr);
 }
@@ -104,7 +105,9 @@ int term_active_value(void*) { return g_view ? g_view->active_index() : 0; }
 void term_pane_action(const char* action, const char*, int value, char* result, int cap, void*) {
     int cur = 0;
     if (g_view) {
-        if (std::strcmp(action, "set_value") == 0) g_view->set_active(value);
+        if (std::strcmp(action, "set_value") == 0) {
+            if (g_view->set_active(value) && g_main) PostMessageW(g_main, kMsgPaneLayoutChanged, 0, 0);
+        }
         cur = g_view->active_index();
         ui_bridge_set_virtual_slider("term.pane", 0, std::max(0, g_view->split_count() - 1),
                                      term_active_value, nullptr);

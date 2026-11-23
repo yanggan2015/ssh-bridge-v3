@@ -526,6 +526,49 @@ bool AppCore::save_ui_layout(int split, const std::vector<std::string>& pane_cha
     return true;
 }
 
+AppCore::PaneSnapshot AppCore::pane_snapshot() const {
+    std::lock_guard<std::mutex> g(config_mu_);
+    PaneSnapshot out;
+    out.split = (cfg_.ui.split == 4) ? 4 : (cfg_.ui.split == 2 ? 2 : 1);
+    out.channels = cfg_.ui.pane_channels;
+    out.channels.resize(static_cast<std::size_t>(out.split));
+    out.active = std::max(0, std::min(cfg_.ui.active_pane, out.split - 1));
+    return out;
+}
+
+bool AppCore::set_active_pane(int index, std::string* err) {
+    std::lock_guard<std::mutex> g(config_mu_);
+    AppConfig next;
+    config_load(next, cfg_.abs_path);
+    if (next.abs_path.empty()) next = cfg_;
+    int split = (next.ui.split == 4) ? 4 : (next.ui.split == 2 ? 2 : 1);
+    next.ui.split = split;
+    next.ui.pane_channels.resize(static_cast<std::size_t>(split));
+    if (index < 0 || index >= split) {
+        if (err) *err = "pane index out of range";
+        return false;
+    }
+    const std::string& name = next.ui.pane_channels[static_cast<std::size_t>(index)];
+    if (name.empty()) {
+        if (err) *err = "pane is empty";
+        return false;
+    }
+    bool exists = false;
+    for (const BoardConfig& b : next.boards) if (b.name == name) exists = true;
+    for (const SSHLinkConfig& s : next.links) if (s.name == name) exists = true;
+    if (!exists) {
+        if (err) *err = "pane channel no longer exists";
+        return false;
+    }
+    next.ui.active_pane = index;
+    if (!config_save(next)) {
+        if (err) *err = "save config failed";
+        return false;
+    }
+    cfg_.ui = next.ui;
+    return true;
+}
+
 const BoardConfig* AppCore::board_of(const std::string& name) const {
     for (const BoardConfig& b : cfg_.boards) if (b.name == name) return &b;
     return nullptr;

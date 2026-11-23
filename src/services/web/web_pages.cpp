@@ -124,6 +124,14 @@ pre.terminal mark.active{background:#7ee0c8;color:#05332e;box-shadow:0 0 0 2px r
 .terminal-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:11px 0 8px}
 .terminal-tools input{flex:1 1 150px;min-width:110px;font-size:12px}
 .terminal-tools .btn{padding:5px 9px;min-height:30px;font-size:11px}
+.pane-strip{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:10px 0 0}
+.pane-strip .pane-label{font-size:11px;color:var(--muted);white-space:nowrap}
+.pane-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface-2);
+  color:var(--ink);border-radius:10px;padding:5px 9px;font-size:11px;min-height:29px}
+.pane-chip.active{border-color:#9fd6cc;background:var(--accent-soft);color:var(--accent);font-weight:600}
+.pane-chip.empty{opacity:.55;cursor:not-allowed}
+.pane-chip .pane-dot{width:7px;height:7px;border-radius:50%;background:#aab9b6}
+.pane-chip.on .pane-dot{background:#34a98f}
 .terminal-card:fullscreen{background:var(--surface);padding:16px;min-height:100vh}
 .terminal-card:fullscreen .terminal{max-height:none;min-height:0;flex:1}
 pre{white-space:pre-wrap;word-break:break-word;background:#0c1820;color:#dcefe9;border-radius:10px;padding:12px;
@@ -442,6 +450,7 @@ std::string page_body(const std::string& page) {
       <div class="card-title"><div><h2>终端</h2><div class="terminal-meta"><span class="chip accent" id="activeName">未选择</span><span class="chip" id="wsState">WS 未连接</span><span class="chip" id="termLock">无 Agent 锁</span></div></div></div>
       <div class="row-end"><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><span class="pill" id="ro">只读</span></div>
     </div>
+    <div class="pane-strip" id="paneStrip"><span class="pane-label">分屏</span><span class="form-status">正在读取画框…</span></div>
     <div class="terminal-tools">
       <input id="termFind" placeholder="查找回显…" aria-label="查找回显">
       <button class="btn ghost" id="findNext" type="button">下一个</button>
@@ -921,12 +930,40 @@ async function connect(){
   if(st==='missing'){$('#hint').textContent='通道不存在或已删除：'+ch;setWsState('通道不可用','danger');return}
   openWs(ch,gen);
 }
+let PANES=null;
+function renderPaneStrip(){
+  const box=$('#paneStrip');if(!box)return;
+  if(!PANES||!PANES.ok){box.innerHTML='<span class="pane-label">分屏</span><span class="form-status">画框读取失败</span>';return}
+  let html='<span class="pane-label">分屏 '+PANES.split+'</span>';
+  for(const p of (PANES.panes||[])){
+    const cls='pane-chip '+(p.active?'active ':'')+(p.bound?'':'empty ')+(p.running?'on':'');
+    html+='<button type="button" class="'+cls+'" data-pane="'+p.index+'"'+(p.bound?'':' disabled')+
+      ' title="'+(p.bound?esc(p.channel):'空画框')+'"><span class="pane-dot"></span>画框 '+(p.index+1)+' · '+
+      (p.bound?esc(p.channel):'空')+'</button>';
+  }
+  box.innerHTML=html;
+  box.querySelectorAll('[data-pane]').forEach(b=>{b.onclick=()=>paneActivate(Number(b.dataset.pane))});
+}
+async function paneLoad(){
+  const r=await api('/api/panes');
+  if(!r.j||!r.j.ok){PANES=null;renderPaneStrip();return}
+  PANES=r.j;renderPaneStrip();
+}
+async function paneActivate(index){
+  const r=await api('/api/panes/active',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index})});
+  if(r.status===401){toast('激活画框需要先设置 Bearer token','error');return}
+  if(!r.j||!r.j.ok){toast('激活失败：'+((r.j&&r.j.error&&(r.j.error.message||r.j.error.code))||r.status),'error');return}
+  const ch=r.j.channel||'';
+  toast(r.j.live?'已激活画框 '+(index+1)+' · '+ch:'已保存画框 '+(index+1)+'，原生窗口未运行');
+  await paneLoad();
+  if(ch){const sel=$('#ch');if(!Array.from(sel.options).some(o=>o.value===ch)){const o=document.createElement('option');o.value=ch;o.textContent=ch;sel.appendChild(o)}sel.value=ch;if(LAST_CH!==ch)connect()}
+}
 async function dashLoad(){
   const r=await api('/status'); if(!r.j||!r.j.channels){$('#term').textContent=r.t;toast('状态读取失败','error');return}
   LAST=r.j;const sel=$('#ch');const old=sel.value;sel.innerHTML='';
   for(const c of r.j.channels){const o=document.createElement('option');o.value=c.name;o.textContent=c.name+' · '+c.state;sel.appendChild(o)}
   if(old&&r.j.channels.some(c=>c.name===old))sel.value=old;else if(!sel.value&&r.j.channels[0])sel.value=r.j.channels[0].name;
-  renderChannels(r.j);renderServices(r.j);
+  renderChannels(r.j);renderServices(r.j);paneLoad();
   const ro=!tok();$('#ro').textContent=ro?'只读（无 token）':'可写（带 token）';$('#ro').className='pill '+(ro?'off':'');
   if(sel.value&&(sel.value!==LAST_CH||(!ws&&!WS_TIMER)))connect();
   else if(sel.value)lockRefresh(sel.value);

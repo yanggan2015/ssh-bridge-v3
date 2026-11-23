@@ -89,6 +89,8 @@ const OperationSpec kOperations[] = {
     {"agent.status.get", "GET", "/api/agent/status", "18081 设备面与 18096 UI 桥状态", "token", "", "device,ui_bridge,endpoints"},
     {"agent.resolve.get", "GET", "/api/agent/resolve", "解析 board/link/channel，返回唯一通道", "public", "board,link,channel", "channel,kind,running"},
     {"status.get", "GET", "/status", "应用、通道、服务、分屏状态；?view=agent 精简", "public", "view", "channels,services,web"},
+    {"panes.get", "GET", "/api/panes", "分屏只读快照：窗格数、激活画框、各画框通道与运行态", "public", "", "ok,split,active,count,panes"},
+    {"panes.active.post", "POST", "/api/panes/active", "受 token 保护激活已绑定画框；UI 在线时同步原生窗口", "token", "index", "ok,active,channel,live"},
     {"agent.scan.get", "GET", "/agent/scan", "全通道只读上下文：连接、终端、缓冲、按钮、features", "public", "", "channels,services,locks,features"},
     {"agent.probe.get", "GET", "/agent/probe", "纯被动读日志尾部，判定终端态", "public", "board,link,channel,tail", "terminal,confidence,evidence"},
     {"agent.state.get", "GET", "/agent/state", "单通道业务状态与游标", "public", "board,link,channel", "channel,terminal,buffer,lock"},

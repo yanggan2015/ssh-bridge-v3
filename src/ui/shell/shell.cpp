@@ -2060,6 +2060,20 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
         on_active_pane_changed();
         return 0;
 
+    case kMsgActivatePane:
+        layout_user_input_ = true;
+        if (view_.set_active(static_cast<int>(wp))) {
+            on_active_pane_changed();
+            dump_state();
+        }
+        return 0;
+
+    case kMsgPaneLayoutChanged:
+        // 桥接切分屏/激活画框没有鼠标输入，需要显式允许把布局落盘。
+        layout_user_input_ = true;
+        on_active_pane_changed();
+        return 0;
+
     case kMsgTermData:
         view_.pull_visible();
         if (core_) core_->clear_pending(static_cast<std::size_t>(wp));

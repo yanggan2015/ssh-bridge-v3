@@ -21,5 +21,7 @@ constexpr UINT kMsgRelayActionResult   = WM_APP + 12;  // 继电器窗口测试�
 constexpr UINT kMsgBoardActionProgress = WM_APP + 13;  // 板卡脚本实时输出（lParam=AsyncBoardProgress*）
 constexpr UINT kMsgActivePaneChanged   = WM_APP + 14;  // 终端激活画框变化（wParam=画框索引，0 起）
 constexpr UINT kMsgWebReload           = WM_APP + 15;  // S9 网页配置保存后请求 UI 线程重载
+constexpr UINT kMsgActivatePane        = WM_APP + 16;  // 网页请求激活画框（wParam=画框索引，0 起）
+constexpr UINT kMsgPaneLayoutChanged   = WM_APP + 17;  // 桥接切分屏/激活画框后强制保存布局
 
 }  // namespace sb3
