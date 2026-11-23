@@ -380,7 +380,9 @@ std::string TunnelManager::status_json() const {
         ssh_err = impl_->ssh.error;
         last = impl_->last_error;
     }
-    bool healthy = probe_port(kHealthPort, 200);
+    // 未启用隧道时不再探测健康端口：之前固定 200ms connect 超时会让每次
+    // /status 都阻塞 200ms。仅在实际运行时探测，且缩短到 50ms。
+    bool healthy = (http_on || ssh_on) ? probe_port(kHealthPort, 50) : false;
     cJSON_AddBoolToObject(o, "on", http_on || ssh_on);
     cJSON_AddStringToObject(o, "exe", impl_ ? impl_->exe.c_str() : "");
     cJSON_AddNumberToObject(o, "health_port", kHealthPort);

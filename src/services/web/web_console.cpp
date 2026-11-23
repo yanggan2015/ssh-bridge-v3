@@ -104,10 +104,10 @@ std::string page_shell(const std::string& page, const std::string& body, const s
     std::string html = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
                        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                        "<title>" + page_title(page) + " · ssh-bridge</title>"
-                       "<link rel=\"stylesheet\" href=\"/static/app.css\"></head><body><div class=\"layout\">"
-                       "<aside class=\"sidebar\"><a class=\"brand\" href=\"/dashboard\"><span class=\"brand-mark\">SB</span><span><strong>ssh-bridge</strong><small>v3 · Web 控制台</small></span></a><nav>" +
+                       "<link rel=\"stylesheet\" href=\"/static/app.css\"></head><body class=\"pg-" + page + "\"><div class=\"layout\">"
+                       "<aside class=\"sidebar\"><a class=\"brand\" href=\"/dashboard\"><span class=\"brand-mark\">SB</span><span><strong>ssh-bridge</strong><small>v3 · Web 控制台</small></span></a><button class=\"nav-menu-btn\" id=\"navMenuBtn\" type=\"button\" aria-expanded=\"false\" title=\"展开页面导航\">菜单</button><button class=\"nav-menu-btn\" id=\"tokenMenuBtn\" type=\"button\" aria-expanded=\"false\" title=\"设置 Bearer token\">令牌</button><nav>" +
                        nav_html(page) + "</nav><div class=\"sidebar-foot\"><div class=\"side-status\"><span class=\"status-dot\" id=\"sideDot\"></span><span id=\"sideState\">只读模式</span></div><div class=\"side-meta\">S9 · HTTP + WS<br>Bearer token · 仅本机/受信网络</div></div></aside>"
-                       "<main><div class=\"shell\"><header class=\"page-head\"><div class=\"title-wrap\"><h1>" + page_title(page) + "</h1><div class=\"sub\">" + page_subtitle(page) + "</div></div>"
+                       "<main><div class=\"shell\"><header class=\"page-head\"><button class=\"nav-toggle-global\" id=\"navToggle\" type=\"button\" title=\"显示/隐藏页面导航（Ctrl+Shift+B）\">导航</button><div class=\"title-wrap\"><h1>" + page_title(page) + "</h1><div class=\"sub\">" + page_subtitle(page) + "</div></div>"
                        "<div class=\"header-tools\"><span class=\"chip\" id=\"tokenState\">只读</span><div class=\"token-box\"><input id=\"tokenBox\" type=\"password\" placeholder=\"Bearer token\" autocomplete=\"off\" spellcheck=\"false\" aria-label=\"Bearer token\"><button id=\"saveToken\" class=\"btn ghost\" type=\"button\">保存 token</button></div></div></header>" +
                        body + "</div></main></div>"
                        "<div class=\"toast\" id=\"toast\" aria-live=\"polite\"></div>"
@@ -4449,7 +4449,7 @@ void WebConsole::Impl::start_thread() {
     worker = std::thread([this]() { worker_loop(); });
     thread = std::thread([this]() {
         while (!stop.load()) {
-            mg_mgr_poll(mgr, 10);
+            mg_mgr_poll(mgr, 5);
             cleanup_job();
         }
     });

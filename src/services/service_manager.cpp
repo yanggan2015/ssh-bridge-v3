@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <filesystem>
+#include <mutex>
 
 #include <cjson/cJSON.h>
 
@@ -22,9 +23,19 @@ namespace {
 std::uint64_t now_ms() { return static_cast<std::uint64_t>(GetTickCount64()); }
 
 std::string pick_local_ip() {
+    // GetAdaptersAddresses 在部分 Windows 主机上单次约 200ms；状态页与 Web URL
+    // 共用同一结果，短时缓存避免每次 /status 都枚举网卡。
+    static std::mutex mu;
+    static std::string cached;
+    static std::uint64_t cached_at = 0;
+    std::lock_guard<std::mutex> g(mu);
+    std::uint64_t now = now_ms();
+    if (!cached.empty() && now >= cached_at && now - cached_at < 5000) return cached;
     char ip[64] = "";
     tftp_pick_default_ip(ip, sizeof(ip));
-    return ip;
+    if (ip[0]) cached = ip;
+    cached_at = now;
+    return cached.empty() ? "127.0.0.1" : cached;
 }
 
 std::string resolve_against(const std::string& root, const std::string& p) {
