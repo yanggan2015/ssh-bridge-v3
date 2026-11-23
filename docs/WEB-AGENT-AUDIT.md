@@ -75,7 +75,7 @@
 | F10 | Web 通道管理 | P1 | `GET/POST /api/channels`、`POST /api/channels/delete`；串口/SSH 表单；重名与名称校验；删除后清理画框引用 |
 | F11 | 终端工具箱 | P1 | `/log/download`、`/log/clear`；前端复制、查找、字号 A-/A+、全屏、清空缓冲 |
 | F12 | 服务配置 | P1 | `GET/POST /api/tftp/config`、`/api/nfs/config`、`/api/share/config`；端口/根/别名/UID/GID/写权限 |
-| F13 | Agent 接口页 | P1 | `GET /api/agent/status`；页面直连 18096 做 capabilities/tree/state/logs 自检；展示 curl 示例 |
+| F13 | Agent 接口页 | P1 | `GET /api/agent/status`；18081 设备面 + 18096 状态只读（不直连、不代理）；展示帮助与 curl 示例 |
 | F14 | 机器可读帮助 | P1 | `GET /api/help` JSON operations；`/help` 文本补充入口 |
 | F15 | Lua/DSL 速查 | P2 | 板控页内嵌速查卡与最小示例 |
 | F16 | Agent 回归套件 | P1 | 新 `agent-smoke.js` 覆盖 K1–K7 与错误码；单独启停 token 场景 |
@@ -128,7 +128,7 @@
 
 | ID | 缺口 | 当前问题 | 实现方案 | 优先级 |
 | --- | --- | --- | --- | --- |
-| P1 | Agent 页远程访问 | 页面直连 `127.0.0.1:18096`，浏览器不在同机时失败 | Web 后端加同源代理 `/api/agent/proxy/*`，由服务端转发并注入 Agent token；页面默认走代理，同机可切直连 | P1 |
+| P1 | Agent 页远程访问 | 页面直连 `127.0.0.1:18096`，浏览器不在同机时失败 | **已否决（C10）**：18081 不代理 18096，Agent 页改为 18096 状态只读；远程 UI 调试另立独立入口，不进入 18081 | P1 |
 | P2 | 服务生命周期验收 | 配置读写已测，启动/停止/重复启停/端口释放未系统测 | 增加浏览器与 API 用例：TFTP 启动→端口占用→停止→端口释放；NFS/Share 重复启停；失败态提示 | P1 |
 | P3 | Job 可观测性 | 只显示动作结果，缺排队/超时/取消/并发视图 | 增加 `/api/jobs`、`/api/jobs/cancel`，前端任务面板显示 queued/running/done/timeout，并限制并发 | P1 |
 | P4 | WS 断线恢复 | 只显示“已连接”，未测非法通道、断线重连、重复订阅 | 前端指数退避重连与状态条；后端校验 channel；测试覆盖非法通道与重连 | P1 |
@@ -136,5 +136,5 @@
 | P6 | 分屏 Web 化 | 1/2/4 分屏只在原生窗口，Web 不可见 | 先做只读 `GET /api/panes` 展示布局与活动画框；再做切换 API 与权限保护 | P2 |
 | P7 | 参考仓对齐项 | 主题/语言、XMODEM/YMODEM、更新/反馈、SFTP 专用页未做 | 主题/语言先做 `ui_settings` + CSS 变量；传输协议与 SFTP 单独立项；更新/反馈沿用原生能力做 Web 入口 | P2 |
 
-验收顺序建议：P1 → P2 → P4 → P3 → P5 → P6 → P7。每项仍按“一批一编译一测试一提交”，不允许把多个高风险后端改动混在一次提交。
+验收顺序建议：P2 → P4 → P6 → P7。P1 已否决（违反 18081 隔离）；P3 已由 C6 完成；P5 已由 C3 完成。每项仍按“一批一编译一测试一提交”，不允许把多个高风险后端改动混在一次提交。
 

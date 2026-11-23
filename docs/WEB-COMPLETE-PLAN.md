@@ -280,7 +280,7 @@ Phase 0–6 已全部完成：
 | F10 | Web 通道管理 | P1 | `GET/POST /api/channels`、`POST /api/channels/delete`；串口/SSH 表单；重名/名称校验；删除清理画框引用 | 新增、编辑、改名、删除、重名 409、非法名 400；删除后 reload 不崩 |
 | F11 | 终端工具箱 | P1 | `/log/download`、`/log/clear`；复制、查找、字号、全屏、清空缓冲 | 下载内容与 ring 一致；清空后 `chars=0`；查找命中；字号/全屏可用 |
 | F12 | 服务配置 | P1 | TFTP/NFS/Share 配置读写接口 + 页面表单 | 端口/根/别名/UID/GID/写权限保存回读；非法端口 400 |
-| F13 | Agent 接口页 | P1 | `/api/agent/status`；页面直连 18096；capabilities/tree/state/logs 自检 | 4 个只读探针全通过；token 错误有提示 |
+| F13 | Agent 接口页 | P1 | `/api/agent/status`；18081 设备面 + 18096 状态只读（不直连、不代理） | 设备面正常；18096 关闭不影响 18081 |
 | F14 | 机器可读帮助 | P1 | `GET /api/help` JSON operations；`/help` 补充入口 | operations 覆盖所有公开路由；无 tunnel 泄漏到 Agent 文档策略保持 |
 | F15 | Lua/DSL 速查 | P2 | 板控页内嵌速查卡、最小示例、时限/沙箱说明 | 示例与 `docs/脚本参考-S12.md` 一致 |
 | F16 | Agent 接口回归 | P1 | `agent-smoke.js` 覆盖 K1–K7 与 400/401/404/405/409/413 | 全通过；`ok:true` 后均读 `/state`/`/control` |
