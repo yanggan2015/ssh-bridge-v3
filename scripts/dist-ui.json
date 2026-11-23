@@ -1,0 +1,17 @@
+{
+  "schema": "ssh-bridge-ui/1",
+  "ui": {
+    "close_to_tray": true,
+    "start_minimized": false,
+    "scrollback_lines": 5000,
+    "font_size": 15,
+    "split": 1,
+    "active_pane": 0,
+    "pane_channels": [
+      "loop1"
+    ]
+  },
+  "window": {
+    "rect": ""
+  }
+}

@@ -462,8 +462,19 @@ bool run_config_split() {
            " in_n=" + std::to_string(cfg.ui.pane_channels.size()));
     report("T1-12", "独立 UI 文件优先于旧统一 ui 段", priority_ok,
            "load=" + std::to_string(priority_ok) + " split=" + std::to_string(priority.ui.split));
+
+    std::string agent_dir = temp_root("config_agent_port");
+    std::string agent_path = util::join_path(agent_dir, "ssh_bridge_config.json");
+    bool agent_wrote = write_all(agent_path,
+        "{\"agent\":{\"enable\":false,\"port\":18086}}\n");
+    AppConfig agent_cfg;
+    bool agent_migrated = agent_wrote && config_load(agent_cfg, agent_path) &&
+                          agent_cfg.agent.port == 18096 && !agent_cfg.agent.enabled;
+    report("T1-14", "旧 Agent 端口 18086 迁移到 18096", agent_migrated,
+           "load=" + std::to_string(agent_wrote) + " port=" +
+           std::to_string(agent_cfg.agent.port));
     return load_ok && split_ok && ui_only && reload_ok && func_only && priority_ok &&
-           local_ok && fallback_ok;
+           local_ok && fallback_ok && agent_migrated;
 }
 
 bool run_upsert_preserve() {

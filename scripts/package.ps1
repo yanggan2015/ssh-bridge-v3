@@ -38,8 +38,11 @@ Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'ssh_bridge3.exe')
 # 分发包固定使用脱敏示例配置：COM4/1 路继电器、OK3568 115200 改为 1500000、
 # 五个板控按钮保留，密码字段为空，auto_login 里改成 YOUR_PASSWORD 占位。
 $distConfigPath = Join-Path $here 'dist-config.json'
+$distUiPath = Join-Path $here 'dist-ui.json'
 if (-not (Test-Path -LiteralPath $distConfigPath)) { throw "缺少脱敏配置：$distConfigPath" }
+if (-not (Test-Path -LiteralPath $distUiPath)) { throw "缺少窗口配置：$distUiPath" }
 Copy-Item -LiteralPath $distConfigPath -Destination (Join-Path $stage 'ssh_bridge_config.json') -Force
+Copy-Item -LiteralPath $distUiPath -Destination (Join-Path $stage 'ssh_bridge_ui.json') -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'work\share') | Out-Null
 # share/tools（eadk_board.py/.md）与 share/skills 随包分发；运行期从 work\share 提供
 $shareSrc = Join-Path $root 'share'

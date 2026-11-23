@@ -420,7 +420,10 @@ void load_root(const cJSON* root, AppConfig* out) {
     const cJSON* agent = cJSON_GetObjectItemCaseSensitive(root, "agent");
     if (cJSON_IsObject(agent)) {
         out->agent.enabled = jbool(agent, "enable", false);
-        out->agent.port = jint(agent, "port", 18096);
+        int port = jint(agent, "port", 18096);
+        // 旧版本的 UI 桥端口 18086 已废弃；保留 enable 语义，只把端口纠偏到 18096。
+        if (port == 18086) port = 18096;
+        out->agent.port = port;
         out->agent.token = jstr(agent, "token", "");
     }
     load_ui_root(root, &out->ui);

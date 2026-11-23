@@ -68,7 +68,7 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 
 ## 界面与快捷键
 
-- 首次启动按工作区 **90%** 开窗；之后记住上次的位置和大小（`output\ui_prefs.ini`）。
+- 首次启动按工作区 **90%** 开窗；之后记住上次的位置和大小（`ssh_bridge_ui.json` 的 `window.rect`）。
 - 工具栏：`新建` `刷新` `重连` `断开` `清屏` `收起/展开`（重连/断开作用于当前选中通道；`断开` 会释放串口/SSH，之后可再点“重连”恢复；最后一个按钮控制左侧通道管理器）。
 - 响应式：客户区宽度小于 **820 DIP** 时左侧通道管理器自动收起、终端铺满；回到 820 DIP 以上自动恢复。窄窗里手动收起后再拖宽也会恢复。最小窗口 **480 × 480 DIP**，工具栏、搜索框、状态栏按 900 / 640 DIP 断点自动压缩。
 - 左侧“文件”页：串口通道浏览本机共享目录（根目录取 `tftp.root`，空则 `work\share`），支持进入子目录、上级、刷新，双击文件用系统默认程序打开；只显示目录和普通文件并过滤临时/系统垃圾项。SSH 通道显示“打开 SFTP”，复用现有 SFTP 面板。
@@ -82,8 +82,13 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 
 ## 配置查找顺序
 
-启动目录 → exe 同目录 → `~\.ssh-bridge\ssh_bridge_config.json` → `config.json`。
+显式 `--config` → 启动目录 → exe 同目录 → `~\.ssh-bridge\ssh_bridge_config.json` → 遗留 `config.json`。
 先看启动目录，便于同一台机器用不同配置做测试；双击绿色版时启动目录没有配置，自然落到 exe 同目录。
+功能配置选中后，窗口配置固定取同目录 `ssh_bridge_ui.json`；旧单文件里的 `ui/window` 会自动兼容读取，首次保存时拆分。
+
+- `ssh_bridge_config.json`：通道、SSH、Web、Agent、TFTP、NFS、共享目录、TCP 转发、隧道、发现、继电器、入站 SSH。
+- `ssh_bridge_ui.json`：窗口矩形、状态栏显示、托盘行为、字体、回看行数、分屏布局、画框通道、活动画框。
+- 两份文件分开保存：改通道不会重写窗口位置，切分屏/隐藏状态栏也不会重写通道。
 启动成功后程序会把工作目录切到 `project_root`，状态文件不会落到 `System32`。
 
 ## 目录
@@ -92,7 +97,8 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 | --- | --- |
 | `ssh_bridge3.exe` | 主程序（静态链接，目标机不需要 MSYS2 / DLL） |
 | `VERSION.txt` | 当前版本、构建 UTC、exe SHA-256 |
-| `ssh_bridge_config.json` | 示例配置：`agent.enable=true`，端口 18096，token 为空 |
+| `ssh_bridge_config.json` | 示例功能配置：Web/Agent 均启用，端口 18081/18096，token 为空（只读） |
+| `ssh_bridge_ui.json` | 示例窗口配置：窗口矩形、状态栏、分屏/画框布局 |
 | `tools\ui_probe.py` | 桥接探针（技能自带；**本程序端口是 18096**，用 `--base` 指定） |
 | `tools\smoke.ps1` | 冒烟脚本：起进程 → 读树 → 输入/搜索/滚动/分屏/关于窗 → 退出 |
 | `tools\update.ps1` | 独立更新器：版本比较、SHA-256 校验、白名单替换、失败回滚 |
@@ -104,6 +110,7 @@ powershell -NoProfile -File tools\update.ps1 -Manifest <UPDATE.json 的 http(s) 
 {
   "boards": [ {"name":"loop1","serial_device":"loop:ai","auto_open":true} ],
   "ssh":    [ {"name":"board","host":"192.168.1.10","port":22,"username":"root","password":""} ],
+  "web":    {"enable": true, "port": 18081, "token": ""},
   "agent":  {"enable": true, "port": 18096, "token": ""}
 }
 ```
@@ -267,7 +274,7 @@ Invoke-RestMethod "$b/action" -Method Post -ContentType 'application/json' `
 
 按钮被点击后，主窗口状态栏第三段立即显示触发的按钮 ID 和耗时，第四段逐行显示脚本 `print/echo/hostcmd/remotecmd` 的当前输出；执行完成后保留最后一行。
 
-菜单 **板控按钮** 直接进入“按钮脚本”页。主窗口当前画框有启用按钮时，终端上方显示按钮条；分屏时按钮条跟随**当前激活画框**自动切换，左侧显示 `板控 · 画框N · 通道名`，空画框显示“未绑定通道”，没有按钮的通道标注“（无按钮）”。点击按钮走统一执行器，继电器、板端命令、本机命令、Lua 脚本都从同一入口执行。分屏数量、各画框通道和激活画框会自动保存到配置 `ui.split / ui.pane_channels / ui.active_pane`，重启后恢复原布局。
+菜单 **板控按钮** 直接进入“按钮脚本”页。主窗口当前画框有启用按钮时，终端上方显示按钮条；分屏时按钮条跟随**当前激活画框**自动切换，左侧显示 `板控 · 画框N · 通道名`，空画框显示“未绑定通道”，没有按钮的通道标注“（无按钮）”。点击按钮走统一执行器，继电器、板端命令、本机命令、Lua 脚本都从同一入口执行。分屏数量、各画框通道和激活画框会自动保存到窗口配置 `ssh_bridge_ui.json` 的 `ui.split / ui.pane_channels / ui.active_pane`，重启后恢复原布局。
 
 ### 底部快捷指令条
 
