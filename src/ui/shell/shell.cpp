@@ -1504,8 +1504,8 @@ void Shell::show_about() {
     }
     RECT mr{};
     GetWindowRect(hwnd_, &mr);
-    const int aw = MulDiv(460, dpi_, 96);
-    const int ah = MulDiv(270, dpi_, 96);
+    const int aw = MulDiv(480, dpi_, 96);
+    const int ah = MulDiv(345, dpi_, 96);
     int ax = mr.left + ((mr.right - mr.left) - aw) / 2;
     int ay = mr.top + ((mr.bottom - mr.top) - ah) / 2;
     const std::wstring version = installed_version();
@@ -1519,27 +1519,29 @@ void Shell::show_about() {
                   WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(14, dpi_, 96),
                   aw - pad * 2, MulDiv(24, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutVersion)), inst_, nullptr);
+    const std::wstring webPort = std::to_wstring(web_ && web_->port() > 0 ? web_->port() : 18081);
     HWND txt = CreateWindowW(L"STATIC",
-                  L"ssh-bridge v3 · 原生 Win32 单进程\r\n"
-                  L"串口 / SSH / 日志共用一个 ring\r\n\r\n"
-                  L"官方发布仓库：\r\n"
-                  L"github.com/yanggan2015/ssh-bridge-v3-releases\r\n"
-                  L"AI 桥接：http://127.0.0.1:18096",
+                  (L"ssh-bridge v3 · 原生 Win32 单进程\r\n\r\n"
+                   L"Web 控制台（浏览器打开）：\r\n"
+                   L"http://127.0.0.1:" + webPort + L"\r\n"
+                   L"AI 调试桥（仅接口，不是网页）：\r\n"
+                   L"http://127.0.0.1:18096\r\n"
+                   L"官方发布仓库：github.com/yanggan2015/ssh-bridge-v3-releases").c_str(),
                   WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(44, dpi_, 96),
-                  aw - pad * 2, MulDiv(112, dpi_, 96), about_,
+                  aw - pad * 2, MulDiv(145, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutText)), inst_, nullptr);
     HWND updNote = CreateWindowW(L"STATIC",
                   (update_checking_ && !last_note_.empty()
                        ? last_note_
                        : std::wstring(L"检查到新版本后自动下载、校验 SHA-256 并重启")).c_str(),
-                  WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(156, dpi_, 96),
+                  WS_CHILD | WS_VISIBLE | SS_LEFT, pad, MulDiv(198, dpi_, 96),
                   aw - pad * 2, MulDiv(22, dpi_, 96), about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutUpdateNote)), inst_, nullptr);
     about_update_note_ = updNote;
     const int btnW = MulDiv(120, dpi_, 96);
     const int btnH = MulDiv(32, dpi_, 96);
     const int gap = MulDiv(16, dpi_, 96);
-    const int btnY = ah - MulDiv(58, dpi_, 96);
+    const int btnY = ah - MulDiv(88, dpi_, 96);
     HWND upd = CreateWindowW(L"BUTTON", L"检查更新", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                   (aw - btnW * 2 - gap) / 2, btnY, btnW, btnH, about_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdcAboutUpdate)), inst_, nullptr);
