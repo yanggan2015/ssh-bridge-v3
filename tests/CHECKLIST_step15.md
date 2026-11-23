@@ -10,6 +10,8 @@
 | CFG-2 | 配置往返 | 保存重载后四类通道与未知键都不丢 | [AUTO] |
 | CFG-3 | 配置拆分 | 新字段只写 `ssh_bridge_config.json`，不写 `ssh_bridge_ui.json` | [AUTO] |
 | CFG-4 | 通道名唯一 | 四类之间重名被拒绝，改名同步分屏绑定 | [AUTO] |
+| CFG-5 | Web 新建落盘 | cwd、行尾、时间戳、Telnet 尺寸完整写入功能配置 | [AUTO] |
+| CFG-2b | 运行后往返 | 退出后未知键与四类数组仍保留 | [AUTO] |
 
 ## B. PowerShell 通道
 
@@ -25,6 +27,8 @@
 | PS-8 | 手动断开 | 断开后 `idle`，10 秒不自动重开 | [AUTO] |
 | PS-9 | 自动恢复 | 子进程被结束后 watchdog 重开，状态回 ready | [AUTO] |
 | PS-10 | 错误路径 | shell 不存在时离线并含 `CreateProcess failed` | [AUTO] |
+| PS-11 | 工作目录/编码 | 配置的 cwd 生效；中文输出无乱码 | [AUTO] |
+| PS-12 | 已连接重连 | ready 状态点重连会更换 PID 并回到 ready | [AUTO] |
 
 ## C. Telnet 通道
 
@@ -38,6 +42,8 @@
 | TN-6 | 断线重连 | 服务端关闭后 offline，服务恢复后自动 ready | [AUTO] |
 | TN-7 | 手动断开 | 断开后 idle，不自动重连；手动重连恢复 | [AUTO] |
 | TN-8 | 端口失败 | 未监听端口时 offline，`last_error` 含连接失败 | [AUTO] |
+| TN-7c | 已连接重连 | ready 状态点重连，探针收到新 ACCEPT 且仍可收发 | [AUTO] |
+| TN-9 | 行尾字节 | `crlf` 配置在线路上以 `0d0a` 结尾 | [AUTO] |
 
 ## D. UI / 通道树
 
@@ -51,6 +57,9 @@
 | UI-6 | 右键菜单 | 打开/重连、断开、编辑、删除可用；SFTP 不显示 | [AUTO] + 截图 |
 | UI-7 | 删除 | 右键/对话框删除后节点消失、画框绑定清空 | [AUTO] |
 | UI-8 | 终端输入 | 在 PowerShell/Telnet 终端实际键入并回车 | 截图 + 日志 |
+| UI-5c | 改名绑定 | 改名后当前分屏 `channel` 同步为新名 | [AUTO] |
+| UI-9 | 编辑回填 | PowerShell 编辑框回填 program/args，类型锁定 | [AUTO] |
+| UI-10 | Telnet 编辑/删除 | 标题为“Telnet 参数”，SSH 专属字段隐藏；删除活动通道不挂死 | [AUTO] |
 
 ## E. Web / Agent
 
@@ -61,6 +70,7 @@
 | WEB-3 | 通道 API 删除 | 两种 kind 均可删除 | [AUTO] |
 | WEB-4 | 网页通道页 | 新增按钮、字段组、卡片正常渲染 | [AUTO] + 截图 |
 | WEB-5 | 网页终端 | 选择新通道可输入并看到回显 | [AUTO] |
+| WEB-UI | 真实浏览器 | PS 默认 CR、Telnet 默认 23/CRLF；表单创建/删除；Agent 页类型列正确 | Edge 自动化 |
 | AG-1 | Agent state/scan | 新通道 `kind`、`state`、`features` 正确 | [AUTO] |
 | AG-2 | Agent write/log | `/write` 写入后 `/log` 能读到输出 | [AUTO] |
 | AG-3 | 串口特性 | `serial_control` 只对串口 true | [AUTO] |
@@ -73,8 +83,10 @@
 | RG-2 | 代码整理 | quality_gate ALL PASS | 脚本 |
 | RG-3 | 串口/SSH 通道 | 原有 4 通道仍 ready，状态栏在线数正确 | step14 + 截图 |
 | RG-4 | 串口自愈 | step14 19/19 | step14_check |
-| RG-5 | 基础功能 | step1 17/17、step3 14/14 | 脚本 |
+| RG-5 | 基础功能 | step1 18/18（-SkipBuild）、step3 14/14 | 脚本 |
 | RG-6 | UI 桥 | ui_bridge 41/41 | 脚本 |
 | RG-7 | Web 全量 | 12 页 162/162 | web_functional.js |
 | RG-8 | 桌面全量 | main 35/35、dialogs 32/32、exit 2/2 | ui_full_audit2 |
 | RG-9 | 退出残留 | 退出后无 ssh_bridge3/powershell 子进程，端口释放 | netstat |
+| RG-10 | 重启恢复 | 退出后重启，PS/TN 自动 ready 且 cwd/行尾保持 | [AUTO] |
+| RG-11 | 二次退出 | 删除持久化测试通道并再次退出，无残留 | [AUTO] |

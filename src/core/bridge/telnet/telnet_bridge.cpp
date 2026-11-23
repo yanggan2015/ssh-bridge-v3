@@ -107,7 +107,9 @@ bool TelnetBridge::running() const {
 void TelnetBridge::reconnect() {
     retry_now_ = true;
     connected_ = false;
-    shutdown_socket();
+    // 与 stop() 同理：Windows 上 shutdown 不能可靠唤醒阻塞中的 recv，
+    // 已连接状态点“重连”必须真正关闭 socket，否则 RX 线程会卡住不再握手。
+    close_socket();
     std::lock_guard<std::mutex> lk(retry_mu_);
     retry_cv_.notify_all();
 }

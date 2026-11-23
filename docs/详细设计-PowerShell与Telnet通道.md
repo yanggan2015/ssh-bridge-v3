@@ -210,3 +210,11 @@ while ($true) {
 - Telnet 端口未监听：连接超时，状态 offline，`last_error` 含 `connect ... failed`；服务启动后自动恢复。
 - Telnet 服务端主动断开：RX 读到 0，状态 offline，按退避重连。
 - 删除/改名四类同名冲突：保存前拒绝，不落盘。
+
+
+## 10. 二次复核修正（2026-11-24）
+
+- Telnet `reconnect()`：与 `stop()` 保持一致，先 `close_socket()` 再唤醒 RX；仅 `shutdown()` 在 Windows 上可能无法唤醒阻塞 `recv()`，会出现“已连接点重连但状态停在 offline”的假重连。
+- Web 新建默认值：网页表单必须自己带正确缺省，不能依赖后端补值。PowerShell 行尾 `cr`，Telnet 行尾 `crlf`，串口/SSH 仍为 `none`。
+- Agent 设备页类型列：按四类 `kind` 分支显示，不能只区分 SSH/串口，否则 PowerShell/Telnet 会被误标为串口。
+- 验收由 53 项扩展到 74 项，新增 cwd/UTF-8、已连接重连、改名分屏绑定、Telnet 编辑、真实浏览器表单与重启持久化。

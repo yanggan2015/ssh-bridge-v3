@@ -184,6 +184,9 @@ $cfg = [ordered]@{
         [ordered]@{ name = 'ps-good'; shell = 'powershell.exe'
             args = '-NoLogo -NoProfile -ExecutionPolicy Bypass'; cwd = ''
             line_ending = 'cr'; buffer_size = 0; log_enabled = $false; log_dir = ''; timestamp = $false }
+        [ordered]@{ name = 'ps-cwd'; shell = 'powershell.exe'
+            args = '-NoLogo -NoProfile -ExecutionPolicy Bypass'; cwd = $runDir
+            line_ending = 'cr'; buffer_size = 0; log_enabled = $false; log_dir = ''; timestamp = $false }
         [ordered]@{ name = 'ps-bad'; shell = 'C:\no-such\pwsh-step15.exe'
             args = '-NoLogo -NoProfile'; cwd = ''
             line_ending = 'cr'; buffer_size = 0; log_enabled = $false; log_dir = ''; timestamp = $false }
@@ -265,6 +268,16 @@ try {
     Start-Sleep -Seconds 2
     $psLog = Get-LogText 'ps-good'
     Check 'PS-7' 'CRLF 两行逐行提交' (($psLog -match 'AAA') -and ($psLog -match 'BBB')) 'AAA/BBB'
+    $psCwd = Wait-Ch 'ps-cwd' { param($c) $c.state -eq 'ready' } 12
+    WebPost '/write' @{ channel = 'ps-cwd'; data = "Write-Output ('CWD-STEP15=' + (Get-Location).Path)`r" } | Out-Null
+    Start-Sleep -Seconds 1
+    $cwdLog = Get-LogText 'ps-cwd'
+    Check 'PS-11a' '配置的 cwd 生效' (($psCwd.state -eq 'ready') -and ($cwdLog -match ('CWD-STEP15=' + [regex]::Escape($runDir)))) `
+        "state=$($psCwd.state) cwd=$runDir"
+    WebPost '/write' @{ channel = 'ps-cwd'; data = "Write-Output '中文验收OK-STEP15'`r" } | Out-Null
+    Start-Sleep -Seconds 1
+    $cwdLog = Get-LogText 'ps-cwd'
+    Check 'PS-11b' 'UTF-8 中文输出无乱码' ($cwdLog -match '中文验收OK-STEP15') '中文验收OK-STEP15'
     Select-Ch 'ps-good'
     UiAction 'btn.disconnect' 'click' | Out-Null
     Start-Sleep -Milliseconds 800
@@ -281,6 +294,11 @@ try {
     $ps = Wait-Ch 'ps-good' { param($c) $c.state -eq 'ready' -and $c.pid -gt 0 -and $c.pid -ne $oldPid } 20
     Check 'PS-9' '子进程被杀后 watchdog 重开' (($ps.state -eq 'ready') -and $ps.pid -ne $oldPid) `
         "old=$oldPid new=$($ps.pid) state=$($ps.state)"
+    $oldPid2 = $ps.pid
+    UiAction 'btn.reconnect' 'click' | Out-Null
+    $ps = Wait-Ch 'ps-good' { param($c) $c.state -eq 'ready' -and $c.pid -gt 0 -and $c.pid -ne $oldPid2 } 12
+    Check 'PS-12' '已连接状态点重连会真正重启进程' (($ps.state -eq 'ready') -and ($ps.pid -ne $oldPid2)) `
+        "old=$oldPid2 new=$($ps.pid) state=$($ps.state)"
     $badps = Wait-Ch 'ps-bad' { param($c) $c.state -eq 'offline' -and $c.last_error } 8
     Check 'PS-10' 'shell 不存在时离线且报错' (($badps.state -eq 'offline') -and ($badps.last_error -match 'CreateProcess|failed')) `
         "state=$($badps.state) err=$($badps.last_error)"
@@ -315,13 +333,29 @@ try {
     UiAction 'btn.reconnect' 'click' | Out-Null
     $tn = Wait-Ch 'tn-good' { param($c) $c.state -eq 'ready' } 10
     Check 'TN-7b' '手动重连恢复 ready' ($tn.state -eq 'ready') "state=$($tn.state)"
+    $accBefore = @(Select-String -Path (Join-Path $runDir 'probe2.log') -Pattern '^ACCEPT ' -ErrorAction SilentlyContinue).Count
+    UiAction 'btn.reconnect' 'click' | Out-Null
+    $tn = Wait-Ch 'tn-good' { param($c) $c.state -eq 'ready' } 10
+    Start-Sleep -Milliseconds 600
+    $accAfter = @(Select-String -Path (Join-Path $runDir 'probe2.log') -Pattern '^ACCEPT ' -ErrorAction SilentlyContinue).Count
+    WebPost '/write' @{ channel = 'tn-good'; data = "TN-RECONNECT`r`n" } | Out-Null
+    Start-Sleep -Milliseconds 800
+    $pane = Get-Pane
+    Check 'TN-7c' '已连接状态点重连会重新握手' (($tn.state -eq 'ready') -and ($accAfter -gt $accBefore) `
+        -and ((@($pane.tail) -join "`n") -match 'TN-RECONNECT')) "accepted=$accBefore->$accAfter state=$($tn.state)"
+    WebPost '/write' @{ channel = 'tn-good'; data = "EOL-STEP15`r`n" } | Out-Null
+    Start-Sleep -Milliseconds 800
+    $raw = Get-Content (Join-Path $runDir 'probe2.log') -Raw
+    $rxAll = ((($raw -split "`n") | Where-Object { $_ -match '^RX ' } | ForEach-Object { $_ -replace '^RX ','' }) `
+        -join '').Trim()
+    Check 'TN-9' '配置 crlf 后线上字节以 0d0a 结尾' ($rxAll -match '0d0a$') "last=$($rxAll.Substring([Math]::Max(0,$rxAll.Length-24)))"
     $badtn = Wait-Ch 'tn-bad' { param($c) $c.state -eq 'offline' -and $c.last_error } 8
     Check 'TN-8' '未监听端口 offline 且含连接错误' (($badtn.state -eq 'offline') -and ($badtn.last_error -match 'connect|fail|refused|timeout')) `
         "state=$($badtn.state) err=$($badtn.last_error)"
 
     # ---------- D UI ----------
     $tree = Get-Tree
-    Check 'UI-1' '分组计数与配置一致' ((@($tree.items) -join "`n") -match 'Telnet \(2\)' -and (@($tree.items) -join "`n") -match 'PowerShell \(2\)') `
+    Check 'UI-1' '分组计数与配置一致' ((@($tree.items) -join "`n") -match 'Telnet \(2\)' -and (@($tree.items) -join "`n") -match 'PowerShell \(3\)') `
         (@($tree.items) -join ';')
     $uiTree = Invoke-RestMethod -Uri "$agentBase/ui-tree" -TimeoutSec 8
     $ids = @($uiTree.controls | ForEach-Object { $_.id })
@@ -361,12 +395,18 @@ try {
     $treeDlg = Invoke-RestMethod -Uri "$agentBase/ui-tree" -TimeoutSec 8
     $byId = @{}; foreach ($c in $treeDlg.controls) { if ($c.id) { $byId[$c.id] = $c } }
     Check 'UI-5a' '编辑时类型下拉锁定' (-not $byId['dlg.channel.kind'].enabled) "enabled=$($byId['dlg.channel.kind'].enabled)"
+    Check 'UI-9a' '编辑 PowerShell 回填 program' ($byId['dlg.channel.shell'].text -match 'powershell\.exe') `
+        "shell=$($byId['dlg.channel.shell'].text)"
+    Check 'UI-9b' '编辑 PowerShell 回填 args' ($byId['dlg.channel.args'].text -match 'NoLogo') `
+        "args=$($byId['dlg.channel.args'].text)"
     UiAction 'dlg.channel.name' 'set_text' 'ps-ui2' | Out-Null
     UiAction 'dlg.channel.save' 'click' | Out-Null
     $psUi2 = Wait-Ch 'ps-ui2' { param($c) $c.state -eq 'ready' } 12
     $tree = Get-Tree
     Check 'UI-5b' '改名落盘且树节点更名' (($psUi2.state -eq 'ready') -and ((@($tree.items) -join "`n") -notmatch '/\s+ps-ui\s')) `
         "state=$($psUi2.state)"
+    $paneBind = Get-Pane
+    Check 'UI-5c' '改名同步分屏画框绑定' ($paneBind.channel -eq 'ps-ui2') "pane=$($paneBind.channel)"
     Select-Ch 'ps-ui2'
     UiAction 'chan.deleteCurrent' 'click' | Out-Null
     Wait-Dialog $true | Out-Null
@@ -377,6 +417,35 @@ try {
     $tree = Get-Tree
     $gone = (($tree.items -join "`n") -notmatch '/\s+ps-ui2\s') -and -not (Get-Ch 'ps-ui2')
     Check 'UI-7' '删除后节点消失且绑定清空' $gone 'tree/config gone'
+    Start-Probe 'probe-tnui.log' 2325
+    UiAction 'menu.file.newTelnet' 'click' | Out-Null
+    Wait-Dialog $true | Out-Null
+    UiAction 'dlg.channel.name' 'set_text' 'tn-ui' | Out-Null
+    UiAction 'dlg.channel.host' 'set_text' '127.0.0.1' | Out-Null
+    UiAction 'dlg.channel.port' 'set_text' '2325' | Out-Null
+    UiAction 'dlg.channel.save' 'click' | Out-Null
+    $tnUi = Wait-Ch 'tn-ui' { param($c) $c.state -eq 'ready' } 12
+    Check 'UI-10a' 'Telnet 对话框保存并连接' (($tnUi.state -eq 'ready') -and $tnUi.detail -eq '127.0.0.1:2325') `
+        "state=$($tnUi.state) detail=$($tnUi.detail)"
+    Select-Ch 'tn-ui'
+    UiAction 'chan.editCurrent' 'click' | Out-Null
+    Wait-Dialog $true | Out-Null
+    $treeDlg = Invoke-RestMethod -Uri "$agentBase/ui-tree" -TimeoutSec 8
+    $byId = @{}; foreach ($c in $treeDlg.controls) { if ($c.id) { $byId[$c.id] = $c } }
+    Check 'UI-10b' 'Telnet 编辑组标题与 SSH 专属字段' (($byId['dlg.group.ssh'].text -match 'Telnet') -and
+        (-not $byId['dlg.channel.user'].visible) -and (-not $byId['dlg.channel.password'].visible) -and
+        ([int]$byId['dlg.channel.port'].text -eq 2325)) "title=$($byId['dlg.group.ssh'].text) port=$($byId['dlg.channel.port'].text)"
+    UiAction 'dlg.channel.cancel' 'click' | Out-Null
+    Start-Sleep -Milliseconds 400
+    Select-Ch 'tn-ui'
+    UiAction 'chan.deleteCurrent' 'click' | Out-Null
+    Wait-Dialog $true | Out-Null
+    UiAction 'dlg.channel.delete' 'click' | Out-Null
+    Start-Sleep -Milliseconds 400
+    UiAction 'dlg.channel.delete' 'click' | Out-Null
+    Start-Sleep -Seconds 2
+    Check 'UI-10c' '删除活动 Telnet 不挂死且节点消失' ((-not (Get-Ch 'tn-ui')) -and
+        ((Get-Process ssh_bridge3 -ErrorAction SilentlyContinue).Responding)) 'deleted'
     Check 'UI-6' '通道右键菜单命令完整且 SFTP 不在通道菜单' `
         ((($ids -contains 'chan.editCurrent') -and ($ids -contains 'chan.deleteCurrent') -and ($ids -contains 'chan.reload')) `
           -and -not ($ids -contains 'chan.sftp')) 'chan.*'
@@ -416,6 +485,24 @@ try {
     $page = Invoke-WebRequest -Uri "$webBase/channels" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 10
     Check 'WEB-4' '通道页含新增按钮/字段组' ($page.Content -match 'newPowershell' -and $page.Content -match 'newTelnet' -and
         $page.Content -match 'cShell' -and $page.Content -match 'cArgs' -and $page.Content -match 'cCwd') 'channels html'
+    Start-Probe 'probe-uiweb.log' 2326
+    $uiProbe = Join-Path $root 'output\webtest\step15_ui_probe.js'
+    $uiOut = Join-Path $root 'output\step15\audit2\web-ui-probe.json'
+    New-Item -ItemType Directory -Force -Path (Split-Path $uiOut) | Out-Null
+    $uiRun = (& node $uiProbe 2>&1 | Out-String)
+    Write-Host $uiRun
+    if (Test-Path $uiOut) {
+        foreach ($r in @(Get-Content -LiteralPath $uiOut -Raw | ConvertFrom-Json)) {
+            Check $r.id $r.desc ($r.result -eq 'PASS') $r.detail
+        }
+    } else {
+        Check 'WEB-UI-0' '浏览器通道页脚本产出结果' $false $uiRun
+    }
+    foreach ($n in @('ps-uiweb', 'tn-uiweb')) {
+        if (Get-Ch $n) {
+            try { WebPost '/api/channels/delete' @{ kind = $(if ($n -like 'ps-*') { 'powershell' } else { 'telnet' }); name = $n } | Out-Null } catch {}
+        }
+    }
     $tn = Wait-Ch 'tn-good' { param($c) $c.state -eq 'ready' } 5
     if ($tn.state -ne 'ready') {
         Select-Ch 'tn-good'
@@ -442,6 +529,21 @@ try {
     Check 'AG-3' 'serial_control 只对串口 true' ($null -eq $serialEntry -or $serialEntry.features.serial_control) `
         'no serial configured in isolation'
 
+    # ---------- F 重启持久化 ----------
+    Start-Probe 'probe-keep.log' 2327
+    $mkPs = WebPost '/api/channels' @{ kind = 'powershell'; channel = @{ name = 'ps-keep'; shell = 'powershell.exe'
+        args = '-NoLogo -NoProfile -ExecutionPolicy Bypass'; cwd = $runDir; line_ending = 'lf'; timestamp = $true; log_enabled = $true } }
+    $mkTn = WebPost '/api/channels' @{ kind = 'telnet'; channel = @{ name = 'tn-keep'; host = '127.0.0.1'; port = 2327
+        connect_timeout_ms = 3000; line_ending = 'cr'; width = 100; height = 30; log_enabled = $true } }
+    $psKeep = Wait-Ch 'ps-keep' { param($c) $c.state -eq 'ready' } 15
+    $tnKeep = Wait-Ch 'tn-keep' { param($c) $c.state -eq 'ready' } 12
+    $cfgNow = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json
+    $psCfg = @($cfgNow.powershell | Where-Object { $_.name -eq 'ps-keep' })[0]
+    $tnCfg = @($cfgNow.telnet | Where-Object { $_.name -eq 'tn-keep' })[0]
+    Check 'CFG-5' 'Web 新建后配置字段完整落盘' ($mkPs.ok -and $mkTn.ok -and $psCfg.cwd -eq $runDir -and
+        $psCfg.line_ending -eq 'lf' -and $psCfg.timestamp -eq $true -and $tnCfg.line_ending -eq 'cr' -and
+        $tnCfg.width -eq 100) "ps=$($psKeep.state) tn=$($tnKeep.state)"
+
     # ---------- F 退出 ----------
     Release-App
     $script:proc = $null
@@ -454,6 +556,23 @@ try {
     $childCount = @($psChildren).Count
     Check 'RG-9' '退出后无应用/子进程且端口释放' ((-not $residual) -and ($childCount -eq 0) -and -not $ports) `
         "app=$residual children=$childCount ports=$(@($ports).Count)"
+
+    $script:proc = Start-Process $exe -WorkingDirectory $runDir -PassThru
+    Start-Sleep -Seconds 4
+    $psKeep2 = Wait-Ch 'ps-keep' { param($c) $c.state -eq 'ready' } 15
+    $tnKeep2 = Wait-Ch 'tn-keep' { param($c) $c.state -eq 'ready' } 15
+    $reCfg = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json
+    $rePs = @($reCfg.powershell | Where-Object { $_.name -eq 'ps-keep' })[0]
+    $reTn = @($reCfg.telnet | Where-Object { $_.name -eq 'tn-keep' })[0]
+    Check 'RG-10' '重启后两类通道自动恢复且字段保持' ($psKeep2.state -eq 'ready' -and $tnKeep2.state -eq 'ready' `
+        -and $rePs.cwd -eq $runDir -and $rePs.line_ending -eq 'lf' -and $reTn.line_ending -eq 'cr') `
+        "ps=$($psKeep2.state) tn=$($tnKeep2.state) cwd=$($rePs.cwd)"
+    try { WebPost '/api/channels/delete' @{ kind = 'powershell'; name = 'ps-keep' } | Out-Null } catch {}
+    try { WebPost '/api/channels/delete' @{ kind = 'telnet'; name = 'tn-keep' } | Out-Null } catch {}
+    Release-App
+    $script:proc = $null
+    Start-Sleep -Seconds 2
+    Check 'RG-11' '第二次退出无残留' (-not (Get-Process ssh_bridge3 -ErrorAction SilentlyContinue)) 'clean'
 
     # 配置往返：让应用重新保存一次后再读
     Check 'CFG-2b' '运行后配置文件仍保留未知键与四类数组' `

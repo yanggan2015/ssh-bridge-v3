@@ -1476,7 +1476,7 @@ async function loadChannels(){
 }
 function blankChannel(kind){
   EDIT={kind,old:''};showKind(kind);
-  setVal('cName','');setVal('cDevice','loop:ai');setVal('cBaud',115200);setVal('cDataBits','8');setVal('cParity','N');setVal('cStopBits','10');setVal('cFlow','none');setVal('cLineEnding','none');setVal('cEncoding','utf-8');setVal('cUsername','');setVal('cPassword','');
+  setVal('cName','');setVal('cDevice','loop:ai');setVal('cBaud',115200);setVal('cDataBits','8');setVal('cParity','N');setVal('cStopBits','10');setVal('cFlow','none');setVal('cLineEnding',kind==='powershell'?'cr':(kind==='telnet'?'crlf':'none'));setVal('cEncoding','utf-8');setVal('cUsername','');setVal('cPassword','');
   setChk('cAutoOpen',true);setChk('cTimestamp',false);setChk('cDtr',true);setChk('cRts',true);
   setVal('cHost','');setVal('cPort',kind==='telnet'?23:22);setVal('cSshUser','root');setVal('cSshPassword','');setVal('cTerm','xterm-256color');setVal('cKeepalive',3);setVal('cWidth',120);setVal('cHeight',32);setVal('cTimeout',5000);
   setVal('cShell','powershell.exe');setVal('cArgs','-NoLogo -NoProfile -ExecutionPolicy Bypass');setVal('cCwd','');
@@ -1585,7 +1585,7 @@ function devRenderChannels(scan,leases){
   list.forEach(c=>{
     const tr=document.createElement('tr');
     devCell(tr,c.name,true);
-    devCell(tr,c.kind==='ssh'?'SSH Link':'串口');
+    devCell(tr,c.kind==='ssh'?'SSH':(c.kind==='powershell'?'PowerShell':(c.kind==='telnet'?'Telnet':'串口')));
     const st=devCell(tr,(c.running?'running':'offline')+' · '+(c.state||'-'));
     const term=(c.terminal&&c.terminal.state)||'-', conf=(c.terminal&&c.terminal.confidence)||'';
     devCell(tr,term+(conf?' / '+conf:''));
