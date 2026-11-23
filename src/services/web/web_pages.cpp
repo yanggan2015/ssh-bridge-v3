@@ -376,6 +376,18 @@ dialog input{width:100%;margin-top:11px}
   .terminal-foot{flex-wrap:wrap}
   .terminal-foot input{flex:1 1 100%}
   .footer-note{text-align:left}
+  body.pg-dashboard .terminal-card .card-head{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:4px;margin:0 0 2px;min-height:22px}
+  body.pg-dashboard .terminal-card .card-head>.row-end{flex:1 1 auto;flex-wrap:nowrap;gap:3px;justify-content:flex-end}
+  body.pg-dashboard .terminal-card .row-end .btn,
+  body.pg-dashboard .terminal-card .row-end .nav-toggle{padding:2px 6px;min-height:22px;font-size:11px;line-height:1.2}
+  body.pg-dashboard .terminal-card #ch{flex:1 1 auto;width:auto;min-width:0;min-height:22px;padding:1px 4px;font-size:11px}
+  body.pg-dashboard .terminal-bar{flex-wrap:nowrap;gap:4px;margin:0 0 2px;min-height:22px}
+  body.pg-dashboard .terminal-bar .pane-strip{gap:3px}
+  body.pg-dashboard .pane-chip{min-height:20px;padding:1px 5px;font-size:11px}
+  body.pg-dashboard .terminal-tools{gap:3px}
+  body.pg-dashboard .terminal-tools .btn{min-height:22px;padding:2px 5px;font-size:11px;line-height:1.2}
+  body.pg-dashboard #termFind{flex:1 1 90px;min-height:22px;padding:1px 5px;font-size:11px}
+  body.pg-dashboard .hint{margin-top:2px;font-size:10px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
 /* 桌面工作台布局：左侧通道栏常驻，右侧会话区吃满剩余空间。
    顶部导航压到 44px，页面标题不再占行；token 改为“令牌”浮层。 */
@@ -503,7 +515,6 @@ window.addEventListener('DOMContentLoaded',()=>{
   if(sv)sv.onclick=()=>{setTok(($('#tokenBox')||{}).value.trim());toast('Token 已保存，正在刷新页面');setTimeout(()=>location.reload(),450)};
   const tm=$('#tokenMenuBtn');
   if(tm)tm.onclick=ev=>{ev.stopPropagation();document.body.classList.toggle('token-open');tm.setAttribute('aria-expanded',document.body.classList.contains('token-open')?'true':'false')};
-  if(!tok()&&document.body.classList.contains('pg-dashboard')&&matchMedia('(max-width:760px)').matches)document.body.classList.add('token-open');
   syncTokenUI();
 });
 )JS";
