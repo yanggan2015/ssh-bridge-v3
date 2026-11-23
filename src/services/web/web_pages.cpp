@@ -600,8 +600,8 @@ std::string page_body(const std::string& page) {
         return R"HTML(
 <section class="card">
   <div class="card-head">
-    <div class="card-title"><div><h2>通道</h2><div class="card-sub">串口与 SSH 通道的新增、编辑、改名、删除；保存后由 UI 线程重载。</div></div></div>
-    <div class="row-end"><button class="btn ghost" id="loadChannels" type="button">刷新</button><button class="btn" id="newSerial" type="button">新增串口</button><button class="btn" id="newSsh" type="button">新增 SSH</button></div>
+    <div class="card-title"><div><h2>通道</h2><div class="card-sub">串口、SSH、PowerShell 与 Telnet 通道的新增、编辑、改名、删除；保存后由 UI 线程重载。</div></div></div>
+    <div class="row-end"><button class="btn ghost" id="loadChannels" type="button">刷新</button><button class="btn" id="newSerial" type="button">新增串口</button><button class="btn" id="newSsh" type="button">新增 SSH</button><button class="btn" id="newPowershell" type="button">新增 PowerShell</button><button class="btn" id="newTelnet" type="button">新增 Telnet</button></div>
   </div>
   <div class="row-end" style="margin-bottom:11px"><span class="chip" id="chanCount">--</span><span class="chip" id="chanOnline">--</span><span class="form-status" id="chanNote">写接口需要 token。</span></div>
   <div class="channel-cards" id="chanCards"></div>
@@ -628,6 +628,9 @@ std::string page_body(const std::string& page) {
     <label class="field"><span>SSH 端口</span><input id="cPort" type="number" min="1" max="65535" value="22"></label>
     <label class="field"><span>SSH 用户名</span><input id="cSshUser" placeholder="root"></label>
     <label class="field"><span>SSH 密码</span><input id="cSshPassword" type="password" autocomplete="off"></label>
+    <label class="field"><span>PowerShell 程序</span><input id="cShell" placeholder="powershell.exe"></label>
+    <label class="field"><span>PowerShell 参数</span><input id="cArgs" placeholder="-NoLogo -NoProfile -ExecutionPolicy Bypass"></label>
+    <label class="field"><span>工作目录（可选）</span><input id="cCwd" placeholder="留空用进程当前目录"></label>
     <label class="field"><span>TERM</span><input id="cTerm" placeholder="xterm-256color"></label>
     <label class="field"><span>Keepalive 秒</span><input id="cKeepalive" type="number" min="0" max="3600" value="3"></label>
     <label class="field"><span>终端列</span><input id="cWidth" type="number" min="40" max="500" value="120"></label>
@@ -1144,7 +1147,7 @@ document.addEventListener('keydown',e=>{
     e.preventDefault();doFindNext();return;
   }
 });
-function chType(c){return c.kind==='ssh'?'SSH':'串口'}
+function chType(c){return c.kind==='ssh'?'SSH':(c.kind==='powershell'?'PowerShell':(c.kind==='telnet'?'Telnet':'串口'))}
 function renderChannels(st){
   const box=$('#channelList'), sel=$('#ch'); if(!box||!st||!st.channels)return;
   box.innerHTML=''; const active=sel?sel.value:LAST_CH;
@@ -1410,34 +1413,55 @@ dashLoad();
     }
     if (page == "channels") {
         return R"JS(
-let CHAN={boards:[],ssh:[]}, EDIT={kind:'serial',old:''}, CHAN_STATUS={};
-const SERIAL_IDS=['cDevice','cBaud','cDataBits','cParity','cStopBits','cFlow','cLineEnding','cEncoding','cUsername','cPassword','cAutoOpen','cTimestamp','cDtr','cRts'];
-const SSH_IDS=['cHost','cPort','cSshUser','cSshPassword','cTerm','cKeepalive','cWidth','cHeight','cTimeout'];
+let CHAN={boards:[],ssh:[],powershell:[],telnet:[]}, EDIT={kind:'serial',old:''}, CHAN_STATUS={};
+const SERIAL_IDS=['cDevice','cBaud','cDataBits','cParity','cStopBits','cFlow','cEncoding','cUsername','cPassword','cAutoOpen','cDtr','cRts','cDiscoverable'];
+const SSH_IDS=['cSshUser','cSshPassword','cTerm','cKeepalive'];
+const NET_IDS=['cHost','cPort','cWidth','cHeight','cTimeout'];
+const PS_IDS=['cShell','cArgs','cCwd'];
+const KIND_LABELS={serial:'串口',ssh:'SSH',powershell:'PowerShell',telnet:'Telnet'};
+const KIND_KEYS={serial:'boards',ssh:'ssh',powershell:'powershell',telnet:'telnet'};
 function chOnline(name){const c=(CHAN_STATUS.channels||[]).find(x=>x.name===name);return c&&(c.state==='ready'||c.state==='online')}
 function showField(el,on){if(!el)return;const box=el.closest('.field')||el.closest('.check-row')||el;box.style.display=on?'':'none'}
 function setVal(id,v){const e=$('#'+id);if(e)e.value=v==null?'':String(v)}
 function setChk(id,v){const e=$('#'+id);if(e)e.checked=!!v}
+function kindLabel(kind){return KIND_LABELS[kind]||'串口'}
 function showKind(kind){
-  $('#cKind').value=kind==='ssh'?'SSH':'串口';
-  $('#chanKindChip').textContent=kind==='ssh'?'SSH':'串口';
-  SERIAL_IDS.forEach(id=>showField($('#'+id),kind!=='ssh'));
-  SSH_IDS.forEach(id=>showField($('#'+id),kind==='ssh'));
-  $('#chanEditorTitle').textContent=(EDIT.old?'编辑 ':'新增 ')+(kind==='ssh'?'SSH 通道':'串口通道');
-  $('#chanEditorSub').textContent=kind==='ssh'?'SSH 出站连接参数；保存后由 UI 线程重载并重连。':'串口设备参数；loop: 设备可用于无硬件验收。';
+  $('#cKind').value=kindLabel(kind);
+  $('#chanKindChip').textContent=kindLabel(kind);
+  const serial=kind==='serial',ssh=kind==='ssh',ps=kind==='powershell',tn=kind==='telnet';
+  SERIAL_IDS.forEach(id=>showField($('#'+id),serial));
+  SSH_IDS.forEach(id=>showField($('#'+id),ssh));
+  NET_IDS.forEach(id=>showField($('#'+id),ssh||tn));
+  PS_IDS.forEach(id=>showField($('#'+id),ps));
+  showField($('#cLineEnding'),serial||ps||tn);
+  showField($('#cTimestamp'),serial||ps||tn);
+  showField($('#cLogEnabled'),true);
+  $('#chanEditorTitle').textContent=(EDIT.old?'编辑 ':'新增 ')+kindLabel(kind)+' 通道';
+  $('#chanEditorSub').textContent=serial?'串口设备参数；loop: 设备可用于无硬件验收。':
+    ssh?'SSH 出站连接参数；保存后由 UI 线程重载并重连。':
+    ps?'本机持久 PowerShell 会话：程序 + 参数 + 可选工作目录。':'Telnet TCP 连接：主机 + 端口 + 最小 IAC 协商。';
 }
-function findChannel(kind,name){const key=kind==='ssh'?'ssh':'boards';return (CHAN[key]||[]).find(x=>x.name===name)}
+function findChannel(kind,name){return (CHAN[KIND_KEYS[kind]]||[]).find(x=>x.name===name)}
 function renderChannelsPage(){
   const box=$('#chanCards');if(!box)return;
-  const all=[...(CHAN.boards||[]).map(c=>({...c,_kind:'serial'})),...(CHAN.ssh||[]).map(c=>({...c,_kind:'ssh'}))];
+  const all=[];
+  ['serial','ssh','powershell','telnet'].forEach(k=>{
+    (CHAN[KIND_KEYS[k]]||[]).forEach(c=>all.push({...c,_kind:k}));
+  });
   $('#chanCount').textContent=all.length+' 个通道';
   $('#chanOnline').textContent=all.filter(c=>chOnline(c.name)).length+' 在线';
-  if(!all.length){box.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-mark">+</div><strong>还没有通道</strong><p>新增一个 loop: 串口或 SSH 通道开始。</p></div>';return}
+  if(!all.length){box.innerHTML='<div class="empty" style="grid-column:1/-1"><div class="empty-mark">+</div><strong>还没有通道</strong><p>新增一个 loop: 串口、SSH、PowerShell 或 Telnet 通道开始。</p></div>';return}
   box.innerHTML='';
   all.forEach(c=>{
     const d=document.createElement('div');d.className='chan-card';
-    const detail=c._kind==='ssh'?(c.username||'')+'@'+(c.host||'')+':'+(c.port||22):(c.serial_device||'')+' · '+(c.baudrate||115200)+' baud';
-    d.innerHTML='<div class="chan-top"><span class="status-dot '+(chOnline(c.name)?'on':'off')+'"></span><span class="chan-name"></span><span class="chip">'+(c._kind==='ssh'?'SSH':'串口')+'</span></div><div class="chan-detail"></div><div class="chan-actions"><button class="btn ghost" data-edit="1" type="button">编辑</button><button class="btn danger" data-del="1" type="button">删除</button></div>';
+    let detail='';
+    if(c._kind==='serial')detail=(c.serial_device||'')+' · '+(c.baudrate||115200)+' baud';
+    else if(c._kind==='ssh')detail=(c.username||'')+'@'+(c.host||'')+':'+(c.port||22);
+    else if(c._kind==='powershell')detail=(c.shell||'powershell.exe')+(c.cwd?' · '+c.cwd:'');
+    else detail=(c.host||'')+':'+(c.port||23);
+    d.innerHTML='<div class="chan-top"><span class="status-dot '+(chOnline(c.name)?'on':'off')+'"></span><span class="chan-name"></span><span class="chip"></span></div><div class="chan-detail"></div><div class="chan-actions"><button class="btn ghost" data-edit="1" type="button">编辑</button><button class="btn danger" data-del="1" type="button">删除</button></div>';
     d.querySelector('.chan-name').textContent=c.name;
+    d.querySelector('.chip').textContent=kindLabel(c._kind);
     d.querySelector('.chan-detail').textContent=detail+' · '+(chOnline(c.name)?'在线':'离线')+(c.auto_open===false?' · 手动打开':'');
     d.querySelector('[data-edit]').onclick=()=>editChannel(c._kind,c.name);
     d.querySelector('[data-del]').onclick=()=>delChannel(c._kind,c.name);
@@ -1447,14 +1471,15 @@ function renderChannelsPage(){
 async function loadChannels(){
   const [a,b]=await Promise.all([api('/api/channels'),api('/status')]);
   if(a.status===401){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>需要 token</strong><p>在右上角填入 web.token 后再读取通道。</p></div>';$('#chanNote').textContent='只读模式：通道列表需要 token。';return}
-  if(!a.j||!a.j.ok){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>读取失败</strong></div>';$('#chanCards p')&&($('#chanCards p').textContent=a.t||('HTTP '+a.status));$('#chanNote').textContent='读取失败';return}
+  if(!a.j||!a.j.ok){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>读取失败</strong></div>';$('#chanNote').textContent='读取失败';return}
   CHAN=a.j;CHAN_STATUS=b.j||{};$('#chanNote').textContent='配置读写需要 token；保存后约 1 秒重载。';renderChannelsPage();
 }
 function blankChannel(kind){
   EDIT={kind,old:''};showKind(kind);
   setVal('cName','');setVal('cDevice','loop:ai');setVal('cBaud',115200);setVal('cDataBits','8');setVal('cParity','N');setVal('cStopBits','10');setVal('cFlow','none');setVal('cLineEnding','none');setVal('cEncoding','utf-8');setVal('cUsername','');setVal('cPassword','');
   setChk('cAutoOpen',true);setChk('cTimestamp',false);setChk('cDtr',true);setChk('cRts',true);
-  setVal('cHost','');setVal('cPort',22);setVal('cSshUser','root');setVal('cSshPassword','');setVal('cTerm','xterm-256color');setVal('cKeepalive',3);setVal('cWidth',120);setVal('cHeight',32);setVal('cTimeout',5000);
+  setVal('cHost','');setVal('cPort',kind==='telnet'?23:22);setVal('cSshUser','root');setVal('cSshPassword','');setVal('cTerm','xterm-256color');setVal('cKeepalive',3);setVal('cWidth',120);setVal('cHeight',32);setVal('cTimeout',5000);
+  setVal('cShell','powershell.exe');setVal('cArgs','-NoLogo -NoProfile -ExecutionPolicy Bypass');setVal('cCwd','');
   setChk('cDiscoverable',false);setChk('cLogEnabled',true);
   $('#chanEditNote').textContent='';$('#chanEditor').hidden=false;$('#chanEditor').scrollIntoView({behavior:'smooth',block:'start'});setTimeout(()=>$('#cName').focus(),80);
 }
@@ -1462,7 +1487,8 @@ function editChannel(kind,name){
   const c=findChannel(kind,name);if(!c)return;EDIT={kind,old:name};showKind(kind);
   setVal('cName',c.name);setVal('cDevice',c.serial_device);setVal('cBaud',c.baudrate);setVal('cDataBits',c.databits||8);setVal('cParity',c.parity||'N');setVal('cStopBits',c.stopbits_x10||10);setVal('cFlow',c.flowcontrol||'none');setVal('cLineEnding',c.line_ending||'none');setVal('cEncoding',c.encoding||'utf-8');setVal('cUsername',c.username);setVal('cPassword',c.password);
   setChk('cAutoOpen',c.auto_open!==false);setChk('cTimestamp',!!c.timestamp);setChk('cDtr',c.dtr!==false);setChk('cRts',c.rts!==false);
-  setVal('cHost',c.host);setVal('cPort',c.port||22);setVal('cSshUser',c.username);setVal('cSshPassword',c.password);setVal('cTerm',c.term||'xterm-256color');setVal('cKeepalive',c.keepalive==null?3:c.keepalive);setVal('cWidth',c.width||120);setVal('cHeight',c.height||32);setVal('cTimeout',c.connect_timeout_ms||5000);
+  setVal('cHost',c.host);setVal('cPort',c.port||(kind==='telnet'?23:22));setVal('cSshUser',c.username);setVal('cSshPassword',c.password);setVal('cTerm',c.term||'xterm-256color');setVal('cKeepalive',c.keepalive==null?3:c.keepalive);setVal('cWidth',c.width||120);setVal('cHeight',c.height||32);setVal('cTimeout',c.connect_timeout_ms||5000);
+  setVal('cShell',c.shell||'powershell.exe');setVal('cArgs',c.args||'-NoLogo -NoProfile -ExecutionPolicy Bypass');setVal('cCwd',c.cwd||'');
   setChk('cDiscoverable',!!c.discoverable);setChk('cLogEnabled',c.log_enabled!==false);
   $('#chanEditNote').textContent='';$('#chanEditor').hidden=false;$('#chanEditor').scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -1471,11 +1497,17 @@ function collectChannel(){
   if(kind==='serial'){
     ch.serial_device=$('#cDevice').value.trim();ch.baudrate=Number($('#cBaud').value||115200);ch.databits=Number($('#cDataBits').value||8);ch.parity=$('#cParity').value;ch.stopbits_x10=Number($('#cStopBits').value||10);ch.flowcontrol=$('#cFlow').value;ch.line_ending=$('#cLineEnding').value;ch.encoding=$('#cEncoding').value.trim();ch.username=$('#cUsername').value.trim();ch.password=$('#cPassword').value;
     ch.auto_open=$('#cAutoOpen').checked;ch.timestamp=$('#cTimestamp').checked;ch.dtr=$('#cDtr').checked;ch.rts=$('#cRts').checked;
-  }else{
+    ch.discoverable=$('#cDiscoverable').checked;
+  }else if(kind==='ssh'){
     ch.host=$('#cHost').value.trim();ch.port=Number($('#cPort').value||22);ch.username=$('#cSshUser').value.trim();ch.password=$('#cSshPassword').value;ch.term=$('#cTerm').value.trim()||'xterm-256color';ch.width=Number($('#cWidth').value||120);ch.height=Number($('#cHeight').value||32);ch.connect_timeout_ms=Number($('#cTimeout').value||5000);ch.keepalive=Number($('#cKeepalive').value||0);
+    ch.discoverable=$('#cDiscoverable').checked;
+  }else if(kind==='powershell'){
+    ch.shell=$('#cShell').value.trim()||'powershell.exe';ch.args=$('#cArgs').value.trim();ch.cwd=$('#cCwd').value.trim();ch.line_ending=$('#cLineEnding').value;ch.timestamp=$('#cTimestamp').checked;
+  }else{
+    ch.host=$('#cHost').value.trim();ch.port=Number($('#cPort').value||23);ch.connect_timeout_ms=Number($('#cTimeout').value||5000);ch.width=Number($('#cWidth').value||120);ch.height=Number($('#cHeight').value||32);ch.line_ending=$('#cLineEnding').value;ch.timestamp=$('#cTimestamp').checked;
   }
-  ch.discoverable=$('#cDiscoverable').checked;ch.log_enabled=$('#cLogEnabled').checked;
-  return {kind:EDIT.kind==='ssh'?'ssh':'serial',old_name:EDIT.old,channel:ch};
+  ch.log_enabled=$('#cLogEnabled').checked;
+  return {kind,old_name:EDIT.old,channel:ch};
 }
 async function saveChannel(){
   const btn=$('#saveChannel'),payload=collectChannel();
@@ -1494,6 +1526,8 @@ async function delChannel(kind,name){
 }
 $('#newSerial').onclick=()=>blankChannel('serial');
 $('#newSsh').onclick=()=>blankChannel('ssh');
+$('#newPowershell').onclick=()=>blankChannel('powershell');
+$('#newTelnet').onclick=()=>blankChannel('telnet');
 $('#loadChannels').onclick=loadChannels;
 $('#saveChannel').onclick=saveChannel;
 $('#cancelChannel').onclick=()=>{$('#chanEditor').hidden=true};

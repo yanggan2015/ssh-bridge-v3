@@ -23,8 +23,8 @@ class AppCore {
 public:
     struct Entry {
         std::string name;
-        std::string kind;        // "serial" / "ssh"
-        std::string detail;      // "COM3 @115200" / "192.168.1.10:22"
+        std::string kind;        // "serial" / "ssh" / "powershell" / "telnet"
+        std::string detail;      // "COM3 @115200" / "192.168.1.10:22" / "powershell.exe"
         std::string state;       // "offline" / "ready" / "idle"
         std::string sig;         // 参数指纹：变了就热应用
         bool        started = false;
@@ -47,11 +47,12 @@ public:
     // 载入配置；返回是否有可用配置文件（没有也按默认值继续）
     bool init(const std::string& project_root);
 
-    // 启动 auto_open 的串口通道与全部 SSH 通道（失败只影响本通道）
+    // 启动 auto_open 的串口通道与全部 SSH/PowerShell/Telnet 通道（失败只影响本通道）
     void start_auto();
     void stop_all();
-    // 串口看门狗：RX/写线程死亡或启动失败后按退避自动重开；手动“断开”后不再重开。
-    void poll_serial_retry();
+    // 通道看门狗：串口/PowerShell 的 RX/写线程死亡或启动失败后按退避自动重开；
+    // 手动“断开”后不再重开。Telnet/SSH 在桥内自行重连。
+    void poll_channel_retry();
 
     // 通道表快照：Web/Agent 线程与 UI 热应用并发时，不能把 entries_ 的引用交出去。
     std::size_t channel_count() const;
@@ -75,6 +76,10 @@ public:
                        std::string* err);
     bool upsert_ssh(const SSHLinkConfig& link, const std::string& old_name,
                     std::string* err);
+    bool upsert_powershell(const PowerShellConfig& cfg, const std::string& old_name,
+                           std::string* err);
+    bool upsert_telnet(const TelnetConfig& cfg, const std::string& old_name,
+                       std::string* err);
     bool delete_channel(const std::string& name, std::string* err);
     // 继电器设备增改删：同样以磁盘最新配置为基准，改名同步按钮引用
     bool upsert_relay(const RelayDeviceConfig& relay, const std::string& old_name,
@@ -84,6 +89,9 @@ public:
     // 配置值快照：调用方拿到的是副本，不再跨线程持有 cfg_ 内部指针。
     bool board_of(const std::string& name, BoardConfig* out) const;
     bool link_of(const std::string& name, SSHLinkConfig* out) const;
+    bool powershell_of(const std::string& name, PowerShellConfig* out) const;
+    bool telnet_of(const std::string& name, TelnetConfig* out) const;
+    std::string kind_of(const std::string& name) const;
     bool is_ssh_name(const std::string& name) const;
     // S8 入站 SSH：用户名=通道名；返回该通道对象与入站密码（空=允许 none）。
     bool resolve_inbound(const std::string& name, std::shared_ptr<IBridge>* bridge,

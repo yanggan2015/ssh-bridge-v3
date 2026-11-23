@@ -24,6 +24,15 @@
 
 namespace sb3 {
 namespace {
+ChannelKind kind_of_entry(AppCore* core, const std::string& name) {
+    const std::string k = core ? core->kind_of(name) : std::string();
+    if (k == "ssh") return ChannelKind::Ssh;
+    if (k == "powershell") return ChannelKind::PowerShell;
+    if (k == "telnet") return ChannelKind::Telnet;
+    return ChannelKind::Serial;
+}
+}  // namespace
+namespace {
 
 const wchar_t kClassName[] = L"SB3_MainWindow";
 const wchar_t kTitle[]     = L"ssh-bridge v3 · 终端工作台";
@@ -108,6 +117,8 @@ constexpr int kIdmChanEdit      = 40042;
 constexpr int kIdmChanDelete    = 40043;
 constexpr int kIdmChanReload    = 40044;
 constexpr int kIdmSftp          = 40045;
+constexpr int kIdmChanNewPowershell = 40055;
+constexpr int kIdmChanNewTelnet     = 40056;
 constexpr int kIdmRelayConfig   = 40050;
 constexpr int kIdmFileService   = 40051;
 constexpr int kIdmBoardButtons  = 40052;
@@ -389,6 +400,8 @@ void Shell::build_menu() {
     HMENU file = CreatePopupMenu();
     AppendMenuW(file, MF_STRING, kIdmChanNewSerial, L"新建串口通道…(&N)\tCtrl+N");
     AppendMenuW(file, MF_STRING, kIdmChanNewSsh, L"新建 SSH 通道…(&S)");
+    AppendMenuW(file, MF_STRING, kIdmChanNewPowershell, L"新建 PowerShell 通道…(&P)");
+    AppendMenuW(file, MF_STRING, kIdmChanNewTelnet, L"新建 Telnet 通道…(&T)");
     AppendMenuW(file, MF_STRING, kIdmChanEdit, L"编辑当前通道…(&E)");
     AppendMenuW(file, MF_STRING, kIdmChanDelete, L"删除当前通道…(&D)");
     AppendMenuW(file, MF_STRING, kIdmChanReload, L"重新加载配置(&R)");
@@ -1548,9 +1561,9 @@ void Shell::show_about() {
     dump_state();
 }
 
-void Shell::show_channel_dialog(const std::string& edit_name, bool ssh) {
+void Shell::show_channel_dialog(const std::string& edit_name, ChannelKind kind) {
     auto self = this;
-    bool ok = dialog_.open(inst_, hwnd_, core_, font_, dpi_, edit_name, ssh,
+    bool ok = dialog_.open(inst_, hwnd_, core_, font_, dpi_, edit_name, kind,
                            [self](const std::string& name, int ms) {
                                self->on_channel_applied(name, ms);
                            });
@@ -1560,7 +1573,10 @@ void Shell::show_channel_dialog(const std::string& edit_name, bool ssh) {
     }
     aibridge::register_channel_dialog(dialog_.hwnd());
     if (edit_name.empty()) {
-        note_status(ssh ? L"新建 SSH 通道：填好保存即生效" : L"新建串口通道：填好保存即生效");
+        const wchar_t* label = kind == ChannelKind::Ssh ? L"SSH" :
+                               kind == ChannelKind::PowerShell ? L"PowerShell" :
+                               kind == ChannelKind::Telnet ? L"Telnet" : L"串口";
+        note_status(L"新建 " + std::wstring(label) + L" 通道：填好保存即生效");
     } else {
         note_status(L"编辑通道：" + widen(edit_name));
     }
@@ -1654,14 +1670,20 @@ void Shell::on_command(int id) {
         break;
     case kIdcBtnNew:
     case kIdmChanNewSerial:
-        show_channel_dialog(std::string(), false);
+        show_channel_dialog(std::string(), ChannelKind::Serial);
         break;
     case kIdmChanNewSsh:
-        show_channel_dialog(std::string(), true);
+        show_channel_dialog(std::string(), ChannelKind::Ssh);
+        break;
+    case kIdmChanNewPowershell:
+        show_channel_dialog(std::string(), ChannelKind::PowerShell);
+        break;
+    case kIdmChanNewTelnet:
+        show_channel_dialog(std::string(), ChannelKind::Telnet);
         break;
     case kIdmChanEdit:
         if (selected_channel().empty()) note_status(L"编辑：未选通道");
-        else show_channel_dialog(selected_channel(), core_->is_ssh_name(selected_channel()));
+        else show_channel_dialog(selected_channel(), kind_of_entry(core_, selected_channel()));
         break;
     case kIdmSftp: {
         std::string ch = selected_channel();
@@ -1696,7 +1718,7 @@ void Shell::on_command(int id) {
         break;
     case kIdmChanDelete:
         if (selected_channel().empty()) note_status(L"删除：未选通道");
-        else show_channel_dialog(selected_channel(), core_->is_ssh_name(selected_channel()));
+        else show_channel_dialog(selected_channel(), kind_of_entry(core_, selected_channel()));
         break;
     case kIdmChanReload: {
         std::uint64_t t0 = util::now_ms();
@@ -1929,6 +1951,8 @@ void Shell::show_tree_context_menu(HTREEITEM item) {
     }
     AppendMenuW(menu, MF_STRING, kIdmChanNewSerial, L"新建串口通道");
     AppendMenuW(menu, MF_STRING, kIdmChanNewSsh, L"新建 SSH 通道");
+    AppendMenuW(menu, MF_STRING, kIdmChanNewPowershell, L"新建 PowerShell 通道");
+    AppendMenuW(menu, MF_STRING, kIdmChanNewTelnet, L"新建 Telnet 通道");
     AppendMenuW(menu, MF_STRING, kIdmChanReload, L"重载配置");
 
     POINT pt{};
@@ -2077,7 +2101,7 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_TIMER:
-        core_->poll_serial_retry();               // 托盘隐藏时也守护串口，避免掉线后永不恢复
+        core_->poll_channel_retry();              // 托盘隐藏时也守护串口/PowerShell，避免掉线后永不恢复
         if (!IsWindowVisible(hwnd_)) return 0;   // 隐藏时不刷状态、不拉数据
         poll_update_check();
         view_.pull_visible();

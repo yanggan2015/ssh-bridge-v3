@@ -87,6 +87,36 @@ struct SSHLinkConfig {
     std::vector<QuickCommandConfig> quick_commands;  // S13 底部快捷指令
 };
 
+struct PowerShellConfig {
+    std::string name;
+    std::string shell = "powershell.exe";   // 绝对路径或 PATH 中的命令
+    std::string args = "-NoLogo -NoProfile -ExecutionPolicy Bypass";
+    std::string cwd;                        // 空 = 进程当前目录
+    std::string line_ending = "cr";         // none / cr / lf / crlf
+    std::uint32_t buffer_size = 0;          // 0 = 用 default.buffer_size
+    bool          log_enabled = true;
+    std::string   log_dir;
+    bool          timestamp = false;
+    std::vector<BoardActionConfig> buttons;
+    std::vector<QuickCommandConfig> quick_commands;
+};
+
+struct TelnetConfig {
+    std::string name;
+    std::string host;
+    int         port = 23;
+    int         connect_timeout_ms = 5000;
+    std::string line_ending = "crlf";
+    int         width = 120;
+    int         height = 32;
+    std::uint32_t buffer_size = 0;          // 0 = 用 default.buffer_size
+    bool          log_enabled = true;
+    std::string   log_dir;
+    bool          timestamp = false;
+    std::vector<BoardActionConfig> buttons;
+    std::vector<QuickCommandConfig> quick_commands;
+};
+
 struct InboundConfig {          // S8
     bool enabled = false;
     int  port    = 2222;
@@ -181,6 +211,8 @@ struct AppConfig {
     DefaultConfig              def;
     std::vector<BoardConfig>   boards;
     std::vector<SSHLinkConfig> links;
+    std::vector<PowerShellConfig> powershell;
+    std::vector<TelnetConfig>  telnet;
     InboundConfig              inbound;
     WebConfig                  web;
     AgentConfig                agent;

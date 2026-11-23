@@ -29,7 +29,7 @@ void add_combo_items(HWND combo, const wchar_t* const* items, int n, int sel) {
     SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(sel), 0);
 }
 
-const wchar_t* kKinds[]      = {L"串口", L"SSH"};
+const wchar_t* kKinds[]      = {L"串口", L"SSH", L"PowerShell", L"Telnet"};
 const wchar_t* kDatabits[]   = {L"5", L"6", L"7", L"8"};
 const wchar_t* kParities[]   = {L"无 (N)", L"偶 (E)", L"奇 (O)", L"标记 (M)", L"空 (S)"};
 const wchar_t* kStopbits[]   = {L"1", L"1.5", L"2"};
@@ -77,7 +77,7 @@ void fill_port_combo(HWND combo) {
 }  // namespace
 
 bool ChannelDialog::open(HINSTANCE inst, HWND parent, AppCore* core, HFONT font, int dpi,
-                         const std::string& edit_name, bool force_ssh, AppliedFn on_applied) {
+                         const std::string& edit_name, ChannelKind kind, AppliedFn on_applied) {
     if (is_open()) {
         ShowWindow(hwnd_, SW_SHOW);
         SetForegroundWindow(hwnd_);
@@ -129,7 +129,7 @@ bool ChannelDialog::open(HINSTANCE inst, HWND parent, AppCore* core, HFONT font,
     }
     if (!hwnd_) return false;
 
-    build(force_ssh);
+    build(kind);
     ShowWindow(hwnd_, SW_SHOW);
     layout();
     SetForegroundWindow(hwnd_);
@@ -141,7 +141,7 @@ void ChannelDialog::close() {
     hwnd_ = nullptr;
 }
 
-void ChannelDialog::build(bool force_ssh) {
+void ChannelDialog::build(ChannelKind initial_kind) {
     auto label = [&](const wchar_t* text, int id) {
         HWND h = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT,
                                  0, 0, 0, 0, hwnd_,
@@ -196,11 +196,12 @@ void ChannelDialog::build(bool force_ssh) {
 
     label(L"类型", chan_dlg::kIdKindLabel);
     HWND kind = combo(chan_dlg::kIdKind);
-    add_combo_items(kind, kKinds, 2, force_ssh ? 1 : 0);
+    add_combo_items(kind, kKinds, 4, static_cast<int>(initial_kind));
     if (editing_) EnableWindow(kind, FALSE);   // 改类型 = 删除后新建，避免身份混淆
 
     label(L"串口参数", chan_dlg::kIdSerialCap);
     label(L"SSH 参数", chan_dlg::kIdSshCap);
+    label(L"PowerShell 参数", chan_dlg::kIdPsCap);
 
     label(L"设备", chan_dlg::kIdDeviceLabel);
     HWND devc = combo_edit(L"", chan_dlg::kIdDevice, serial_port_items());
@@ -227,7 +228,7 @@ void ChannelDialog::build(bool force_ssh) {
     add_combo_items(flow, kFlows, 3, 0);
     label(L"行尾", chan_dlg::kIdLineLabel);
     HWND le = combo(chan_dlg::kIdLineEnd);
-    add_combo_items(le, kLineEnds, 4, 0);
+    add_combo_items(le, kLineEnds, 4, initial_kind == ChannelKind::PowerShell ? 2 : 0);
     label(L"编码", chan_dlg::kIdEncLabel);
     HWND enc = combo(chan_dlg::kIdEncoding);
     add_combo_items(enc, kEncodings, 2, 0);
@@ -246,7 +247,8 @@ void ChannelDialog::build(bool force_ssh) {
     label(L"主机", chan_dlg::kIdHostLabel);
     edit(L"", chan_dlg::kIdHost, 0);
     label(L"端口", chan_dlg::kIdPortLabel);
-    combo_edit(L"22", chan_dlg::kIdPort, number_items({22, 2022, 2222, 8022, 52222}));
+    combo_edit(initial_kind == ChannelKind::Telnet ? L"23" : L"22", chan_dlg::kIdPort,
+               number_items({22, 23, 2022, 2222, 8022, 52222}));
     label(L"用户", chan_dlg::kIdUserLabel);
     edit(L"root", chan_dlg::kIdUser, 0);
     label(L"密码", chan_dlg::kIdPassLabel);
@@ -263,6 +265,13 @@ void ChannelDialog::build(bool force_ssh) {
     label(L"保活(s)", chan_dlg::kIdKeepLabel);
     combo_edit(L"3", chan_dlg::kIdKeepalive, number_items({0, 3, 5, 10, 30}));
 
+    label(L"程序", chan_dlg::kIdShellLabel);
+    edit(L"powershell.exe", chan_dlg::kIdShell, 0);
+    label(L"参数", chan_dlg::kIdArgsLabel);
+    edit(L"-NoLogo -NoProfile -ExecutionPolicy Bypass", chan_dlg::kIdArgs, 0);
+    label(L"工作目录", chan_dlg::kIdCwdLabel);
+    edit(L"", chan_dlg::kIdCwd, 0);
+
     label(L"", chan_dlg::kIdHint);
     button(L"删除", chan_dlg::kIdDelete, BS_PUSHBUTTON);
     button(L"取消", chan_dlg::kIdCancel, BS_PUSHBUTTON);
@@ -277,16 +286,25 @@ void ChannelDialog::build(bool force_ssh) {
                                    WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, hwnd_,
                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(chan_dlg::kIdSshBox)),
                                    inst_, nullptr);
+    HWND ps_box = CreateWindowExW(0, L"BUTTON", L"PowerShell 参数",
+                                  WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, hwnd_,
+                                  reinterpret_cast<HMENU>(static_cast<UINT_PTR>(chan_dlg::kIdPsBox)),
+                                  inst_, nullptr);
     SendMessageW(serial_box, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     SendMessageW(ssh_box,    WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    SendMessageW(ps_box,     WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     HWND serial_cap = GetDlgItem(hwnd_, chan_dlg::kIdSerialCap);
     HWND ssh_cap    = GetDlgItem(hwnd_, chan_dlg::kIdSshCap);
+    HWND ps_cap     = GetDlgItem(hwnd_, chan_dlg::kIdPsCap);
     SetWindowTextW(serial_cap, L"串口参数");
     SetWindowTextW(ssh_cap,    L"SSH 参数");
+    SetWindowTextW(ps_cap,     L"PowerShell 参数");
     ShowWindow(serial_box, SW_HIDE);
     ShowWindow(ssh_box, SW_HIDE);
+    ShowWindow(ps_box, SW_HIDE);
     ShowWindow(serial_cap, SW_HIDE);
     ShowWindow(ssh_cap, SW_HIDE);
+    ShowWindow(ps_cap, SW_HIDE);
 
     if (editing_) load_from_config();
 
@@ -318,14 +336,57 @@ void ChannelDialog::layout() {
     int top = pad + row_h + pad;
     int box_h = MulDiv(162, dpi_, 96);
     int bw = w - pad * 2;
-    bool ssh = is_ssh();
+    const ChannelKind k = kind();
+    const bool ssh = k == ChannelKind::Ssh;
+    const bool ps = k == ChannelKind::PowerShell;
+    const bool tn = k == ChannelKind::Telnet;
 
-    mv(ssh ? chan_dlg::kIdSshBox : chan_dlg::kIdSerialBox, pad, top, bw, box_h);
+    int box_id = (ssh || tn) ? chan_dlg::kIdSshBox
+                             : (ps ? chan_dlg::kIdPsBox : chan_dlg::kIdSerialBox);
+    mv(box_id, pad, top, bw, box_h);
     int ix = pad + MulDiv(10, dpi_, 96);
     int iw = bw - MulDiv(20, dpi_, 96);
     int y = top + MulDiv(24, dpi_, 96);
 
-    if (ssh) {
+    if (ps) {
+        mv(chan_dlg::kIdShellLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(64, dpi_, 96), row_h);
+        mv(chan_dlg::kIdShell, ix + MulDiv(68, dpi_, 96), y,
+           iw - MulDiv(68, dpi_, 96), row_h);
+        y += row_h + gap;
+        mv(chan_dlg::kIdArgsLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(40, dpi_, 96), row_h);
+        mv(chan_dlg::kIdArgs, ix + MulDiv(44, dpi_, 96), y,
+           iw - MulDiv(44, dpi_, 96), row_h);
+        y += row_h + gap;
+        mv(chan_dlg::kIdCwdLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(64, dpi_, 96), row_h);
+        mv(chan_dlg::kIdCwd, ix + MulDiv(68, dpi_, 96), y,
+           iw - MulDiv(68, dpi_, 96), row_h);
+        y += row_h + gap;
+        mv(chan_dlg::kIdLineLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(36, dpi_, 96), row_h);
+        mv(chan_dlg::kIdLineEnd, ix + MulDiv(40, dpi_, 96), y, MulDiv(72, dpi_, 96), row_h);
+        mv(chan_dlg::kIdLog, ix + MulDiv(160, dpi_, 96), y, MulDiv(80, dpi_, 96), row_h);
+    } else if (tn) {
+        mv(chan_dlg::kIdHostLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(40, dpi_, 96), row_h);
+        mv(chan_dlg::kIdHost, ix + MulDiv(44, dpi_, 96), y,
+           iw - MulDiv(44, dpi_, 96) - MulDiv(150, dpi_, 96), row_h);
+        mv(chan_dlg::kIdPortLabel, ix + iw - MulDiv(144, dpi_, 96), y + MulDiv(4, dpi_, 96),
+           MulDiv(36, dpi_, 96), row_h);
+        mv(chan_dlg::kIdPort, ix + iw - MulDiv(102, dpi_, 96), y, MulDiv(102, dpi_, 96), row_h);
+
+        y += row_h + gap;
+        mv(chan_dlg::kIdWidthLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(24, dpi_, 96), row_h);
+        mv(chan_dlg::kIdWidth, ix + MulDiv(28, dpi_, 96), y, MulDiv(52, dpi_, 96), row_h);
+        mv(chan_dlg::kIdHeightLabel, ix + MulDiv(88, dpi_, 96), y + MulDiv(4, dpi_, 96),
+           MulDiv(24, dpi_, 96), row_h);
+        mv(chan_dlg::kIdHeight, ix + MulDiv(114, dpi_, 96), y, MulDiv(52, dpi_, 96), row_h);
+        mv(chan_dlg::kIdTimeoutLabel, ix + MulDiv(174, dpi_, 96), y + MulDiv(4, dpi_, 96),
+           MulDiv(60, dpi_, 96), row_h);
+        mv(chan_dlg::kIdTimeout, ix + MulDiv(238, dpi_, 96), y, MulDiv(64, dpi_, 96), row_h);
+
+        y += row_h + gap;
+        mv(chan_dlg::kIdLineLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(36, dpi_, 96), row_h);
+        mv(chan_dlg::kIdLineEnd, ix + MulDiv(40, dpi_, 96), y, MulDiv(72, dpi_, 96), row_h);
+        mv(chan_dlg::kIdLog, ix + MulDiv(160, dpi_, 96), y, MulDiv(80, dpi_, 96), row_h);
+    } else if (ssh) {
         mv(chan_dlg::kIdHostLabel, ix, y + MulDiv(4, dpi_, 96), MulDiv(40, dpi_, 96), row_h);
         mv(chan_dlg::kIdHost, ix + MulDiv(44, dpi_, 96), y,
            iw - MulDiv(44, dpi_, 96) - MulDiv(150, dpi_, 96), row_h);
@@ -405,49 +466,99 @@ void ChannelDialog::layout() {
 }
 
 void ChannelDialog::apply_kind_visibility() {
-    bool ssh = is_ssh();
-    struct Pair { int ctl; bool serial_only; };
-    const Pair set[] = {
-        {chan_dlg::kIdDevice, true}, {chan_dlg::kIdBaud, true}, {chan_dlg::kIdDatabits, true},
-        {chan_dlg::kIdParity, true}, {chan_dlg::kIdStopbits, true}, {chan_dlg::kIdFlow, true},
-        {chan_dlg::kIdLineEnd, true}, {chan_dlg::kIdEncoding, true}, {chan_dlg::kIdAutoOpen, true},
-        {chan_dlg::kIdDtr, true}, {chan_dlg::kIdRts, true}, {chan_dlg::kIdTest, false},
-        {chan_dlg::kIdHost, false}, {chan_dlg::kIdPort, false}, {chan_dlg::kIdUser, false},
-        {chan_dlg::kIdPassword, false}, {chan_dlg::kIdTerm, false}, {chan_dlg::kIdTimeout, false},
-        {chan_dlg::kIdWidth, false}, {chan_dlg::kIdHeight, false}, {chan_dlg::kIdKeepalive, false},
+    const ChannelKind k = kind();
+    const bool ssh = k == ChannelKind::Ssh;
+    const bool ps = k == ChannelKind::PowerShell;
+    const bool tn = k == ChannelKind::Telnet;
+    const bool serial = k == ChannelKind::Serial;
+
+    auto show = [&](int id, bool on) {
+        if (HWND h = GetDlgItem(hwnd_, id)) ShowWindow(h, on ? SW_SHOWNA : SW_HIDE);
     };
-    for (const Pair& p : set) {
-        HWND h = GetDlgItem(hwnd_, p.ctl);
-        if (!h) continue;
-        bool show = p.serial_only ? !ssh : ssh;
-        if (p.ctl == chan_dlg::kIdTest) show = true;
-        ShowWindow(h, show ? SW_SHOWNA : SW_HIDE);
+    // 字段控件
+    const int serial_ctl[] = {chan_dlg::kIdDevice, chan_dlg::kIdBaud, chan_dlg::kIdDatabits,
+                              chan_dlg::kIdParity, chan_dlg::kIdStopbits, chan_dlg::kIdFlow,
+                              chan_dlg::kIdEncoding, chan_dlg::kIdAutoOpen, chan_dlg::kIdDtr,
+                              chan_dlg::kIdRts, chan_dlg::kIdRefresh};
+    const int ssh_ctl[] = {chan_dlg::kIdUser, chan_dlg::kIdPassword, chan_dlg::kIdTerm,
+                           chan_dlg::kIdKeepalive};
+    const int net_ctl[] = {chan_dlg::kIdHost, chan_dlg::kIdPort, chan_dlg::kIdTimeout,
+                           chan_dlg::kIdWidth, chan_dlg::kIdHeight};
+    const int ps_ctl[] = {chan_dlg::kIdShell, chan_dlg::kIdArgs, chan_dlg::kIdCwd};
+    for (int id : serial_ctl) show(id, serial);
+    for (int id : ssh_ctl) show(id, ssh);
+    for (int id : net_ctl) show(id, ssh || tn);
+    for (int id : ps_ctl) show(id, ps);
+    show(chan_dlg::kIdLineEnd, serial || ps || tn);
+    show(chan_dlg::kIdLog, true);
+    show(chan_dlg::kIdTest, serial || ssh || tn);
+
+    // label
+    const int serial_labels[] = {chan_dlg::kIdDeviceLabel, chan_dlg::kIdBaudLabel,
+                                 chan_dlg::kIdDataLabel, chan_dlg::kIdParityLabel,
+                                 chan_dlg::kIdStopLabel, chan_dlg::kIdFlowLabel,
+                                 chan_dlg::kIdEncLabel};
+    const int ssh_labels[] = {chan_dlg::kIdUserLabel, chan_dlg::kIdPassLabel,
+                              chan_dlg::kIdTermLabel, chan_dlg::kIdKeepLabel};
+    const int net_labels[] = {chan_dlg::kIdHostLabel, chan_dlg::kIdPortLabel,
+                              chan_dlg::kIdTimeoutLabel, chan_dlg::kIdWidthLabel,
+                              chan_dlg::kIdHeightLabel};
+    const int ps_labels[] = {chan_dlg::kIdShellLabel, chan_dlg::kIdArgsLabel,
+                             chan_dlg::kIdCwdLabel};
+    for (int id : serial_labels) show(id, serial);
+    for (int id : ssh_labels) show(id, ssh);
+    for (int id : net_labels) show(id, ssh || tn);
+    for (int id : ps_labels) show(id, ps);
+    show(chan_dlg::kIdLineLabel, serial || ps || tn);
+
+    // 分组框
+    show(chan_dlg::kIdSerialBox, serial);
+    show(chan_dlg::kIdSshBox, ssh || tn);
+    show(chan_dlg::kIdPsBox, ps);
+    if (HWND h = GetDlgItem(hwnd_, chan_dlg::kIdSshBox)) {
+        SetWindowTextW(h, tn ? L"Telnet 参数" : L"SSH 参数");
     }
-    // 串口专用 label / 分组框，成对显示
-    const int serial_labels[] = {3102, 3104, 3105, 3106, 3116, 3117, 3118, 3119, 3103};
-    for (int id : serial_labels) {
-        if (HWND h = GetDlgItem(hwnd_, id)) ShowWindow(h, ssh ? SW_HIDE : SW_SHOWNA);
-    }
-    const int ssh_labels[] = {3107, 3108, 3109, 3110, 3111, 3112, 3113, 3114, 3115};
-    for (int id : ssh_labels) {
-        if (HWND h = GetDlgItem(hwnd_, id)) ShowWindow(h, ssh ? SW_SHOWNA : SW_HIDE);
-    }
-    if (HWND h = GetDlgItem(hwnd_, chan_dlg::kIdSerialCap)) ShowWindow(h, SW_HIDE);
-    if (HWND h = GetDlgItem(hwnd_, chan_dlg::kIdSshCap))    ShowWindow(h, SW_HIDE);
-    ShowWindow(GetDlgItem(hwnd_, chan_dlg::kIdSerialBox), ssh ? SW_HIDE : SW_SHOWNA);
-    ShowWindow(GetDlgItem(hwnd_, chan_dlg::kIdSshBox),    ssh ? SW_SHOWNA : SW_HIDE);
-    ShowWindow(GetDlgItem(hwnd_, chan_dlg::kIdLog), SW_SHOWNA);   // 两种类型都记录日志
+    show(chan_dlg::kIdSerialCap, false);
+    show(chan_dlg::kIdSshCap, false);
+    show(chan_dlg::kIdPsCap, false);
 }
 
-bool ChannelDialog::is_ssh() const {
+ChannelKind ChannelDialog::kind() const {
     HWND kind = GetDlgItem(hwnd_, chan_dlg::kIdKind);
-    return kind && SendMessageW(kind, CB_GETCURSEL, 0, 0) == 1;
+    int sel = kind ? static_cast<int>(SendMessageW(kind, CB_GETCURSEL, 0, 0)) : 0;
+    if (sel < 0 || sel > 3) sel = 0;
+    return static_cast<ChannelKind>(sel);
 }
 
 void ChannelDialog::load_from_config() {
     if (!core_) return;
     set_text(chan_dlg::kIdName, widen(edit_name_));
-    if (SSHLinkConfig s; core_->link_of(edit_name_, &s)) {
+    const std::string kd = core_->kind_of(edit_name_);
+    int kind_idx = kd == "ssh" ? 1 : (kd == "powershell" ? 2 : (kd == "telnet" ? 3 : 0));
+    SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdKind), CB_SETCURSEL,
+                 static_cast<WPARAM>(kind_idx), 0);
+    auto set_line_end = [&](const std::string& le) {
+        int lidx = le == "lf" ? 1 : (le == "cr" ? 2 : (le == "none" ? 3 : 0));
+        SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLineEnd), CB_SETCURSEL,
+                     static_cast<WPARAM>(lidx), 0);
+    };
+    if (PowerShellConfig p; core_->powershell_of(edit_name_, &p)) {
+        set_text(chan_dlg::kIdShell, widen(p.shell));
+        set_text(chan_dlg::kIdArgs, widen(p.args));
+        set_text(chan_dlg::kIdCwd, widen(p.cwd));
+        set_line_end(p.line_ending);
+        SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLog), BM_SETCHECK,
+                     p.log_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    } else if (TelnetConfig t; core_->telnet_of(edit_name_, &t)) {
+        set_text(chan_dlg::kIdHost, widen(t.host));
+        set_text(chan_dlg::kIdPort, std::to_wstring(t.port));
+        set_text(chan_dlg::kIdTimeout, std::to_wstring(t.connect_timeout_ms));
+        set_text(chan_dlg::kIdWidth, std::to_wstring(t.width));
+        set_text(chan_dlg::kIdHeight, std::to_wstring(t.height));
+        set_line_end(t.line_ending);
+        SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLog), BM_SETCHECK,
+                     t.log_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    } else if (SSHLinkConfig s; core_->link_of(edit_name_, &s)) {
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdKind), CB_SETCURSEL, 1, 0);
         set_text(chan_dlg::kIdHost, widen(s.host));
         set_text(chan_dlg::kIdPort, std::to_wstring(s.port));
@@ -494,6 +605,12 @@ void ChannelDialog::load_from_config() {
 }
 
 void ChannelDialog::on_kind_change() {
+    const ChannelKind k = kind();
+    if (k == ChannelKind::Telnet && text_of(chan_dlg::kIdPort) == L"22") {
+        set_text(chan_dlg::kIdPort, L"23");
+    } else if (k == ChannelKind::Ssh && text_of(chan_dlg::kIdPort) == L"23") {
+        set_text(chan_dlg::kIdPort, L"22");
+    }
     apply_kind_visibility();
     layout();
     InvalidateRect(hwnd_, nullptr, TRUE);
@@ -575,6 +692,37 @@ SSHLinkConfig ChannelDialog::collect_ssh() const {
     return s;
 }
 
+PowerShellConfig ChannelDialog::collect_powershell() const {
+    PowerShellConfig p;
+    p.name = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdName)));
+    p.shell = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdShell)));
+    if (p.shell.empty()) p.shell = "powershell.exe";
+    p.args = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdArgs)));
+    p.cwd = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdCwd)));
+    int lidx = static_cast<int>(SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLineEnd),
+                                             CB_GETCURSEL, 0, 0));
+    p.line_ending = lidx == 1 ? "lf" : (lidx == 2 ? "cr" : (lidx == 3 ? "none" : "crlf"));
+    p.log_enabled = SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLog), BM_GETCHECK, 0, 0) == BST_CHECKED;
+    p.timestamp = false;
+    return p;
+}
+
+TelnetConfig ChannelDialog::collect_telnet() const {
+    TelnetConfig t;
+    t.name = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdName)));
+    t.host = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdHost)));
+    t.port = number_of(chan_dlg::kIdPort, 23);
+    t.connect_timeout_ms = number_of(chan_dlg::kIdTimeout, 5000);
+    t.width = number_of(chan_dlg::kIdWidth, 120);
+    t.height = number_of(chan_dlg::kIdHeight, 32);
+    int lidx = static_cast<int>(SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLineEnd),
+                                             CB_GETCURSEL, 0, 0));
+    t.line_ending = lidx == 1 ? "lf" : (lidx == 2 ? "cr" : (lidx == 3 ? "none" : "crlf"));
+    t.log_enabled = SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLog), BM_GETCHECK, 0, 0) == BST_CHECKED;
+    t.timestamp = false;
+    return t;
+}
+
 bool ChannelDialog::validate(std::wstring* err) const {
     std::wstring name = text_of(chan_dlg::kIdName);
     std::string name_u8 = util::trim(term::utf16_to_utf8(name));
@@ -599,6 +747,23 @@ bool ChannelDialog::validate(std::wstring* err) const {
         if (w < 20 || w > 500 || h < 10 || h > 300) { *err = L"终端尺寸超出范围（列 20–500 / 行 10–300）"; return false; }
         int ka = number_of(chan_dlg::kIdKeepalive, -1);
         if (ka < 0 || ka > 600) { *err = L"保活必须在 0–600 s"; return false; }
+    } else if (is_powershell()) {
+        std::string shell = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdShell)));
+        if (shell.empty()) { *err = L"PowerShell 程序不能为空"; return false; }
+        std::string cwd = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdCwd)));
+        if (!cwd.empty() && GetFileAttributesW(widen(cwd).c_str()) == INVALID_FILE_ATTRIBUTES) {
+            *err = L"工作目录不存在"; return false;
+        }
+    } else if (is_telnet()) {
+        std::string host = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdHost)));
+        if (host.empty()) { *err = L"主机不能为空"; return false; }
+        int port = number_of(chan_dlg::kIdPort, 0);
+        if (port < 1 || port > 65535) { *err = L"端口必须在 1–65535"; return false; }
+        int to = number_of(chan_dlg::kIdTimeout, 0);
+        if (to < 500 || to > 60000) { *err = L"超时必须在 500–60000 ms"; return false; }
+        int w = number_of(chan_dlg::kIdWidth, 0);
+        int h = number_of(chan_dlg::kIdHeight, 0);
+        if (w < 20 || w > 500 || h < 10 || h > 300) { *err = L"终端尺寸超出范围（列 20–500 / 行 10–300）"; return false; }
     } else {
         std::string dev = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdDevice)));
         if (dev.empty()) { *err = L"串口设备不能为空（如 COM5 或 loop:ai）"; return false; }
@@ -622,6 +787,14 @@ void ChannelDialog::save() {
         SSHLinkConfig s = collect_ssh();
         name = s.name;
         ok = core_->upsert_ssh(s, editing_ ? edit_name_ : std::string(), &err_u8);
+    } else if (is_powershell()) {
+        PowerShellConfig p = collect_powershell();
+        name = p.name;
+        ok = core_->upsert_powershell(p, editing_ ? edit_name_ : std::string(), &err_u8);
+    } else if (is_telnet()) {
+        TelnetConfig t = collect_telnet();
+        name = t.name;
+        ok = core_->upsert_telnet(t, editing_ ? edit_name_ : std::string(), &err_u8);
     } else {
         BoardConfig b = collect_board();
         name = b.name;
@@ -640,9 +813,26 @@ void ChannelDialog::save() {
 }
 
 void ChannelDialog::test_open() {
-    if (is_ssh()) {
+    if (is_powershell()) {
+        std::wstring shell = widen(util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdShell))));
+        if (shell.empty()) {
+            set_hint(L"先填 PowerShell 程序", false);
+            return;
+        }
+        if (shell.find(L'\\') != std::wstring::npos || shell.find(L'/') != std::wstring::npos) {
+            if (GetFileAttributesW(shell.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                set_hint(L"程序不存在：" + shell, false);
+                return;
+            }
+            set_hint(L"程序存在，可直接打开持久 PowerShell 会话", true);
+            return;
+        }
+        set_hint(L"按 PATH 解析程序：" + shell + L"（保存后打开时校验）", true);
+        return;
+    }
+    if (is_ssh() || is_telnet()) {
         std::string host = util::trim(term::utf16_to_utf8(text_of(chan_dlg::kIdHost)));
-        int port = number_of(chan_dlg::kIdPort, 0);
+        int port = number_of(chan_dlg::kIdPort, is_telnet() ? 23 : 22);
         if (host.empty() || port < 1 || port > 65535) {
             set_hint(L"先填合法的主机与端口", false);
             return;

@@ -60,6 +60,8 @@ SOURCES := \
   src/core/ssh/ssh_session.cpp \
   src/core/ssh/sftp_client.cpp \
   src/core/bridge/ssh/ssh_bridge.cpp \
+  src/core/bridge/powershell/powershell_bridge.cpp \
+  src/core/bridge/telnet/telnet_bridge.cpp \
   src/core/util/util.cpp \
   src/core/channel_core.cpp \
   src/core/logbuf/logbuf.cpp \

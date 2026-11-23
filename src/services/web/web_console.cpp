@@ -170,7 +170,7 @@ bool valid_id(const std::string& id) {
 
 cJSON* channel_object(cJSON* root, const std::string& name) {
     if (!cJSON_IsObject(root)) return nullptr;
-    for (const char* key : {"boards", "ssh"}) {
+    for (const char* key : {"boards", "ssh", "powershell", "telnet"}) {
         cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
         if (!cJSON_IsArray(arr)) continue;
         cJSON* it = nullptr;
@@ -2464,9 +2464,44 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             s.log_enabled = json_bool(chobj, "log_enabled", s.log_enabled);
             s.discoverable = json_bool(chobj, "discoverable", s.discoverable);
             saved = core->upsert_ssh(s, old_name, &err);
+        } else if (kind == "powershell") {
+            PowerShellConfig old;
+            bool has_old = core->powershell_of(old_name.empty() ? nm : old_name, &old);
+            PowerShellConfig p = has_old ? old : PowerShellConfig{};
+            p.name = nm;
+            std::string shell = util::trim(json_str(chobj, "shell"));
+            if (shell.empty() && has_old) shell = old.shell;
+            p.shell = shell.empty() ? "powershell.exe" : shell;
+            p.args = json_str(chobj, "args").empty() ? p.args : json_str(chobj, "args");
+            p.cwd = json_str(chobj, "cwd").empty() ? p.cwd : json_str(chobj, "cwd");
+            p.line_ending = json_str(chobj, "line_ending").empty() ? p.line_ending : json_str(chobj, "line_ending");
+            p.log_enabled = json_bool(chobj, "log_enabled", p.log_enabled);
+            p.timestamp = json_bool(chobj, "timestamp", p.timestamp);
+            saved = core->upsert_powershell(p, old_name, &err);
+        } else if (kind == "telnet") {
+            TelnetConfig old;
+            bool has_old = core->telnet_of(old_name.empty() ? nm : old_name, &old);
+            TelnetConfig t = has_old ? old : TelnetConfig{};
+            t.name = nm;
+            std::string host = util::trim(json_str(chobj, "host"));
+            if (host.empty() && has_old) host = old.host;
+            if (host.empty()) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "host required", rid));
+                return;
+            }
+            t.host = host;
+            t.port = json_int(chobj, "port", t.port);
+            t.connect_timeout_ms = json_int(chobj, "connect_timeout_ms", t.connect_timeout_ms);
+            t.width = json_int(chobj, "width", t.width);
+            t.height = json_int(chobj, "height", t.height);
+            t.line_ending = json_str(chobj, "line_ending").empty() ? t.line_ending : json_str(chobj, "line_ending");
+            t.log_enabled = json_bool(chobj, "log_enabled", t.log_enabled);
+            t.timestamp = json_bool(chobj, "timestamp", t.timestamp);
+            saved = core->upsert_telnet(t, old_name, &err);
         } else {
             cJSON_Delete(body);
-            reply_json_text(c, 400, agent::error_json("invalid_argument", "kind must be serial or ssh", rid));
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "kind must be serial/ssh/powershell/telnet", rid));
             return;
         }
         cJSON_Delete(body);
@@ -2749,12 +2784,13 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         if (method_is(hm, "GET")) {
             ensure_channel_array(root, "boards");
             ensure_channel_array(root, "ssh");
+            ensure_channel_array(root, "powershell");
+            ensure_channel_array(root, "telnet");
             cJSON* out = cJSON_CreateObject();
             cJSON_AddBoolToObject(out, "ok", true);
-            cJSON_AddItemToObject(out, "boards",
-                                  cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(root, "boards"), 1));
-            cJSON_AddItemToObject(out, "ssh",
-                                  cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(root, "ssh"), 1));
+            for (const char* key : {"boards", "ssh", "powershell", "telnet"})
+                cJSON_AddItemToObject(out, key,
+                                      cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(root, key), 1));
             cJSON_Delete(root);
             reply_json(c, 200, out);
             return;
@@ -2766,7 +2802,8 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         std::string old_name = body ? util::trim(json_str(body, "old_name")) : std::string();
         std::string name = cJSON_IsObject(ch) ? util::trim(json_str(ch, "name")) : std::string();
         std::string err;
-        if (!cJSON_IsObject(ch) || (kind != "serial" && kind != "ssh") ||
+        if (!cJSON_IsObject(ch) ||
+            (kind != "serial" && kind != "ssh" && kind != "powershell" && kind != "telnet") ||
             !valid_channel_name(name, &err)) {
             cJSON_Delete(body);
             cJSON* e = cJSON_CreateObject();
@@ -2775,15 +2812,23 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json(c, 400, e);
             return;
         }
+        auto channel_key = [](const std::string& k) -> const char* {
+            if (k == "serial") return "boards";
+            if (k == "ssh") return "ssh";
+            if (k == "powershell") return "powershell";
+            return "telnet";
+        };
         // 以磁盘最新配置为基准做局部修改，避免与按钮/继电器/并发通道写入互相覆盖。
         bool saved = core && core->patch_config_json([&](cJSON* root) -> bool {
             ensure_channel_array(root, "boards");
             ensure_channel_array(root, "ssh");
+            ensure_channel_array(root, "powershell");
+            ensure_channel_array(root, "telnet");
             if (channel_object(root, name) && name != old_name) {
                 err = "通道名已存在";
                 return false;
             }
-            cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
+            cJSON* arr = ensure_channel_array(root, channel_key(kind));
             int idx = -1;
             cJSON* target = find_named_in_array(arr, old_name.empty() ? name : old_name, &idx);
             if (!target && !old_name.empty()) {
@@ -2839,6 +2884,43 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 else if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "password")) &&
                          !util::trim(json_str(ch, "password")).empty())
                     copy_str_field(target, ch, "password");
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "log_enabled")))
+                    copy_bool_field(target, ch, "log_enabled", true);
+            } else if (kind == "powershell") {
+                std::string shell = util::trim(json_str(ch, "shell"));
+                if (shell.empty() && !created) shell = util::trim(json_str(target, "shell"));
+                if (shell.empty()) shell = "powershell.exe";
+                copy_str_field(target, ch, "shell");
+                if (shell != util::trim(json_str(target, "shell")))
+                    cJSON_AddStringToObject(target, "shell", shell.c_str());
+                copy_str_field(target, ch, "args");
+                copy_str_field(target, ch, "cwd");
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "line_ending")))
+                    copy_str_field(target, ch, "line_ending");
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "timestamp")))
+                    copy_bool_field(target, ch, "timestamp", false);
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "log_enabled")))
+                    copy_bool_field(target, ch, "log_enabled", true);
+            } else if (kind == "telnet") {
+                std::string host = util::trim(json_str(ch, "host"));
+                if (host.empty() && !created) host = util::trim(json_str(target, "host"));
+                if (host.empty()) {
+                    err = "Telnet 主机不能为空";
+                    return false;
+                }
+                copy_str_field(target, ch, "host");
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "port")))
+                    copy_int_field(target, ch, "port", 23, 1, 65535);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "connect_timeout_ms")))
+                    copy_int_field(target, ch, "connect_timeout_ms", 5000, 100, 120000);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "width")))
+                    copy_int_field(target, ch, "width", 120, 40, 500);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "height")))
+                    copy_int_field(target, ch, "height", 32, 10, 200);
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "line_ending")))
+                    copy_str_field(target, ch, "line_ending");
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "timestamp")))
+                    copy_bool_field(target, ch, "timestamp", false);
                 if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "log_enabled")))
                     copy_bool_field(target, ch, "log_enabled", true);
             } else {
@@ -2929,14 +3011,19 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         cJSON* body = cJSON_Parse(body_string(hm).c_str());
         std::string kind = body ? json_str(body, "kind") : std::string();
         std::string name = body ? util::trim(json_str(body, "name")) : std::string();
-        if (!cJSON_IsObject(body) || (kind != "serial" && kind != "ssh") || name.empty()) {
+        if (!cJSON_IsObject(body) ||
+            (kind != "serial" && kind != "ssh" && kind != "powershell" && kind != "telnet") ||
+            name.empty()) {
             cJSON_Delete(body);
             reply_json_text(c, 400, "{\"ok\":false,\"error\":\"kind/name required\"}");
             return;
         }
         std::string err;
         bool saved = core && core->patch_config_json([&](cJSON* root) -> bool {
-            cJSON* arr = ensure_channel_array(root, kind == "serial" ? "boards" : "ssh");
+            const char* key = kind == "serial" ? "boards" :
+                              kind == "ssh" ? "ssh" :
+                              kind == "powershell" ? "powershell" : "telnet";
+            cJSON* arr = ensure_channel_array(root, key);
             int idx = -1;
             cJSON* target = find_named_in_array(arr, name, &idx);
             if (!target) {
@@ -3476,7 +3563,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 cJSON_DeleteItemFromObjectCaseSensitive(existing, "polarity_inverted");
                 cJSON_AddBoolToObject(existing, "polarity_inverted", pol_inv);
                 if (!old_name.empty() && old_name != name) {
-                    for (const char* key : {"boards", "ssh"}) {
+                    for (const char* key : {"boards", "ssh", "powershell", "telnet"}) {
                         cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
                         cJSON* ch = nullptr;
                         if (!cJSON_IsArray(arr)) continue;
@@ -3536,7 +3623,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 return false;
             }
             cJSON* refs = cJSON_CreateArray();
-            for (const char* key : {"boards", "ssh"}) {
+            for (const char* key : {"boards", "ssh", "powershell", "telnet"}) {
                 cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, key);
                 cJSON* ch = nullptr;
                 if (!cJSON_IsArray(arr)) continue;

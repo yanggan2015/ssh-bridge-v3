@@ -12,6 +12,9 @@
 
 namespace sb3 {
 
+// 通道类型：与 AppCore::Entry::kind 一一对应
+enum class ChannelKind { Serial = 0, Ssh = 1, PowerShell = 2, Telnet = 3 };
+
 namespace chan_dlg {
 
 inline constexpr wchar_t kClass[] = L"SB3_ChannelDialog";
@@ -70,6 +73,14 @@ enum Id {
     kIdCancel     = 3052,
     kIdDelete     = 3053,
     kIdTest       = 3054,
+    kIdShell      = 3060,
+    kIdArgs       = 3061,
+    kIdCwd        = 3062,
+    kIdPsBox      = 3063,
+    kIdPsCap      = 3064,
+    kIdShellLabel = 3120,
+    kIdArgsLabel  = 3121,
+    kIdCwdLabel   = 3122,
 };
 
 }  // namespace chan_dlg
@@ -78,9 +89,9 @@ class ChannelDialog {
 public:
     using AppliedFn = std::function<void(const std::string& name, int elapsed_ms)>;
 
-    // edit_name 非空 = 编辑；force_ssh 决定新建时的初始类型
+    // edit_name 非空 = 编辑；kind 决定新建时的初始类型
     bool open(HINSTANCE inst, HWND parent, AppCore* core, HFONT font, int dpi,
-              const std::string& edit_name, bool force_ssh, AppliedFn on_applied);
+              const std::string& edit_name, ChannelKind kind, AppliedFn on_applied);
     void close();
     bool is_open() const { return hwnd_ && IsWindow(hwnd_); }
     HWND hwnd() const { return hwnd_; }
@@ -89,7 +100,7 @@ private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 
-    void build(bool force_ssh);
+    void build(ChannelKind kind);
     void layout();
     void apply_kind_visibility();
     void load_from_config();
@@ -101,9 +112,14 @@ private:
     std::wstring text_of(int id) const;
     void set_text(int id, const std::wstring& s);
     int number_of(int id, int def) const;
-    bool is_ssh() const;
+    ChannelKind kind() const;
+    bool is_ssh() const { return kind() == ChannelKind::Ssh; }
+    bool is_powershell() const { return kind() == ChannelKind::PowerShell; }
+    bool is_telnet() const { return kind() == ChannelKind::Telnet; }
     BoardConfig   collect_board() const;
     SSHLinkConfig collect_ssh() const;
+    PowerShellConfig collect_powershell() const;
+    TelnetConfig  collect_telnet() const;
     bool validate(std::wstring* err) const;
 
     AppCore*    core_    = nullptr;

@@ -334,6 +334,43 @@ void load_ssh(const cJSON* o, SSHLinkConfig* s) {
     load_quick_commands(o, &s->quick_commands);
 }
 
+void load_powershell(const cJSON* o, PowerShellConfig* p) {
+    p->name = jstr(o, "name", "");
+    p->shell = jstr(o, "shell", "powershell.exe");
+    p->args = jstr(o, "args", "-NoLogo -NoProfile -ExecutionPolicy Bypass");
+    p->cwd = jstr(o, "cwd", "");
+    p->line_ending = jstr(o, "line_ending", "cr");
+    int bs = jint(o, "buffer_size", 0);
+    p->buffer_size = bs > 0 ? static_cast<std::uint32_t>(std::min(bs, 256 * 1024 * 1024)) : 0;
+    p->log_enabled = jbool(o, "log_enabled", true);
+    p->log_dir = jstr(o, "log_dir", "");
+    p->timestamp = jbool(o, "timestamp", false);
+    load_buttons(o, &p->buttons);
+    load_quick_commands(o, &p->quick_commands);
+}
+
+void load_telnet(const cJSON* o, TelnetConfig* t) {
+    t->name = jstr(o, "name", "");
+    t->host = jstr(o, "host", "");
+    t->port = jint(o, "port", 23);
+    if (t->port < 1 || t->port > 65535) t->port = 23;
+    t->connect_timeout_ms = jint(o, "connect_timeout_ms", jint(o, "connect_timeout", 5000));
+    if (t->connect_timeout_ms < 500) t->connect_timeout_ms = 500;
+    if (t->connect_timeout_ms > 60000) t->connect_timeout_ms = 60000;
+    t->line_ending = jstr(o, "line_ending", "crlf");
+    t->width = jint(o, "width", 120);
+    t->height = jint(o, "height", 32);
+    if (t->width < 20) t->width = 20;
+    if (t->height < 5) t->height = 5;
+    int bs = jint(o, "buffer_size", 0);
+    t->buffer_size = bs > 0 ? static_cast<std::uint32_t>(std::min(bs, 256 * 1024 * 1024)) : 0;
+    t->log_enabled = jbool(o, "log_enabled", true);
+    t->log_dir = jstr(o, "log_dir", "");
+    t->timestamp = jbool(o, "timestamp", false);
+    load_buttons(o, &t->buttons);
+    load_quick_commands(o, &t->quick_commands);
+}
+
 void load_ui_root(const cJSON* root, UiConfig* ui) {
     const cJSON* u = cJSON_GetObjectItemCaseSensitive(root, "ui");
     if (cJSON_IsObject(u)) {
@@ -404,6 +441,48 @@ void load_root(const cJSON* root, AppConfig* out) {
             load_ssh(it, &s);
             if (s.name.empty() && it->string) s.name = it->string;
             out->links.push_back(s);
+        }
+    }
+    const cJSON* psh = cJSON_GetObjectItemCaseSensitive(root, "powershell");
+    if (cJSON_IsArray(psh)) {
+        const cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, psh) {
+            if (!cJSON_IsObject(it)) continue;
+            if (jhas(it, "enable") && !jbool(it, "enable", true)) continue;
+            PowerShellConfig p;
+            load_powershell(it, &p);
+            out->powershell.push_back(p);
+        }
+    } else if (cJSON_IsObject(psh)) {
+        const cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, psh) {
+            if (!cJSON_IsObject(it)) continue;
+            if (jhas(it, "enable") && !jbool(it, "enable", true)) continue;
+            PowerShellConfig p;
+            load_powershell(it, &p);
+            if (p.name.empty() && it->string) p.name = it->string;
+            out->powershell.push_back(p);
+        }
+    }
+    const cJSON* tnt = cJSON_GetObjectItemCaseSensitive(root, "telnet");
+    if (cJSON_IsArray(tnt)) {
+        const cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, tnt) {
+            if (!cJSON_IsObject(it)) continue;
+            if (jhas(it, "enable") && !jbool(it, "enable", true)) continue;
+            TelnetConfig t;
+            load_telnet(it, &t);
+            out->telnet.push_back(t);
+        }
+    } else if (cJSON_IsObject(tnt)) {
+        const cJSON* it = nullptr;
+        cJSON_ArrayForEach(it, tnt) {
+            if (!cJSON_IsObject(it)) continue;
+            if (jhas(it, "enable") && !jbool(it, "enable", true)) continue;
+            TelnetConfig t;
+            load_telnet(it, &t);
+            if (t.name.empty() && it->string) t.name = it->string;
+            out->telnet.push_back(t);
         }
     }
     const cJSON* inb = cJSON_GetObjectItemCaseSensitive(root, "inbound_ssh");
@@ -549,6 +628,42 @@ cJSON* ssh_to_json(const SSHLinkConfig& s) {
     return o;
 }
 
+cJSON* powershell_to_json(const PowerShellConfig& p) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "name", p.name.c_str());
+    cJSON_AddStringToObject(o, "shell", p.shell.c_str());
+    cJSON_AddStringToObject(o, "args", p.args.c_str());
+    cJSON_AddStringToObject(o, "cwd", p.cwd.c_str());
+    cJSON_AddStringToObject(o, "line_ending", p.line_ending.c_str());
+    cJSON_AddNumberToObject(o, "buffer_size", static_cast<double>(p.buffer_size));
+    cJSON_AddBoolToObject(o, "log_enabled", p.log_enabled);
+    cJSON_AddStringToObject(o, "log_dir", p.log_dir.c_str());
+    cJSON_AddBoolToObject(o, "timestamp", p.timestamp);
+    cJSON* btns = cJSON_AddArrayToObject(o, "buttons");
+    for (const BoardActionConfig& a : p.buttons) cJSON_AddItemToArray(btns, button_to_json(a));
+    cJSON_AddItemToObject(o, "quick_commands", quick_commands_to_json(p.quick_commands));
+    return o;
+}
+
+cJSON* telnet_to_json(const TelnetConfig& t) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "name", t.name.c_str());
+    cJSON_AddStringToObject(o, "host", t.host.c_str());
+    cJSON_AddNumberToObject(o, "port", t.port);
+    cJSON_AddNumberToObject(o, "connect_timeout_ms", t.connect_timeout_ms);
+    cJSON_AddStringToObject(o, "line_ending", t.line_ending.c_str());
+    cJSON_AddNumberToObject(o, "width", t.width);
+    cJSON_AddNumberToObject(o, "height", t.height);
+    cJSON_AddNumberToObject(o, "buffer_size", static_cast<double>(t.buffer_size));
+    cJSON_AddBoolToObject(o, "log_enabled", t.log_enabled);
+    cJSON_AddStringToObject(o, "log_dir", t.log_dir.c_str());
+    cJSON_AddBoolToObject(o, "timestamp", t.timestamp);
+    cJSON* btns = cJSON_AddArrayToObject(o, "buttons");
+    for (const BoardActionConfig& a : t.buttons) cJSON_AddItemToArray(btns, button_to_json(a));
+    cJSON_AddItemToObject(o, "quick_commands", quick_commands_to_json(t.quick_commands));
+    return o;
+}
+
 cJSON* default_to_json(const DefaultConfig& d) {    cJSON* o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "username", d.username.c_str());
     cJSON_AddStringToObject(o, "password", d.password.c_str());
@@ -593,6 +708,14 @@ void save_root(cJSON* root, const AppConfig& cfg) {
     cJSON_DeleteItemFromObjectCaseSensitive(root, "ssh");
     cJSON* sarr = cJSON_AddArrayToObject(root, "ssh");
     for (const SSHLinkConfig& s : cfg.links) cJSON_AddItemToArray(sarr, ssh_to_json(s));
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "powershell");
+    cJSON* parr = cJSON_AddArrayToObject(root, "powershell");
+    for (const PowerShellConfig& p : cfg.powershell) cJSON_AddItemToArray(parr, powershell_to_json(p));
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "telnet");
+    cJSON* tarr = cJSON_AddArrayToObject(root, "telnet");
+    for (const TelnetConfig& t : cfg.telnet) cJSON_AddItemToArray(tarr, telnet_to_json(t));
 
     cJSON* inb = cJSON_GetObjectItemCaseSensitive(root, "inbound_ssh");
     if (!cJSON_IsObject(inb)) {

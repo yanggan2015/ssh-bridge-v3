@@ -241,8 +241,10 @@ void add_features(cJSON* o, const AppCore::Entry& e, AppCore* core) {
     cJSON_AddBoolToObject(f, "probe", true);
     const std::vector<BoardActionConfig> btns = core ? core->buttons_of(e.name) : std::vector<BoardActionConfig>{};
     cJSON_AddBoolToObject(f, "board_actions", !btns.empty());
-    cJSON_AddBoolToObject(f, "serial_control", true);
+    cJSON_AddBoolToObject(f, "serial_control", e.kind == "serial");
     cJSON_AddBoolToObject(f, "ssh_link", e.kind == "ssh");
+    cJSON_AddBoolToObject(f, "powershell_link", e.kind == "powershell");
+    cJSON_AddBoolToObject(f, "telnet_link", e.kind == "telnet");
     cJSON_AddBoolToObject(f, "incremental_log", true);
     cJSON_AddBoolToObject(f, "log_disk", true);
     cJSON_AddBoolToObject(f, "command", true);
@@ -362,6 +364,9 @@ void add_global_features(cJSON* root) {
     cJSON_AddBoolToObject(f, "lock", true);
     cJSON_AddBoolToObject(f, "jobs", true);
     cJSON_AddBoolToObject(f, "serial_control", true);
+    cJSON_AddBoolToObject(f, "ssh_link", true);
+    cJSON_AddBoolToObject(f, "powershell_link", true);
+    cJSON_AddBoolToObject(f, "telnet_link", true);
     cJSON_AddBoolToObject(f, "tftp_artifacts", true);
 }
 

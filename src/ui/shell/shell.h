@@ -68,7 +68,7 @@ private:
     void restore_layout_from_config();
     bool channel_exists(const std::string& name) const;
     void save_layout_state();
-    void show_channel_dialog(const std::string& edit_name, bool ssh);
+    void show_channel_dialog(const std::string& edit_name, ChannelKind kind);
     void refresh_channels(const std::string& prefer);
     void on_channel_applied(const std::string& name, int elapsed_ms);
 

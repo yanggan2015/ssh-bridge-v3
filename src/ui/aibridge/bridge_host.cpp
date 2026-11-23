@@ -276,6 +276,8 @@ void add_channel_virtuals() {
     const Item items[] = {
         {"chan.newSerial",    "新建串口通道（Ctrl+N）", 40040},
         {"chan.newSsh",       "新建 SSH 通道",          40041},
+        {"chan.newPowershell","新建 PowerShell 通道",   40055},
+        {"chan.newTelnet",    "新建 Telnet 通道",       40056},
         {"chan.editCurrent",  "编辑当前通道",           40042},
         {"chan.deleteCurrent","删除当前通道（两步确认）", 40043},
         {"chan.reload",       "重新加载配置文件",       40044},
@@ -529,6 +531,8 @@ bool start(HWND main, AppCore* core, TerminalView* view, const Options& opt) {
     add_menu("menu.help.checkUpdate", "检查更新", 40060);
     add_menu("menu.file.newSerial", "新建串口通道", 40040);
     add_menu("menu.file.newSsh", "新建 SSH 通道", 40041);
+    add_menu("menu.file.newPowershell", "新建 PowerShell 通道", 40055);
+    add_menu("menu.file.newTelnet", "新建 Telnet 通道", 40056);
     add_menu("menu.file.editChannel", "编辑当前通道", 40042);
     add_menu("menu.file.deleteChannel", "删除当前通道", 40043);
     add_menu("menu.file.reloadConfig", "重新加载配置", 40044);
@@ -602,6 +606,9 @@ void register_channel_dialog(HWND dlg) {
         {chan_dlg::kIdFlowLabel, "dlg.label.flow"},
         {chan_dlg::kIdLineLabel, "dlg.label.lineending"},
         {chan_dlg::kIdEncLabel, "dlg.label.encoding"},
+        {chan_dlg::kIdShellLabel, "dlg.label.shell"},
+        {chan_dlg::kIdArgsLabel, "dlg.label.args"},
+        {chan_dlg::kIdCwdLabel, "dlg.label.cwd"},
         {chan_dlg::kIdName, "dlg.channel.name"},
         {chan_dlg::kIdKind, "dlg.channel.kind"},
         {chan_dlg::kIdDevice, "dlg.channel.device"},
@@ -625,8 +632,12 @@ void register_channel_dialog(HWND dlg) {
         {chan_dlg::kIdWidth, "dlg.channel.cols"},
         {chan_dlg::kIdHeight, "dlg.channel.rows"},
         {chan_dlg::kIdKeepalive, "dlg.channel.keepalive"},
+        {chan_dlg::kIdShell, "dlg.channel.shell"},
+        {chan_dlg::kIdArgs, "dlg.channel.args"},
+        {chan_dlg::kIdCwd, "dlg.channel.cwd"},
         {chan_dlg::kIdSerialBox, "dlg.group.serial"},
         {chan_dlg::kIdSshBox, "dlg.group.ssh"},
+        {chan_dlg::kIdPsBox, "dlg.group.powershell"},
         {chan_dlg::kIdHint, "dlg.channel.hint"},
         {chan_dlg::kIdSave, "dlg.channel.save"},
         {chan_dlg::kIdCancel, "dlg.channel.cancel"},
