@@ -169,11 +169,68 @@ void AppCore::start_entry(Entry& e, bool serial_auto) {
     if (!e.bridge) return;
     if (e.bridge->running()) {
         e.started = true;
+        if (e.kind == "serial") {
+            e.want_open = true;
+            e.retry_at_ms = 0;
+            e.retry_attempt = 0;
+        }
         return;
     }
     // 串口只在 auto_open 时自动开；SSH 一律尝试（失败后台重试）
-    if (e.kind == "serial" && !serial_auto) return;
+    if (e.kind == "serial" && !serial_auto) {
+        e.want_open = false;
+        e.retry_at_ms = 0;
+        e.retry_attempt = 0;
+        return;
+    }
     e.started = e.bridge->start();
+    if (e.kind == "serial") {
+        e.want_open = true;
+        if (e.started) {
+            e.retry_at_ms = 0;
+            e.retry_attempt = 0;
+        } else {
+            schedule_serial_retry(e, util::now_ms());
+        }
+    }
+}
+
+void AppCore::schedule_serial_retry(Entry& e, std::uint64_t now) {
+    ++e.retry_attempt;
+    int shift = e.retry_attempt > 4 ? 3 : e.retry_attempt - 1;
+    if (shift < 0) shift = 0;
+    int delay_ms = 2000 << shift;          // 2 / 4 / 8 / 16 秒
+    if (delay_ms > 15000) delay_ms = 15000;
+    e.retry_at_ms = now + static_cast<std::uint64_t>(delay_ms);
+}
+
+void AppCore::poll_serial_retry() {
+    std::lock_guard<std::mutex> g(entries_mu_);
+    const std::uint64_t now = util::now_ms();
+    for (Entry& e : entries_) {
+        if (e.kind != "serial" || !e.bridge || !e.want_open) continue;
+        if (e.bridge->running()) {
+            e.started = true;
+            if (e.retry_attempt != 0 || e.retry_at_ms != 0) {
+                e.retry_attempt = 0;
+                e.retry_at_ms = 0;
+            }
+            continue;
+        }
+        e.started = false;
+        if (e.retry_at_ms == 0) {
+            schedule_serial_retry(e, now);
+            continue;
+        }
+        if (now < e.retry_at_ms) continue;
+        if (e.bridge->start()) {
+            e.started = true;
+            e.retry_attempt = 0;
+            e.retry_at_ms = 0;
+        } else {
+            schedule_serial_retry(e, now);
+        }
+    }
 }
 
 void AppCore::start_auto() {
@@ -194,6 +251,9 @@ void AppCore::stop_all() {
     for (Entry& e : entries_) {
         if (e.bridge) e.bridge->stop();
         e.started = false;
+        e.want_open = false;
+        e.retry_at_ms = 0;
+        e.retry_attempt = 0;
     }
 }
 
@@ -310,6 +370,10 @@ AppCore::ReloadResult AppCore::reload_config() {
         if (e.kind == "serial") {
             const BoardConfig* b = find_board(cfg_, e.name);
             if (b) static_cast<SerialBridge*>(e.bridge.get())->apply_config(*b);
+            // 重载以新配置为准：auto_open=false 不再守护；需要时用户可手动重连。
+            e.want_open = b && b->auto_open;
+            e.retry_at_ms = 0;
+            e.retry_attempt = 0;
         } else {
             const SSHLinkConfig* s = find_link(cfg_, e.name);
             if (s) static_cast<SshBridge*>(e.bridge.get())->apply_config(*s);
@@ -745,11 +809,18 @@ bool AppCore::resolve_inbound(const std::string& name, std::shared_ptr<IBridge>*
 
 bool AppCore::reconnect(const std::string& name) {
     std::shared_ptr<IBridge> b;
+    bool is_serial = false;
     {
         std::lock_guard<std::mutex> g(entries_mu_);
         for (Entry& e : entries_) {
             if (e.name != name || !e.bridge) continue;
             b = e.bridge;
+            is_serial = e.kind == "serial";
+            if (is_serial) {
+                e.want_open = true;      // 用户显式重连 = 恢复自动守护
+                e.retry_at_ms = 0;
+                e.retry_attempt = 0;
+            }
             break;
         }
     }
@@ -757,12 +828,31 @@ bool AppCore::reconnect(const std::string& name) {
     if (b->running()) {
         b->reconnect();
     } else if (!b->start()) {
+        if (is_serial) {
+            std::lock_guard<std::mutex> g(entries_mu_);
+            for (Entry& e : entries_) {
+                if (e.name != name) continue;
+                e.started = false;
+                schedule_serial_retry(e, util::now_ms());
+                break;
+            }
+        }
         return false;
     }
     {
         std::lock_guard<std::mutex> g(entries_mu_);
         for (Entry& e : entries_) {
-            if (e.name == name) e.started = true;
+            if (e.name != name) continue;
+            e.started = b->running();
+            if (is_serial) {
+                e.want_open = true;
+                if (e.started) {
+                    e.retry_at_ms = 0;
+                    e.retry_attempt = 0;
+                } else if (e.retry_at_ms == 0) {
+                    schedule_serial_retry(e, util::now_ms());
+                }
+            }
         }
     }
     return true;
@@ -770,12 +860,19 @@ bool AppCore::reconnect(const std::string& name) {
 
 bool AppCore::disconnect(const std::string& name) {
     bool found = false;
+    bool is_serial = false;
     std::shared_ptr<IBridge> b;
     {
         std::lock_guard<std::mutex> g(entries_mu_);
         for (Entry& e : entries_) {
             if (e.name != name || !e.bridge) continue;
             b = e.bridge;
+            is_serial = e.kind == "serial";
+            if (is_serial) {
+                e.want_open = false;     // 手动断开后不再自动重开，直到用户重连/重载
+                e.retry_at_ms = 0;
+                e.retry_attempt = 0;
+            }
             found = true;
             break;
         }
@@ -787,6 +884,11 @@ bool AppCore::disconnect(const std::string& name) {
         if (e.name == name) {
             e.started = false;
             e.state = "idle";
+            if (e.kind == "serial") {
+                e.want_open = false;
+                e.retry_at_ms = 0;
+                e.retry_attempt = 0;
+            }
         }
     }
     return true;
@@ -942,9 +1044,15 @@ std::string AppCore::state_json(bool window_visible) const {
         const char* st = "idle";
         if (e.bridge) {
             if (e.bridge->running()) st = "ready";
-            else if (e.started) st = "offline";
+            else if (e.started || e.want_open) st = "offline";
         }
         cJSON_AddStringToObject(o, "state", st);
+        if (e.kind == "serial") {
+            cJSON_AddBoolToObject(o, "want_open", e.want_open);
+            cJSON_AddNumberToObject(o, "retry_attempt", e.retry_attempt);
+            auto* sb = dynamic_cast<SerialBridge*>(e.bridge.get());
+            if (sb) cJSON_AddStringToObject(o, "last_error", sb->last_error().c_str());
+        }
         if (e.bridge) {
             cJSON_AddNumberToObject(o, "echo_latency_us",
                                     static_cast<double>(e.bridge->echo_latency_us()));

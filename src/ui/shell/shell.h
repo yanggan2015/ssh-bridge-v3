@@ -57,6 +57,7 @@ private:
     void on_tray_event(LPARAM lp);
     void show_tray_menu();
     void on_tree_change();
+    void show_tree_context_menu(HTREEITEM item);
     void on_left_tab_change();
     bool select_channel_index(std::size_t idx);
     void find_typed();

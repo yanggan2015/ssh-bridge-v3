@@ -1,8 +1,8 @@
 # ui_responsive_check.ps1 — 左侧通道管理器窄窗自动收起 / 按钮展开收起回归
-# 前置：ssh_bridge3 已在运行，桥接 http://127.0.0.1:18086。
+# 前置：ssh_bridge3 已在运行，桥接 http://127.0.0.1:18096。
 # 用法：pwsh -NoProfile -File tests\ui_responsive_check.ps1
 $ErrorActionPreference = 'Stop'
-$base = 'http://127.0.0.1:18086'
+$base = 'http://127.0.0.1:18096'
 $fail = 0
 $total = 0
 

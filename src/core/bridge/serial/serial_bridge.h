@@ -29,7 +29,7 @@ public:
 
     bool start() override;
     void stop() override;
-    bool running() const override { return running_.load(); }
+    bool running() const override { return running_.load() && io_alive_.load(); }
     void reconnect() override;
 
     // 热应用：换 DCB / 行尾 / ring 参数，保留 ring 内容（旧内容重灌）
@@ -84,6 +84,7 @@ private:
 
     HANDLE port_ = INVALID_HANDLE_VALUE;
     std::atomic<bool> running_{false};
+    std::atomic<bool> io_alive_{false};       // RX 线程存活；退出即视为掉线
     std::atomic<bool> stop_{false};
     std::thread rx_thread_;
     std::thread writer_thread_;

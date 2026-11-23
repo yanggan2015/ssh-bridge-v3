@@ -18,6 +18,12 @@ namespace {
 constexpr DWORD kEventWaitMs = 150;
 constexpr DWORD kBufMax      = 4096;
 
+// 线程退出（正常 stop 或读失败）都必须让 running() 立刻反映离线。
+struct IoAliveGuard {
+    std::atomic<bool>* flag;
+    ~IoAliveGuard() { if (flag) flag->store(false); }
+};
+
 BYTE parity_of(const std::string& p) {
     if (p == "E" || p == "e") return EVENPARITY;
     if (p == "O" || p == "o") return ODDPARITY;
@@ -148,11 +154,25 @@ void SerialBridge::set_error(const std::string& msg) {
 }
 
 bool SerialBridge::start() {
-    if (running_.load()) return true;
-    if (!open_port()) return false;
+    if (running()) return true;
+    if (running_.load()) stop();       // 端口对象还在但 RX 已死：先回收线程/句柄
+    if (!open_port()) {
+        running_.store(false);
+        io_alive_.store(false);
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lk(err_mu_);
+        last_error_.clear();
+    }
     stop_.store(false);
     cmds_.reset();               // stop() 会关闭队列，重启要重新打开
+    {
+        std::lock_guard<std::mutex> lock(loop_mu_);
+        loop_in_.clear();
+    }
     running_.store(true);
+    io_alive_.store(true);
     if (loop_) {
         rx_thread_ = std::thread([this] { loop_rx_loop(); });
     } else {
@@ -165,6 +185,7 @@ bool SerialBridge::start() {
 void SerialBridge::stop() {
     if (!running_.load()) {
         close_port();
+        io_alive_.store(false);
         return;
     }
     stop_.store(true);
@@ -178,6 +199,7 @@ void SerialBridge::stop() {
     if (writer_thread_.joinable()) writer_thread_.join();
     core_.log().flush_cr_hold();
     close_port();
+    io_alive_.store(false);
     running_.store(false);
 }
 
@@ -261,6 +283,7 @@ std::string SerialBridge::lines_json() const {
 }
 
 void SerialBridge::rx_loop() {
+    IoAliveGuard alive_guard{&io_alive_};
     // 持续挂一个 overlapped ReadFile，数据到达后交给 ring，再立刻重挂。
     // 不能把 WaitCommEvent 和 ReadFile 共用事件并在超时后取消：CH340 / CP210x
     // 在“先等到 EV_RXCHAR，再 ResetEvent 读”这条路径上会丢掉本次读完成，
@@ -312,7 +335,6 @@ void SerialBridge::rx_loop() {
                     std::snprintf(msg, sizeof(msg), "ReadFile overlapped failed: error %lu",
                                   static_cast<unsigned long>(GetLastError()));
                     set_error(msg);
-                    continue;
                 }
                 break;
             }
@@ -332,6 +354,7 @@ void SerialBridge::rx_loop() {
 }
 
 void SerialBridge::loop_rx_loop() {
+    IoAliveGuard alive_guard{&io_alive_};
     while (!stop_.load()) {
         std::string batch;
         {
@@ -354,6 +377,7 @@ void SerialBridge::loop_rx_loop() {
 }
 
 void SerialBridge::writer_loop() {
+    IoAliveGuard alive_guard{&io_alive_};
     while (!stop_.load()) {
         std::string batch;
         if (!cmds_.pop_all(&batch, 100)) {
@@ -377,6 +401,13 @@ void SerialBridge::writer_loop() {
         BOOL ok = WriteFile(port_, out.data(), static_cast<DWORD>(out.size()), &wrote, &ov);
         if (!ok && GetLastError() == ERROR_IO_PENDING) {
             wait_io(port_, &ov, 200, &wrote);
+        } else if (!ok) {
+            char msg[96];
+            std::snprintf(msg, sizeof(msg), "WriteFile failed: error %lu",
+                          static_cast<unsigned long>(GetLastError()));
+            set_error(msg);
+            CloseHandle(ov.hEvent);
+            break;
         }
         tx_bytes_.fetch_add(wrote);
         CloseHandle(ov.hEvent);

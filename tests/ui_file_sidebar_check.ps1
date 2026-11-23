@@ -3,7 +3,7 @@ param(
     [string]$Exe = 'C:\code\ssh-bridge-windows3\output\build\ssh_bridge3.exe',
     [string]$TemplateConfig = 'C:\code\ssh-bridge-windows3\scripts\dist-config.json',
     [string]$WorkDir = 'C:\code\ssh-bridge-windows3\output\dist\file-sidebar-test',
-    [int]$Port = 18086
+    [int]$Port = 18096
 )
 $ErrorActionPreference = 'Stop'
 $base = "http://127.0.0.1:$Port"

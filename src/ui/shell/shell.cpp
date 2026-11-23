@@ -1898,6 +1898,48 @@ void Shell::on_active_pane_changed() {
     save_layout_state();
 }
 
+void Shell::show_tree_context_menu(HTREEITEM item) {
+    int idx = -1;
+    if (item) {
+        TVITEMW tv{};
+        tv.mask = TVIF_PARAM | TVIF_HANDLE;
+        tv.hItem = item;
+        if (SendMessageW(tree_, TVM_GETITEM, 0, reinterpret_cast<LPARAM>(&tv))) {
+            idx = static_cast<int>(tv.lParam);
+        }
+    }
+    const auto entries = core_->entries();
+    const bool is_group = idx < 0 || static_cast<std::size_t>(idx) >= entries.size();
+    const AppCore::Entry* entry = is_group ? nullptr : &entries[static_cast<std::size_t>(idx)];
+    const bool online = entry && entry->bridge && entry->bridge->running();
+    const bool is_ssh = entry && core_->is_ssh_name(entry->name);
+
+    HMENU menu = CreatePopupMenu();
+    if (!is_group) {
+        AppendMenuW(menu, MF_STRING, kIdmReconnect, online ? L"重连" : L"打开");
+        AppendMenuW(menu, MF_STRING | (online ? 0u : MF_GRAYED), kIdmDisconnect, L"断开");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kIdmChanEdit, L"编辑配置");
+        AppendMenuW(menu, MF_STRING, kIdmChanDelete, L"删除通道");
+        if (is_ssh) {
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, kIdmSftp, L"打开 SFTP");
+        }
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    }
+    AppendMenuW(menu, MF_STRING, kIdmChanNewSerial, L"新建串口通道");
+    AppendMenuW(menu, MF_STRING, kIdmChanNewSsh, L"新建 SSH 通道");
+    AppendMenuW(menu, MF_STRING, kIdmChanReload, L"重载配置");
+
+    POINT pt{};
+    GetCursorPos(&pt);
+    SetForegroundWindow(hwnd_);
+    int cmd = static_cast<int>(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                              pt.x, pt.y, 0, hwnd_, nullptr));
+    DestroyMenu(menu);
+    if (cmd) on_command(cmd);
+}
+
 void Shell::on_tree_change() {
     if (sync_tree_binding_) {
         sync_tree_binding_ = false;
@@ -2035,7 +2077,8 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_TIMER:
-        if (!IsWindowVisible(hwnd_)) return 0;   // 隐藏到托盘时不刷状态、不拉数据
+        core_->poll_serial_retry();               // 托盘隐藏时也守护串口，避免掉线后永不恢复
+        if (!IsWindowVisible(hwnd_)) return 0;   // 隐藏时不刷状态、不拉数据
         poll_update_check();
         view_.pull_visible();
         update_status();
@@ -2064,6 +2107,19 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
         LPNMHDR hdr = reinterpret_cast<LPNMHDR>(lp);
         if (hdr && hdr->idFrom == kIdcTree && hdr->code == TVN_SELCHANGEDW) {
             on_tree_change();
+        }
+        if (hdr && hdr->idFrom == kIdcTree && hdr->code == NM_RCLICK) {
+            POINT pt{};
+            GetCursorPos(&pt);
+            ScreenToClient(tree_, &pt);
+            TVHITTESTINFO ht{};
+            ht.pt = pt;
+            HTREEITEM item = reinterpret_cast<HTREEITEM>(
+                SendMessageW(tree_, TVM_HITTEST, 0, reinterpret_cast<LPARAM>(&ht)));
+            if (item) {
+                SendMessageW(tree_, TVM_SELECTITEM, TVGN_CARET, reinterpret_cast<LPARAM>(item));
+                show_tree_context_menu(item);
+            }
         }
         if (hdr && hdr->idFrom == kIdcLeftTabs && hdr->code == TCN_SELCHANGE) {
             on_left_tab_change();

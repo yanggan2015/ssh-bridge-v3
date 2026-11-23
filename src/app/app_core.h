@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -27,6 +28,9 @@ public:
         std::string state;       // "offline" / "ready" / "idle"
         std::string sig;         // 参数指纹：变了就热应用
         bool        started = false;
+        bool        want_open = false;       // 用户/配置希望该串口在线（断开=false，重连=true）
+        std::uint64_t retry_at_ms = 0;       // 下次自动重连时间（0=尚未排期）
+        int         retry_attempt = 0;       // 连续失败次数，用于 2/4/8/15 秒退避
         std::shared_ptr<IBridge> bridge;   // 异步按钮执行期间也要保住对象，避免配置重载后悬空
         std::shared_ptr<std::atomic<bool>> wake;   // 合并 RX 唤醒，避免消息洪水
     };
@@ -46,6 +50,8 @@ public:
     // 启动 auto_open 的串口通道与全部 SSH 通道（失败只影响本通道）
     void start_auto();
     void stop_all();
+    // 串口看门狗：RX/写线程死亡或启动失败后按退避自动重开；手动“断开”后不再重开。
+    void poll_serial_retry();
 
     // 通道表快照：Web/Agent 线程与 UI 热应用并发时，不能把 entries_ 的引用交出去。
     std::size_t channel_count() const;
@@ -138,6 +144,7 @@ private:
     void build_entries();
     void rebind_kicks_locked();
     void start_entry(Entry& e, bool serial_auto);
+    void schedule_serial_retry(Entry& e, std::uint64_t now);
 
     AppConfig cfg_;
     std::string project_root_;

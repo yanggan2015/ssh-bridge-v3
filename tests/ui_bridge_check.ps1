@@ -2,7 +2,7 @@
 # 用法： pwsh -File tests\ui_bridge_check.ps1 [-SkipBuild]
 # 退出码： 0 = 全绿；1 = 有 FAIL
 #
-# 观测面：桥接 HTTP（127.0.0.1:18086）+ output\ui_state.json
+# 观测面：桥接 HTTP（127.0.0.1:18096）+ output\ui_state.json
 # 断言口径：动作 ok:true 只代表送达；每一项都必须紧接 /state 或 /control 复核业务真值。
 # 覆盖：/ping、/capabilities、/ui-tree、/control、/state、/action、/logs；
 #       按钮 click、搜索框 set_text/get_text/clear、树 select、虚拟菜单 click、
@@ -16,7 +16,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $root 'output\build\ssh_bridge3.exe'
 $runDir = Join-Path $root 'output\s5check'
 $rows = @()
-$base = 'http://127.0.0.1:18086'
+$base = 'http://127.0.0.1:18096'
 
 # 基线：每个控件必须登记稳定 id，且至少要有一个可执行动作
 $expected = @(
@@ -112,7 +112,7 @@ if (-not $SkipBuild) {
 
 Kill-App
 Remove-Item -Recurse -Force $runDir -ErrorAction SilentlyContinue
-Write-Config $runDir '"agent": {"enable": true, "port": 18086, "token": ""},'
+Write-Config $runDir '"agent": {"enable": true, "port": 18096, "token": ""},'
 
 $proc = Start-App $runDir
 try {
@@ -395,10 +395,10 @@ try {
     # ---------- agent.enable=false 不监听 ----------
     $runOff = Join-Path $root 'output\s5check-off'
     Remove-Item -Recurse -Force $runOff -ErrorAction SilentlyContinue
-    Write-Config $runOff '"agent": {"enable": false, "port": 18086, "token": ""},'
+    Write-Config $runOff '"agent": {"enable": false, "port": 18096, "token": ""},'
     $poff = Start-App $runOff $false
     Start-Sleep -Seconds 2
-    $listenOff = @(Get-NetTCPConnection -LocalPort 18086 -State Listen -ErrorAction SilentlyContinue)
+    $listenOff = @(Get-NetTCPConnection -LocalPort 18096 -State Listen -ErrorAction SilentlyContinue)
     $pingOff = $false
     try { $r = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/ping" -TimeoutSec 2; $pingOff = ($r.StatusCode -eq 200) } catch { $pingOff = $false }
     Check 'T5-40' 'agent.enable=false 时不监听、/ping 不通' `
@@ -410,7 +410,7 @@ try {
     # ---------- token ----------
     $runTok = Join-Path $root 'output\s5check-token'
     Remove-Item -Recurse -Force $runTok -ErrorAction SilentlyContinue
-    Write-Config $runTok '"agent": {"enable": true, "port": 18086, "token": "s3cret"},'
+    Write-Config $runTok '"agent": {"enable": true, "port": 18096, "token": "s3cret"},'
     $ptok = Start-App $runTok
     $noTok = Get-Status '/ping'
     $withTok = 0

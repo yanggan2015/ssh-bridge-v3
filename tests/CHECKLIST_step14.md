@@ -1,7 +1,7 @@
 # Step 14 验收清单：配置拆分、窗口状态、串口自愈、通道右键
 
 > 对应设计：`docs/详细设计-配置拆分与串口自愈.md`
-> 自动化：`tests/step14_check.ps1`（专项） + `tests/step1_check.ps1`、`tests/step3_check.ps1`、`tests/ui_full_audit2.ps1`、Web 162 项（全量）
+> 自动化：`tests/step14_check.ps1`（本步专项） + `tests/step1_check.ps1`、`tests/step3_check.ps1`、`tests/ui_bridge_check.ps1`、`tests/ui_full_audit2.ps1`、Web 162 项（全量）
 > 规则：先测后改；专项不全绿不进入下一阶段；每次提交必须附影响面与相邻回归结果。
 
 ## A. 配置拆分与查找（A01–A12）
@@ -56,9 +56,9 @@
 | D03 | 释放后恢复 | 占用解除后无需点按钮自动恢复 ready | 是 |
 | D04 | 手工断开 | 点击断开后 `want_open=false`，等待 2 个重试周期不自动打开 | 是 |
 | D05 | 手工重连 | 点击重连立即打开，失败进入退避 | 是 |
-| D06 | RX 线程退出 | 接收线程退出后通道状态变 offline，而不是假在线 | 是 |
+| D06 | RX 线程退出 | 接收/写线程退出即 `running()=false`，不再假在线 | 源码守卫 + 断开路径复核 |
 | D07 | 退出无残留 | 应用退出后串口句柄释放，PowerShell 可打开 | 是 |
-| D08 | 配置重载 | 重载后按新 `auto_open` 决定是否保持 want_open | 是 |
+| D08 | 配置重载 | 重载后 `want_open` 以新 `auto_open` 为准；false 不再守护 | 是 |
 
 ## E. 通道右键菜单（E01–E08）
 
