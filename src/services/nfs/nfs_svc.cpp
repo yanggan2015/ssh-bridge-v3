@@ -6,6 +6,23 @@
 
 static void util_log(const char *fmt, ...) { (void)fmt; }
 
+// NFS 别名会参与导出和 Linux 挂载命令。只允许绝对、单层或多层路径，
+// 禁止 ..、引号、空白、反斜杠和控制字符，避免路径越界与 shell 拼接注入。
+static bool alias_is_safe(const char *alias) {
+    if (!alias || alias[0] != '/') return false;
+    size_t n = strlen(alias);
+    if (n == 0 || n > 128) return false;
+    if (strstr(alias, "..")) return false;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)alias[i];
+        if (c < 0x20 || c == 0x7f) return false;
+        if (c == '\'' || c == '"' || c == '`' || c == '\\' || c == ';' ||
+            c == '&' || c == '|' || c == '$' || c == '(' || c == ')' ||
+            c == ' ' || c == '\t' || c == '\n' || c == '\r') return false;
+    }
+    return true;
+}
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -55,14 +72,18 @@ int nfs_svc_stop(void) {
 
 int nfs_svc_start(const char *export_abs, const char *alias, unsigned uid, unsigned gid,
                   char *err, size_t errcap) {
-    char al[160];
     if (err && errcap) err[0] = '\0';
     if (!export_abs || !export_abs[0]) {
         if (err) snprintf(err, errcap, "export empty");
         return -1;
     }
-    mkdir_utf8(export_abs);
+    char al[160];
     alias_norm(alias, al, sizeof(al));
+    if (!alias_is_safe(al)) {
+        if (err) snprintf(err, errcap, "NFS alias must be an absolute path without quotes/..");
+        return -1;
+    }
+    mkdir_utf8(export_abs);
     char export_path[MAX_PATH] = "";
     if (!to_short_ansi(export_abs, export_path, sizeof(export_path))) {
         if (err && errcap)
@@ -104,6 +125,25 @@ static void alias_norm(const char *alias, char *out, size_t cap) {
         snprintf(out, cap, "%s", a);
     else
         snprintf(out, cap, "/%s", a);
+}
+
+// 单引号包裹 shell 参数；内部单引号写成 '\''，避免挂载路径含引号时逃逸。
+static void shell_quote(const char *s, char *out, size_t cap) {
+    size_t j = 0;
+    if (!out || cap < 3) return;
+    out[j++] = '\'';
+    for (const char *p = s ? s : ""; *p && j + 4 < cap; ++p) {
+        if (*p == '\'') {
+            out[j++] = '\'';
+            out[j++] = '\\';
+            out[j++] = '\'';
+            out[j++] = '\'';
+        } else {
+            out[j++] = *p;
+        }
+    }
+    out[j++] = '\'';
+    out[j] = '\0';
 }
 
 static int run_sh(const char *cmd, char *err, size_t errcap) {
@@ -169,7 +209,9 @@ int nfs_svc_stop(void) {
     unlink(NFS_EXPORTS_D);
     (void)system("exportfs -r >/dev/null 2>&1");
     if (g_we_bind_mounted && g_alias[0]) {
-        snprintf(cmd, sizeof(cmd), "umount '%s' >/dev/null 2>&1", g_alias);
+        char q_alias[320];
+        shell_quote(g_alias, q_alias, sizeof(q_alias));
+        snprintf(cmd, sizeof(cmd), "umount %s >/dev/null 2>&1", q_alias);
         (void)system(cmd);
         g_we_bind_mounted = 0;
     }
@@ -182,7 +224,7 @@ int nfs_svc_stop(void) {
 
 int nfs_svc_start(const char *export_abs, const char *alias, unsigned uid, unsigned gid,
                   char *err, size_t errcap) {
-    char al[160], cmd[768];
+    char al[160], cmd[1200];
     struct stat st;
     if (err && errcap) err[0] = '\0';
     if (!export_abs || !export_abs[0]) {
@@ -190,6 +232,10 @@ int nfs_svc_start(const char *export_abs, const char *alias, unsigned uid, unsig
         return -1;
     }
     alias_norm(alias, al, sizeof(al));
+    if (!alias_is_safe(al)) {
+        if (err) snprintf(err, errcap, "NFS alias must be an absolute path without quotes/..");
+        return -1;
+    }
     if (mkdir(export_abs, 0755) != 0 && errno != EEXIST) {
         if (err) snprintf(err, errcap, "mkdir export failed");
         return -1;
@@ -204,7 +250,10 @@ int nfs_svc_start(const char *export_abs, const char *alias, unsigned uid, unsig
     g_we_bind_mounted = 0;
     if (strcmp(export_abs, al) != 0) {
         if (!is_mounted_on(al)) {
-            snprintf(cmd, sizeof(cmd), "mount --bind '%s' '%s'", export_abs, al);
+            char q_export[640], q_alias[320];
+            shell_quote(export_abs, q_export, sizeof(q_export));
+            shell_quote(al, q_alias, sizeof(q_alias));
+            snprintf(cmd, sizeof(cmd), "mount --bind %s %s", q_export, q_alias);
             if (run_sh(cmd, err, errcap) != 0) return -1;
             g_we_bind_mounted = 1;
         }

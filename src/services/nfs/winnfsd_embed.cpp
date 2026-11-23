@@ -53,7 +53,8 @@ static unsigned __stdcall server_thread(void *param) {
     int i;
     bool ok = false;
 
-    g_sInAddr = (char *)"0.0.0.0";
+    // winnfsd 只读使用该全局地址串；const_cast 仅消除第三方签名的 const 不匹配。
+    g_sInAddr = const_cast<char *>("0.0.0.0");
     portmap.Set(PROG_MOUNT, MOUNT_PORT);
     portmap.Set(PROG_NFS, NFS_PORT);
     nfs.SetUserID(a->uid, a->gid);

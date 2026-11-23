@@ -296,15 +296,15 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
     }
 
     if (uri.rfind("/tools/", 0) == 0 || uri.rfind("/skills/", 0) == 0) {
-        std::string rel = uri.substr(1);
+        std::string asset_rel = uri.substr(1);
         std::string abs;
-        std::error_code ec;
-        if (!safe_join(rel, &abs) || !fs::is_regular_file(fs::u8path(abs), ec)) {
+        std::error_code asset_ec;
+        if (!safe_join(asset_rel, &abs) || !fs::is_regular_file(fs::u8path(abs), asset_ec)) {
             mg_http_reply(c, 404, "Content-Type: text/plain; charset=utf-8\r\n", "文件不存在");
             return;
         }
-        auto sz = fs::file_size(fs::u8path(abs), ec);
-        if (ec || sz > 64ull * 1024 * 1024) {
+        auto sz = fs::file_size(fs::u8path(abs), asset_ec);
+        if (asset_ec || sz > 64ull * 1024 * 1024) {
             mg_http_reply(c, 413, "Content-Type: text/plain; charset=utf-8\r\n", "文件过大");
             return;
         }
@@ -384,8 +384,8 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
                 if (std::fclose(f) != 0) write_ok = false;
                 if (!write_ok) {
                     error = "写入失败：" + base;
-                    std::error_code ec;
-                    fs::remove(fs::u8path(target), ec);
+                    std::error_code remove_ec;
+                    fs::remove(fs::u8path(target), remove_ec);
                     continue;
                 }
                 written += static_cast<long>(body_len);
@@ -410,8 +410,8 @@ void ShareServer::handle(mg_connection* c, mg_http_message* hm, int ev) {
                     if (std::fclose(f) != 0) write_ok = false;
                     if (!write_ok) {
                         error = "写入失败：" + base;
-                        std::error_code ec;
-                        fs::remove(fs::u8path(target), ec);
+                        std::error_code remove_ec;
+                        fs::remove(fs::u8path(target), remove_ec);
                     } else {
                         written = static_cast<long>(body_len);
                     }

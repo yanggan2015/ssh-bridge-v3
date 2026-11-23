@@ -637,9 +637,9 @@ void Shell::fill_tree() {
     std::string want = view_.active_channel();
     HTREEITEM initial = nullptr;
     if (!want.empty()) {
-        const auto& entries = core_->entries();
-        for (std::size_t i = 0; i < entries.size(); ++i) {
-            if (entries[i].name != want) continue;
+        const auto& channel_entries = core_->entries();
+        for (std::size_t i = 0; i < channel_entries.size(); ++i) {
+            if (channel_entries[i].name != want) continue;
             for (HTREEITEM h : channel_items_) {
                 TVITEMW tv{};
                 tv.mask = TVIF_PARAM | TVIF_HANDLE;

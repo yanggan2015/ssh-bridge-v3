@@ -364,12 +364,12 @@ LRESULT RelayPanel::handle(UINT msg, WPARAM wp, LPARAM lp) {
                 mgr_->relay_note_state(r->relay_port, r->relay_channel, r->relay_on, r->relay_mode,
                                        r->ok ? std::string() : r->message);
             }
-            std::wstring msg = utf8_to_wide(r->message);
+            std::wstring result_msg = utf8_to_wide(r->message);
             if (!r->output.empty()) {
                 std::size_t n = std::min<std::size_t>(r->output.size(), 600);
-                msg += L"\n" + utf8_to_wide(r->output.substr(0, n));
+                result_msg += L"\n" + utf8_to_wide(r->output.substr(0, n));
             }
-            note(msg, !r->ok);
+            note(result_msg, !r->ok);
             if (!r->output.empty()) util::ensure_dir("output");
             delete r;
         }

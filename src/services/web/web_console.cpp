@@ -248,6 +248,19 @@ bool valid_channel_name(const std::string& name, std::string* err) {
     return true;
 }
 
+bool valid_nfs_alias(const std::string& alias) {
+    if (alias.empty()) return true;  // 空值由配置层默认成 /share
+    if (alias.size() > 128 || alias[0] != '/') return false;
+    if (alias.find("..") != std::string::npos) return false;
+    for (unsigned char c : alias) {
+        if (c < 0x20 || c == 0x7f) return false;
+        if (c == '\'' || c == '"' || c == '`' || c == '\\' || c == ';' ||
+            c == '&' || c == '|' || c == '$' || c == '(' || c == ')' ||
+            c == ' ' || c == '\t') return false;
+    }
+    return true;
+}
+
 void add_action_json(cJSON* o, const BoardActionConfig& a) {
     cJSON_AddStringToObject(o, "id", a.id.c_str());
     cJSON_AddStringToObject(o, "label", a.label.c_str());
@@ -827,12 +840,12 @@ struct WebConsole::Impl {
     TransferProgress xfer;
 
     void xfer_set(const std::string& path, const std::string& direction, const std::string& state,
-                  const std::string& error, std::uint64_t sent, std::uint64_t total) {
+                  const std::string& err_text, std::uint64_t sent, std::uint64_t total) {
         std::lock_guard<std::mutex> g(prog_mu);
         xfer.path = path;
         xfer.direction = direction;
         xfer.state = state;
-        xfer.error = error;
+        xfer.error = err_text;
         xfer.sent = sent;
         xfer.total = total;
         xfer.updated_ms = now_ms();
@@ -1281,7 +1294,7 @@ void WebConsole::Impl::worker_loop() {
             } else {
                 BoardActionResult r = run_board_action(
                     task.cfg, task.channel, *found, task.bridge.get(),
-                    [this](const std::string& port) { return core && core->port_in_use(port); }, 0, {});
+                    [this](const std::string& relay_port) { return core && core->port_in_use(relay_port); }, 0, {});
                 ok = r.ok;
                 message = r.message;
                 output = r.output;
@@ -2356,20 +2369,20 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 reply_json_text(c, 400, agent::error_json("invalid_argument", "name required", rid));
                 return;
             }
-            bool running = bridge(del) && bridge(del)->running();
+            bool channel_running = bridge(del) && bridge(del)->running();
             bool referenced = false;
             if (core) {
                 for (const std::string& pane : core->config().ui.pane_channels)
                     if (pane == del) referenced = true;
             }
-            if ((running || referenced) && !json_bool(body, "confirm", false)) {
+            if ((channel_running || referenced) && !json_bool(body, "confirm", false)) {
                 cJSON_Delete(body);
                 cJSON* out = cJSON_CreateObject();
                 cJSON_AddBoolToObject(out, "ok", false);
                 cJSON* errj = cJSON_AddObjectToObject(out, "error");
                 cJSON_AddStringToObject(errj, "code", "channel_in_use");
                 cJSON_AddStringToObject(errj, "message", "channel is running or referenced by a pane; confirm required");
-                cJSON_AddBoolToObject(errj, "running", running);
+                cJSON_AddBoolToObject(errj, "running", channel_running);
                 cJSON_AddBoolToObject(errj, "referenced", referenced);
                 cJSON_AddStringToObject(out, "request_id", rid.c_str());
                 reply_json(c, 409, out);
@@ -2819,16 +2832,16 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return "telnet";
         };
         // 以磁盘最新配置为基准做局部修改，避免与按钮/继电器/并发通道写入互相覆盖。
-        bool saved = core && core->patch_config_json([&](cJSON* root) -> bool {
-            ensure_channel_array(root, "boards");
-            ensure_channel_array(root, "ssh");
-            ensure_channel_array(root, "powershell");
-            ensure_channel_array(root, "telnet");
-            if (channel_object(root, name) && name != old_name) {
+        bool saved = core && core->patch_config_json([&](cJSON* cfg_root) -> bool {
+            ensure_channel_array(cfg_root, "boards");
+            ensure_channel_array(cfg_root, "ssh");
+            ensure_channel_array(cfg_root, "powershell");
+            ensure_channel_array(cfg_root, "telnet");
+            if (channel_object(cfg_root, name) && name != old_name) {
                 err = "通道名已存在";
                 return false;
             }
-            cJSON* arr = ensure_channel_array(root, channel_key(kind));
+            cJSON* arr = ensure_channel_array(cfg_root, channel_key(kind));
             int idx = -1;
             cJSON* target = find_named_in_array(arr, old_name.empty() ? name : old_name, &idx);
             if (!target && !old_name.empty()) {
@@ -3498,8 +3511,8 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             if (!cJSON_IsObject(dev)) dev = body;
             std::string old_name = json_str(body, "old_name");
             std::string name = json_str(dev, "name");
-            std::string port = json_str(dev, "windows_port");
-            if (port.empty()) port = json_str(dev, "port");
+            std::string serial_port = json_str(dev, "windows_port");
+            if (serial_port.empty()) serial_port = json_str(dev, "port");
             std::string linux_port = json_str(dev, "linux_port");
             int channels = json_int(dev, "channels", 2);
             int baud = json_int(dev, "baudrate", 9600);
@@ -3508,7 +3521,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             bool io_inv = json_bool(dev, "io_inverted", false);
             bool pol_inv = json_bool(dev, "polarity_inverted", false);
             cJSON_Delete(body);
-            if (name.empty() || port.empty() || channels < 1 || channels > 16 || baud < 1200 || baud > 115200 || delay < 0) {
+            if (name.empty() || serial_port.empty() || channels < 1 || channels > 16 || baud < 1200 || baud > 115200 || delay < 0) {
                 reply_json_text(c, 400, "{\"ok\":false,\"error\":\"设备名/端口不能为空，通道 1-16，波特率 1200-115200\"}");
                 return;
             }
@@ -3549,7 +3562,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 cJSON_AddBoolToObject(existing, "enable", enable);
                 cJSON_DeleteItemFromObjectCaseSensitive(existing, "windows_port");
                 cJSON_DeleteItemFromObjectCaseSensitive(existing, "port");
-                cJSON_AddStringToObject(existing, "windows_port", port.c_str());
+                cJSON_AddStringToObject(existing, "windows_port", serial_port.c_str());
                 cJSON_DeleteItemFromObjectCaseSensitive(existing, "linux_port");
                 cJSON_AddStringToObject(existing, "linux_port", linux_port.c_str());
                 cJSON_DeleteItemFromObjectCaseSensitive(existing, "channels");
@@ -3943,12 +3956,12 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json(c, 200, root);
             return;
         }
-        bool running = services->tftp_running();
+        bool tftp_on = services->tftp_running();
         std::string root_dir = services->tftp_root();
-        cJSON_AddBoolToObject(root, "running", running);
+        cJSON_AddBoolToObject(root, "running", tftp_on);
         cJSON_AddStringToObject(root, "protocol", "udp");
         cJSON_AddStringToObject(root, "root", root_dir.c_str());
-        cJSON_AddNumberToObject(root, "port", running ? services->tftp_port() : cfg.tftp.port);
+        cJSON_AddNumberToObject(root, "port", tftp_on ? services->tftp_port() : cfg.tftp.port);
         cJSON_AddStringToObject(root, "bind_ip", cfg.tftp.bind_ip.c_str());
         cJSON_AddBoolToObject(root, "allow_write", cfg.tftp.allow_write);
         cJSON_AddStringToObject(root, "note", services->tftp_status().c_str());
@@ -4343,7 +4356,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 return;
             }
             bool enable = json_bool(body, "enable", false);
-            int port = json_int(body, "port", key == "tftp" ? 69 : (key == "nfs" ? 2049 : 18082));
+            int svc_port = json_int(body, "port", key == "tftp" ? 69 : (key == "nfs" ? 2049 : 18082));
             std::string root = util::trim(json_str(body, "root"));
             std::string bind_ip = util::trim(json_str(body, "bind_ip"));
             std::string alias = util::trim(json_str(body, "alias"));
@@ -4351,12 +4364,16 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             int gid = json_int(body, "gid", 0);
             bool allow_write = json_bool(body, "allow_write", true);
             cJSON_Delete(body);
-            if ((key != "nfs" && (port < 1 || port > 65535)) || uid < 0 || uid > 65535 || gid < 0 || gid > 65535) {
+            if ((key != "nfs" && (svc_port < 1 || svc_port > 65535)) || uid < 0 || uid > 65535 || gid < 0 || gid > 65535) {
                 reply_json_text(c, 400, "{\"ok\":false,\"error\":\"端口或 UID/GID 超出范围\"}");
                 return;
             }
             if (key == "nfs" && (!alias.empty() && alias[0] != '/')) {
                 reply_json_text(c, 400, "{\"ok\":false,\"error\":\"NFS 别名必须以 / 开头\"}");
+                return;
+            }
+            if (key == "nfs" && !valid_nfs_alias(alias)) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"NFS 别名含非法字符\"}");
                 return;
             }
             std::string err;
@@ -4370,7 +4387,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                     cJSON_AddNumberToObject(sec, "uid", uid);
                     cJSON_AddNumberToObject(sec, "gid", gid);
                 } else {
-                    cJSON_AddNumberToObject(sec, "port", port);
+                    cJSON_AddNumberToObject(sec, "port", svc_port);
                     if (key == "tftp") {
                         cJSON_AddStringToObject(sec, "bind_ip", bind_ip.c_str());
                         cJSON_AddBoolToObject(sec, "allow_write", allow_write);
@@ -4404,9 +4421,24 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        if (!cJSON_IsObject(body)) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid json\"}");
+            return;
+        }
+        const cJSON* on_item = cJSON_GetObjectItemCaseSensitive(body, "on");
+        if (!cJSON_IsBool(on_item)) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"on must be boolean\"}");
+            return;
+        }
         std::string name = json_str(body, "name");
-        bool on = cJSON_IsTrue(cJSON_GetObjectItem(body, "on"));
+        bool on = cJSON_IsTrue(on_item);
         cJSON_Delete(body);
+        if (name.empty()) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"name required\"}");
+            return;
+        }
         if (!services || !core) {
             reply_json_text(c, 500, "{\"ok\":false,\"error\":\"services not ready\"}");
             return;
@@ -4514,7 +4546,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             std::string exe_path = json_str(body, "exe_path");
             std::string server_addr = json_str(body, "server_addr");
             int server_port = json_int(body, "server_port", 7000);
-            std::string token = json_str(body, "token");
+            std::string tunnel_token = json_str(body, "token");
             int local_port = json_int(body, "local_port", 18081);
             int remote_port = json_int(body, "remote_port", 0);
             int ssh_local_port = json_int(body, "ssh_local_port", 2222);
@@ -4544,7 +4576,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                 cJSON_AddStringToObject(sec, "exe_path", exe_path.c_str());
                 cJSON_AddStringToObject(sec, "server_addr", server_addr.c_str());
                 cJSON_AddNumberToObject(sec, "server_port", server_port);
-                cJSON_AddStringToObject(sec, "token", token.c_str());
+                cJSON_AddStringToObject(sec, "token", tunnel_token.c_str());
                 cJSON_AddNumberToObject(sec, "local_port", local_port);
                 cJSON_AddNumberToObject(sec, "remote_port", remote_port);
                 cJSON_AddNumberToObject(sec, "ssh_local_port", ssh_local_port);
@@ -4572,18 +4604,18 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
                                                        : "discovery";
         cJSON* root = cJSON_CreateObject();
         cJSON_AddBoolToObject(root, "ok", true);
-        bool running = false;
+        bool service_on = false;
         if (services) {
             cJSON* all = cJSON_Parse(services->state_json().c_str());
             cJSON* sec = all ? cJSON_GetObjectItemCaseSensitive(all, key) : nullptr;
             if (cJSON_IsObject(sec)) {
-                running = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sec, "on"));
+                service_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sec, "on"));
                 cJSON* dup = cJSON_Duplicate(sec, 1);
                 if (dup) cJSON_AddItemToObject(root, "status", dup);
             }
             cJSON_Delete(all);
         }
-        cJSON_AddBoolToObject(root, "running", running);
+        cJSON_AddBoolToObject(root, "running", service_on);
         reply_json(c, 200, root);
         return;
     }

@@ -941,9 +941,9 @@ void TerminalView::draw_slot(HDC dc, int idx, RECT rc, bool active) {
         if (cursor_abs >= static_cast<std::uint64_t>(abs0) && cursor_abs < static_cast<std::uint64_t>(abs0 + rows)) {
             int row = static_cast<int>(cursor_abs - static_cast<std::uint64_t>(abs0));
             int x = body.left + pane.cursor_col() * cell_w_;
-            int y = body.top + row * cell_h_;
+            int caret_y = body.top + row * cell_h_;
             HBRUSH caret = CreateSolidBrush(active ? RGB(0xD4, 0xD4, 0xD4) : RGB(0x8A, 0x8A, 0x8A));
-            RECT cr{x, y, x + 2, y + cell_h_};
+            RECT cr{x, caret_y, x + 2, caret_y + cell_h_};
             FillRect(dc, &cr, caret);
             DeleteObject(caret);
         }
