@@ -126,7 +126,8 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 
 ## 当前状态
 
-- **当前基线（2026-11-24）**：分支 `feature/powershell-telnet-20261124`；本轮完成全量代码审计与输入加固，业务代码加严告警 **70 → 0**，`make clean` 后干净重建 **0 warning / 0 error**，质量闸门 **145 文件 ALL PASS**；19 套件 **19/19、1093/1093、bad=0**，Web 12 页逐页功能 **162/162**，新增 HTTP 输入加固 **8/8**。当前二进制 `13,549,928 B`，SHA-256 `5D95119BA1BF28AE839ADAF56DDC48B7C932FBEC32606F1A75CB24E027628D8A`。详见 `docs/代码审计与整理报告-20261124.md`。
+- **Web 可选 token（2026-11-24）**：新增 `web.require_token`，默认不启用 token，写接口开放；启用后恢复 `Authorization: Bearer <web.token>` 校验。Web 顶部“安全”面板可勾选启用并保存，`GET/POST /api/web/auth` 提供状态与切换，`/status` 增加 `token_required`/`token_set`。干净重建 **0 warning / 0 error**；Token 专项 **8/8**、Web 功能 **162/162**、Web 下拉 **201/201**、桌面 **69/69**、桌面下拉 **139/139**、HTTP 加固 **8/8**。当前二进制 `13,564,962 B`，SHA-256 `69E6B8D176912FD248C76A423B5BFF7A7202A83DD63A03B8D7DF2A3A646ADA17`；详见 `docs/Web-可选Token认证-20261124.md`。
+- **早前基线（2026-11-24 下午）**：分支 `feature/powershell-telnet-20261124`；本轮完成全量代码审计与输入加固，业务代码加严告警 **70 → 0**，`make clean` 后干净重建 **0 warning / 0 error**，质量闸门 **145 文件 ALL PASS**；19 套件 **19/19、1093/1093、bad=0**，Web 12 页逐页功能 **162/162**，新增 HTTP 输入加固 **8/8**。当时二进制 `13,549,928 B`，SHA-256 `5D95119BA1BF28AE839ADAF56DDC48B7C932FBEC32606F1A75CB24E027628D8A`。详见 `docs/代码审计与整理报告-20261124.md`。
 - **审计修复**：`POST /service` 对非法 JSON、缺失/非布尔 `on`、空 `name` 返回 400，不再静默停服务；NFS 别名增加绝对路径与字符白名单，Linux `mount --bind`/`umount` 改用安全单引号转义；Web NFS 配置保存阶段拒绝非法别名；修复 16 处 shadow 与 1 处 cast-qual 告警。
 - **完整盘点（2026-11-24）**：桌面 69 个可见控件、Web 12 页、Agent `/api/help` 74 项操作均已逐项盘点，141 条功能台账为“完整 126 / 部分 3 / 未实现 12”；证据与明细见 `docs/全功能清单与完整测试报告-20261124.md`。
 - **本体**：原生 Win32 单进程终端工作台，串口/SSH 出站、共享 ring、ANSI 终端、1/2/4 分屏、SFTP、板控按钮、Lua/DSL、快捷指令、托盘与单实例均已落地。
