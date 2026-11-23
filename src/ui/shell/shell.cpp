@@ -338,26 +338,28 @@ void Shell::sync_web() {
             web_->stop();
             note_status(L"Web 控制台已关闭");
         }
-        web_->configure(w.port, w.token);
+        web_->configure(w.port, w.token, w.require_token);
         aibridge::set_web_console(web_);
         return;
     }
-    if (web_->running() && web_->port() == w.port && web_->token() == w.token) {
+    if (web_->running() && web_->port() == w.port && web_->token() == w.token &&
+        web_->require_token() == w.require_token) {
         aibridge::set_web_console(web_);
         return;
     }
     if (web_->running()) web_->stop();
-    web_->configure(w.port, w.token);
+    web_->configure(w.port, w.token, w.require_token);
     std::string err;
-    if (!web_->start(core_, services_, w.port, w.token, &err)) {
+    if (!web_->start(core_, services_, w.port, w.token, w.require_token, &err)) {
         note_status(L"Web 控制台启动失败：" + widen(err));
         aibridge::set_web_console(web_);
         return;
     }
     aibridge::set_web_console(web_);
     std::string url = "http://" + services_->local_ip() + ":" + std::to_string(w.port);
-    note_status(L"Web 控制台：" + widen(url) +
-                (w.token.empty() ? L"（只读，无 token）" : L"（写接口需 token）"));
+    std::wstring auth = !w.require_token ? L"（可写，未启用 token）"
+                       : (w.token.empty() ? L"（只读，token 未配置）" : L"（写接口需 token）");
+    note_status(L"Web 控制台：" + widen(url) + auth);
 }
 
 void Shell::sync_s12() {

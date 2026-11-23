@@ -188,7 +188,9 @@ std::string help_json(AppCore* core, int web_port, const UiBridgeInfo& ui, bool 
     cJSON_AddStringToObject(root, "build", kBuild);
     cJSON_AddNumberToObject(root, "schema", 2);
     cJSON_AddStringToObject(root, "protocol", kProtocol);
-    cJSON_AddStringToObject(root, "auth", "写接口使用 Authorization: Bearer <web.token>；读接口公开");
+    cJSON_AddStringToObject(root, "auth", web_token_required
+                                                  ? "写接口使用 Authorization: Bearer <web.token>；读接口公开"
+                                                  : "未启用 Web token；写接口开放，读接口公开");
 
     cJSON* surfaces = cJSON_AddObjectToObject(root, "surfaces");
     cJSON* device = cJSON_AddObjectToObject(surfaces, "device");
@@ -196,7 +198,7 @@ std::string help_json(AppCore* core, int web_port, const UiBridgeInfo& ui, bool 
     cJSON_AddNumberToObject(device, "port", web_port);
     cJSON_AddStringToObject(device, "base_url", "/");
     cJSON_AddStringToObject(device, "protocol", kProtocol);
-    cJSON_AddStringToObject(device, "auth", web_token_required ? "bearer-write" : "read-only-write-disabled");
+    cJSON_AddStringToObject(device, "auth", web_token_required ? "bearer-write" : "open-write");
     cJSON* ui_json = cJSON_AddObjectToObject(surfaces, "ui_bridge");
     cJSON_AddBoolToObject(ui_json, "enabled", ui.enabled);
     cJSON_AddNumberToObject(ui_json, "port", ui.port);
@@ -250,7 +252,7 @@ std::string status_json(AppCore* core, int web_port, const UiBridgeInfo& ui, boo
     cJSON_AddBoolToObject(device, "enabled", true);
     cJSON_AddNumberToObject(device, "port", web_port);
     cJSON_AddStringToObject(device, "base_url", "/");
-    cJSON_AddStringToObject(device, "auth", web_token_required ? "bearer-write" : "read-only-write-disabled");
+    cJSON_AddStringToObject(device, "auth", web_token_required ? "bearer-write" : "open-write");
     cJSON_AddNumberToObject(device, "channels", core ? static_cast<double>(core->entries().size()) : 0);
     cJSON* deps = cJSON_AddArrayToObject(device, "endpoints");
     for (const char* e : {"/health", "/api/help", "/help", "/help/<channel>", "/api/agent/status",
@@ -307,7 +309,7 @@ std::string help_text(AppCore* core, int web_port, const UiBridgeInfo& ui) {
     } else {
         out += "  (core not ready)\n";
     }
-    out += "\n写操作需要 Authorization: Bearer <web.token>。通道写还要过租约锁；他人持锁返回 423 agent_lock。\n";
+    out += "\n写操作是否要求 Authorization: Bearer <web.token> 取决于 Web 安全设置；通道写始终要过租约锁，他人持锁返回 423 agent_lock。\n";
     out += "每通道的可复制 curl 见 GET /help/<channel>。\n";
     return out;
 }

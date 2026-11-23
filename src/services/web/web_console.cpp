@@ -1,7 +1,7 @@
 // web_console.cpp — S9：单端口 HTTP + WebSocket + 10 个手机可用的网页。
 //
 // 设计口径：http_port 默认 18081；/ws/log 下行 BINARY；上行 /write 进 cmdq；
-// 无 token 只读（status/log），写接口 401；3 个 WS 会话各自独立游标。
+// require_token=false 时写接口开放；true 时写接口要求 Bearer token。3 个 WS 会话各自独立游标。
 #include "services/web/web_console.h"
 #include "services/web/web_pages.h"
 
@@ -111,22 +111,24 @@ std::string page_shell(const std::string& page, const std::string& body, const s
                        "<button class=\"nav-menu-btn\" id=\"navMenuBtn\" type=\"button\" "
                        "aria-expanded=\"false\" title=\"展开页面导航\">菜单</button>"
                        "<button class=\"nav-menu-btn\" id=\"tokenMenuBtn\" type=\"button\" "
-                       "aria-expanded=\"false\" title=\"设置 Bearer token\">令牌</button><nav>" +
+                       "aria-expanded=\"false\" title=\"Web 安全设置：可选 token\">安全</button><nav>" +
                        nav_html(page) + "</nav><div class=\"sidebar-foot\">"
                        "<div class=\"side-status\"><span class=\"status-dot\" id=\"sideDot\"></span>"
-                       "<span id=\"sideState\">只读模式</span></div>"
-                       "<div class=\"side-meta\">S9 · HTTP + WS<br>Bearer token · 仅本机/受信网络</div>"
+                       "<span id=\"sideState\">安全状态检测中</span></div>"
+                       "<div class=\"side-meta\">S9 · HTTP + WS<br>Web 写保护 · 可选 token</div>"
                        "</div></aside>"
                        "<main><div class=\"shell\"><header class=\"page-head\">"
                        "<button class=\"nav-toggle-global\" id=\"navToggle\" type=\"button\" "
                        "title=\"显示/隐藏页面导航（Ctrl+Shift+B）\">导航</button>"
                        "<div class=\"title-wrap\"><h1>" + page_title(page) + "</h1>"
                        "<div class=\"sub\">" + page_subtitle(page) + "</div></div>"
-                       "<div class=\"header-tools\"><span class=\"chip\" id=\"tokenState\">只读</span>"
-                       "<div class=\"token-box\"><input id=\"tokenBox\" type=\"password\" "
+                       "<div class=\"header-tools\"><span class=\"chip\" id=\"tokenState\">检查中</span>"
+                       "<div class=\"token-box\"><label class=\"token-switch\" title=\"启用后写接口必须携带 Bearer token\">"
+                       "<input id=\"tokenEnable\" type=\"checkbox\" aria-label=\"启用 token 校验\"><span>启用 token</span></label>"
+                       "<input id=\"tokenBox\" type=\"password\" "
                        "placeholder=\"Bearer token\" autocomplete=\"off\" spellcheck=\"false\" "
                        "aria-label=\"Bearer token\">"
-                       "<button id=\"saveToken\" class=\"btn ghost\" type=\"button\">保存 token</button>"
+                       "<button id=\"saveToken\" class=\"btn ghost\" type=\"button\">保存设置</button>"
                        "</div></div></header>" +
                        body + "</div></main></div>"
                        "<div class=\"toast\" id=\"toast\" aria-live=\"polite\"></div>"
@@ -823,6 +825,7 @@ struct WebConsole::Impl {
     std::atomic<bool> running{false};
     std::atomic<bool> stop{false};
     int port = 18081;
+    bool require_token = false;
     std::string token;
     void* notify = nullptr;
     std::string error;
@@ -872,6 +875,7 @@ struct WebConsole::Impl {
     }
 
     bool write_ok(mg_http_message* hm) const {
+        if (!require_token) return true;
         if (token.empty()) return false;
         mg_str* h = mg_http_get_header(hm, "Authorization");
         if (!h) return false;
@@ -940,7 +944,9 @@ std::string WebConsole::Impl::status() const {
     cJSON* web = cJSON_AddObjectToObject(root, "web");
     cJSON_AddBoolToObject(web, "on", running.load());
     cJSON_AddNumberToObject(web, "port", port);
-    cJSON_AddBoolToObject(web, "readonly", token.empty());
+    cJSON_AddBoolToObject(web, "token_required", require_token);
+    cJSON_AddBoolToObject(web, "token_set", !token.empty());
+    cJSON_AddBoolToObject(web, "readonly", require_token && token.empty());
     std::string ip = services ? services->local_ip() : "127.0.0.1";
     cJSON_AddStringToObject(web, "url", ("http://" + ip + ":" + std::to_string(port)).c_str());
     return json_text(root);
@@ -2289,12 +2295,72 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         reply_text(c, 200, core ? core->config_json_text() : "{}", "application/json; charset=utf-8");
         return;
     }
+    if (path == "/api/web/auth") {
+        if (method_is(hm, "GET")) {
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", true);
+            cJSON_AddBoolToObject(root, "enabled", require_token);
+            cJSON_AddBoolToObject(root, "token_set", !token.empty());
+            reply_json(c, 200, root);
+            return;
+        }
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET or POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"web auth requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        if (!cJSON_IsObject(body)) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"invalid JSON\"}");
+            return;
+        }
+        bool enabled = json_bool(body, "enabled", require_token);
+        const cJSON* jt = cJSON_GetObjectItemCaseSensitive(body, "token");
+        std::string next_token = cJSON_IsString(jt) ? jt->valuestring : token;
+        if (enabled && next_token.empty()) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"启用 token 前必须设置非空 token\"}");
+            return;
+        }
+        std::string err;
+        bool saved = core && core->patch_config_json([&](cJSON* root) {
+            cJSON* web = cJSON_GetObjectItemCaseSensitive(root, "web");
+            if (!cJSON_IsObject(web)) {
+                cJSON_DeleteItemFromObjectCaseSensitive(root, "web");
+                web = cJSON_AddObjectToObject(root, "web");
+            }
+            cJSON_DeleteItemFromObjectCaseSensitive(web, "require_token");
+            cJSON_AddBoolToObject(web, "require_token", enabled);
+            cJSON_DeleteItemFromObjectCaseSensitive(web, "token");
+            cJSON_AddStringToObject(web, "token", next_token.c_str());
+            return true;
+        }, &err);
+        cJSON_Delete(body);
+        if (!saved) {
+            cJSON* root = cJSON_CreateObject();
+            cJSON_AddBoolToObject(root, "ok", false);
+            cJSON_AddStringToObject(root, "error", err.c_str());
+            reply_json(c, 400, root);
+            return;
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddBoolToObject(root, "enabled", enabled);
+        cJSON_AddBoolToObject(root, "token_set", !next_token.empty());
+        reply_json(c, 200, root);
+        if (notify) PostMessageW(static_cast<HWND>(notify), kMsgWebReload, 0, 0);
+        return;
+    }
     if (path == "/api/help") {
         if (!method_is(hm, "GET")) {
             reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", new_request_id()));
             return;
         }
-        reply_json_text(c, 200, agent::help_json(core, port, ui_info(), !token.empty()));
+        reply_json_text(c, 200, agent::help_json(core, port, ui_info(), require_token));
         return;
     }
     if (path == "/api/agent/status") {
@@ -2306,7 +2372,7 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 401, "{\"ok\":false,\"error\":\"agent status requires Bearer token\"}");
             return;
         }
-        reply_json_text(c, 200, agent::status_json(core, port, ui_info(), !token.empty()));
+        reply_json_text(c, 200, agent::status_json(core, port, ui_info(), require_token));
         return;
     }
     if (path == "/boards" || path == "/boards/delete") {
@@ -4706,7 +4772,7 @@ void WebConsole::set_notify(void* hwnd) {
 }
 
 bool WebConsole::start(AppCore* core, ServiceManager* services, int port,
-                       const std::string& token, std::string* err) {
+                       const std::string& token, bool require_token, std::string* err) {
     if (impl_->running.load()) return true;
     if (port <= 0 || port > 65535) {
         if (err) *err = "Web 端口越界";
@@ -4716,6 +4782,7 @@ bool WebConsole::start(AppCore* core, ServiceManager* services, int port,
     impl_->services = services;
     impl_->port = port;
     impl_->token = token;
+    impl_->require_token = require_token;
     impl_->error.clear();
     impl_->stop.store(false);
     impl_->mgr = new mg_mgr();
@@ -4773,17 +4840,21 @@ bool WebConsole::running() const { return impl_ && impl_->running.load(); }
 int WebConsole::port() const { return impl_ ? impl_->port : 0; }
 std::string WebConsole::error() const { return impl_ ? impl_->error : std::string(); }
 std::string WebConsole::token() const { return impl_ ? impl_->token : std::string(); }
-void WebConsole::configure(int port, const std::string& token) {
+bool WebConsole::require_token() const { return impl_ && impl_->require_token; }
+void WebConsole::configure(int port, const std::string& token, bool require_token) {
     if (!impl_) return;
     impl_->port = port;
     impl_->token = token;
+    impl_->require_token = require_token;
 }
 std::string WebConsole::status_json() const {
     if (!impl_) return "{}";
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "on", impl_->running.load());
     cJSON_AddNumberToObject(root, "port", impl_->port);
-    cJSON_AddBoolToObject(root, "readonly", impl_->token.empty());
+    cJSON_AddBoolToObject(root, "token_required", impl_->require_token);
+    cJSON_AddBoolToObject(root, "token_set", !impl_->token.empty());
+    cJSON_AddBoolToObject(root, "readonly", impl_->require_token && impl_->token.empty());
     cJSON_AddStringToObject(root, "error", impl_->error.c_str());
     return json_text(root);
 }

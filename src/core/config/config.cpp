@@ -495,6 +495,8 @@ void load_root(const cJSON* root, AppConfig* out) {
         out->web.enabled = jbool(web, "enable", false);
         out->web.port = jint(web, "port", 18081);
         out->web.token = jstr(web, "token", "");
+        // 旧配置兼容：显式字段优先；缺失时，已有 token 视为启用，空 token 默认不启用。
+        out->web.require_token = jbool(web, "require_token", !out->web.token.empty());
     }
     const cJSON* agent = cJSON_GetObjectItemCaseSensitive(root, "agent");
     if (cJSON_IsObject(agent)) {
@@ -736,6 +738,8 @@ void save_root(cJSON* root, const AppConfig& cfg) {
     cJSON_AddBoolToObject(web, "enable", cfg.web.enabled);
     cJSON_DeleteItemFromObjectCaseSensitive(web, "port");
     cJSON_AddNumberToObject(web, "port", cfg.web.port);
+    cJSON_DeleteItemFromObjectCaseSensitive(web, "require_token");
+    cJSON_AddBoolToObject(web, "require_token", cfg.web.require_token);
     cJSON_DeleteItemFromObjectCaseSensitive(web, "token");
     cJSON_AddStringToObject(web, "token", cfg.web.token.c_str());
 

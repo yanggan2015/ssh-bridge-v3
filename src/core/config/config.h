@@ -125,7 +125,8 @@ struct InboundConfig {          // S8
 struct WebConfig {              // S9
     bool enabled = false;
     int  port    = 18081;
-    std::string token;          // 空 = 只读；非空 = 写接口要求 Bearer
+    bool require_token = false; // false = 不校验 token，写入开放；true = 写接口要求 Bearer
+    std::string token;          // require_token 为 true 时使用；空值会导致写入不可用
 };
 
 struct AgentConfig {            // S10

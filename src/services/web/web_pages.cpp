@@ -82,6 +82,8 @@ h1{font-size:27px;line-height:1.2;margin:0 0 5px;letter-spacing:-.3px}
   border-radius:11px;padding:3px 4px 3px 10px;box-shadow:var(--shadow-sm)}
 .token-box input{border:0;background:transparent;width:145px;padding:7px 4px;outline:none;font-size:13px}
 .token-box .btn{border-radius:8px;min-height:32px;padding:5px 9px;font-size:13px}
+.token-switch{display:flex;align-items:center;gap:4px;padding:0 5px;font-size:12px;color:var(--muted);white-space:nowrap}
+.token-switch input{width:14px!important;height:14px;margin:0;padding:0}
 .token-state{white-space:nowrap}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;
   margin-bottom:16px;box-shadow:var(--shadow-sm)}
@@ -321,7 +323,7 @@ dialog input{width:100%;margin-top:11px}
   header.page-head .header-tools .chip{display:none}
   h1{font-size:18px}
   .header-tools{margin-top:0;justify-content:flex-end}
-  .token-box{width:190px}.token-box input{width:100%;flex:1}
+  .token-box{width:250px}.token-box input{width:100%;flex:1}
   .card{padding:14px;border-radius:13px}
   .card-head{flex-direction:column;align-items:stretch;gap:10px}
   .card-head>.row-end{justify-content:flex-start}
@@ -334,7 +336,7 @@ dialog input{width:100%;margin-top:11px}
   body.pg-dashboard h1{display:none}
   body.pg-dashboard header.page-head{display:none}
   body.pg-dashboard.token-open header.page-head{display:flex;min-height:34px;margin:4px 0 5px}
-  body.pg-dashboard .token-box{width:170px}
+  body.pg-dashboard .token-box{width:250px}
   body.pg-dashboard .hint{margin-top:3px;line-height:1.3}
   .toast{max-width:none;left:10px;right:10px;top:46%;transform:translateY(-50%)}
   body.pg-dashboard main{padding:5px 6px 0}
@@ -453,15 +455,27 @@ dialog input{width:100%;margin-top:11px}
 
 extern const char* const kCommonJs = R"JS(
 const TOKEN_KEY='sb3_web_token';
+let AUTH_REQUIRED=false, AUTH_TOUCHED=false;
 const $=s=>document.querySelector(s);
 const $$=s=>Array.from(document.querySelectorAll(s));
 function tok(){return localStorage.getItem(TOKEN_KEY)||''}
 function setTok(v){localStorage.setItem(TOKEN_KEY,v||'');const e=$('#tokenBox');if(e)e.value=v||'';syncTokenUI()}
+function writeReady(){return !AUTH_REQUIRED||!!tok()}
 function syncTokenUI(){
-  const on=!!tok(), chip=$('#tokenState'), side=$('#sideState');
-  if(chip){chip.textContent=on?'可写 · 已带 token':'只读 · 未设 token';chip.className='chip '+(on?'on':'off')}
-  if(side){side.textContent=on?'Bearer token 已加载':'只读模式 · 无 token'}
-  const dot=$('#sideDot');if(dot)dot.className='status-dot '+(on?'on':'warn');
+  const requires=AUTH_REQUIRED, has=!!tok(), ok=writeReady();
+  const chip=$('#tokenState'), side=$('#sideState'), en=$('#tokenEnable');
+  if(en&&!AUTH_TOUCHED)en.checked=requires;
+  if(chip){chip.textContent=!requires?'可写 · 未启用 token':(has?'可写 · 已带 token':'需要 token');chip.className='chip '+(ok?'on':'off')}
+  if(side){side.textContent=!requires?'开放写入 · 未启用 token':(has?'Bearer token 已加载':'需要 token · 写入已锁')}
+  const box=$('#tokenBox');if(box)box.placeholder=requires?'Bearer token':'可选 token';
+  const dot=$('#sideDot');if(dot)dot.className='status-dot '+(ok?'on':'warn');
+}
+async function refreshAuthState(){
+  const r=await api('/status');
+  if(r.j&&r.j.web&&typeof r.j.web.token_required==='boolean'){
+    AUTH_REQUIRED=!!r.j.web.token_required;
+    syncTokenUI();
+  }
 }
 function hdr(extra){const h=Object.assign({},extra||{});if(tok())h.Authorization='Bearer '+tok();return h}
 async function api(path,opt){
@@ -511,18 +525,31 @@ function setBusy(btn,busy,label){
 }
 window.addEventListener('DOMContentLoaded',()=>{
   const e=$('#tokenBox');if(e){e.value=tok();e.onchange=()=>setTok(e.value.trim())}
+  const en=$('#tokenEnable');if(en)en.onchange=()=>{AUTH_TOUCHED=true};
   const sv=$('#saveToken');
-  if(sv)sv.onclick=()=>{setTok(($('#tokenBox')||{}).value.trim());toast('Token 已保存，正在刷新页面');setTimeout(()=>location.reload(),450)};
+  if(sv)sv.onclick=async()=>{
+    const enabled=!!(($('#tokenEnable')||{}).checked);
+    const token=(($('#tokenBox')||{}).value||'').trim();
+    if(enabled&&!token){toast('启用 token 前请先填写令牌','error');return}
+    setBusy(sv,true,'保存中…');
+    const r=await api('/api/web/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,token})});
+    setBusy(sv,false);
+    if(!r.r.ok){toast('保存失败：'+((r.j&&r.j.error)||r.t||r.status),'error');return}
+    setTok(token);AUTH_REQUIRED=enabled;AUTH_TOUCHED=false;syncTokenUI();
+    toast(enabled?'已启用 token，页面即将刷新':'已停用 token，写入不再需要令牌');
+    setTimeout(()=>location.reload(),1000);
+  };
   const tm=$('#tokenMenuBtn');
   if(tm)tm.onclick=ev=>{ev.stopPropagation();document.body.classList.toggle('token-open');tm.setAttribute('aria-expanded',document.body.classList.contains('token-open')?'true':'false')};
   syncTokenUI();
+  refreshAuthState();
 });
 )JS";
 
 static const char* kFileBrowserHtml = R"HTML(
 <section class="card" id="fileCard">
   <div class="card-head">
-    <div class="card-title"><div><h2>共享文件</h2><div class="card-sub">TFTP / NFS / HTTP 共享使用同一根目录；上传和删除需要 token。</div></div></div>
+    <div class="card-title"><div><h2>共享文件</h2><div class="card-sub">TFTP / NFS / HTTP 共享使用同一根目录；上传和删除受 Web 写保护，启用 token 时需令牌。</div></div></div>
     <div class="file-toolbar">
       <button class="btn ghost" id="fileRefresh" type="button">刷新</button>
       <button class="btn ghost" id="fileMkdir" type="button">新建目录</button>
@@ -584,7 +611,7 @@ async function fileLoad(path){
 }
 async function fileUpload(files){
   if(!files||!files.length)return;
-  if(!tok()){toast('请先保存 Bearer token 再上传','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   for(const f of Array.from(files)){
     const r=await api('/api/files/upload?'+qs({path:FILE_PATH,name:f.name}),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});
     if(!r.r.ok){toast('上传失败：'+f.name+' · '+(r.j&&r.j.error||r.t),'error')}
@@ -617,7 +644,7 @@ std::string page_body(const std::string& page) {
   <section class="card terminal-card">
     <div class="card-head">
       <div class="card-title"><div><h2>终端</h2><div class="terminal-meta"><span class="chip accent" id="activeName">未选择</span><span class="chip" id="wsState">WS 未连接</span><span class="chip" id="rxBadge" title="当前通道累计接收字节">RX --</span><span class="chip" id="termLock">无 Agent 锁</span></div></div></div>
-      <div class="row-end"><button class="nav-toggle" id="toggleNav" type="button" title="显示/隐藏左侧通道面板">通道面板</button><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><button class="btn ghost" id="keyHelp" type="button" aria-keyshortcuts="F5 Control+F F3 Control+Shift+B" title="F5 刷新 · Ctrl+F 查找 · F3 下一个 · Ctrl+Shift+B 导航">快捷键</button><span class="pill" id="ro">只读</span></div>
+      <div class="row-end"><button class="nav-toggle" id="toggleNav" type="button" title="显示/隐藏左侧通道面板">通道面板</button><select id="ch" aria-label="选择通道"></select><button class="btn ghost" id="reload" type="button">刷新</button><button class="btn ghost" id="keyHelp" type="button" aria-keyshortcuts="F5 Control+F F3 Control+Shift+B" title="F5 刷新 · Ctrl+F 查找 · F3 下一个 · Ctrl+Shift+B 导航">快捷键</button><span class="pill" id="ro">检查中</span></div>
     </div>
     <div class="terminal-bar">
       <div class="pane-strip" id="paneStrip"><span class="pane-label">分屏</span><span class="form-status">正在读取画框…</span></div>
@@ -673,7 +700,7 @@ std::string page_body(const std::string& page) {
     <div class="card-title"><div><h2>通道</h2><div class="card-sub">串口、SSH、PowerShell 与 Telnet 通道的新增、编辑、改名、删除；保存后由 UI 线程重载。</div></div></div>
     <div class="row-end"><button class="btn ghost" id="loadChannels" type="button">刷新</button><button class="btn" id="newSerial" type="button">新增串口</button><button class="btn" id="newSsh" type="button">新增 SSH</button><button class="btn" id="newPowershell" type="button">新增 PowerShell</button><button class="btn" id="newTelnet" type="button">新增 Telnet</button></div>
   </div>
-  <div class="row-end" style="margin-bottom:11px"><span class="chip" id="chanCount">--</span><span class="chip" id="chanOnline">--</span><span class="form-status" id="chanNote">写接口需要 token。</span></div>
+  <div class="row-end" style="margin-bottom:11px"><span class="chip" id="chanCount">--</span><span class="chip" id="chanOnline">--</span><span class="form-status" id="chanNote">写操作受 Web 写保护；启用 token 时需令牌。</span></div>
   <div class="channel-cards" id="chanCards"></div>
 </section>
 <section class="card editor" id="chanEditor" hidden>
@@ -771,7 +798,7 @@ std::string page_body(const std::string& page) {
   <div class="form-status" id="agNote"></div>
 </section>
 <section class="card">
-  <div class="card-head"><div class="card-title"><div><h2>18081 接口速查</h2><div class="card-sub">优先从 /api/help 动态读取；下方只列闭环主路径。写操作需要 Bearer token，通道写还要过租约锁。</div></div></div><a class="btn ghost" href="/help" target="_blank">文本帮助</a></div>
+  <div class="card-head"><div class="card-title"><div><h2>18081 接口速查</h2><div class="card-sub">优先从 /api/help 动态读取；下方只列闭环主路径。写操作受 Web 写保护，启用 token 时需 Bearer token，通道写还要过租约锁。</div></div></div><a class="btn ghost" href="/help" target="_blank">文本帮助</a></div>
   <div class="help-list" id="deviceHelp"></div>
 </section>
 <section class="card">
@@ -792,7 +819,7 @@ std::string page_body(const std::string& page) {
     <button class="btn ghost" id="loadCfg" type="button">读取配置</button>
     <button class="btn" id="saveCfg" type="button">保存并重载</button>
     <span class="spacer"></span>
-    <span class="form-status" id="cfgNote">写接口需要 token。</span>
+    <span class="form-status" id="cfgNote">写操作受 Web 写保护；启用 token 时需令牌。</span>
   </div>
   <div id="cfgForm" class="cfg-form" style="margin-top:14px"></div>
 </section>
@@ -1316,7 +1343,7 @@ function renderTermLock(){
   chip.textContent='Agent 操作中';chip.className='chip warn';
   if(banner)banner.hidden=false;
   if(text)text.textContent='通道 '+l.channel+' 被 '+owner+' 持有；剩余 '+left+'s。人类写入前需接管。';
-  if(take)take.hidden=!tok();
+  if(take)take.hidden=!writeReady();
 }
 async function lockRefresh(ch){
   if(!ch)return;
@@ -1329,7 +1356,7 @@ async function lockRefresh(ch){
 async function takeLock(){
   const ch=$('#ch').value;
   if(!ch)return;
-  if(!tok()){toast('人工接管需要先保存 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const who=(TERM_LOCK&&TERM_LOCK.owner)||'Agent';
   if(!await askConfirm('人工接管通道','将清掉 '+who+' 在 '+ch+' 上的租约，并把后续写操作交给网页终端。','接管'))return;
   const r=await api('/lock/takeover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,reason:'web-terminal-human',session_id:TERM_TAKE_SID})});
@@ -1431,7 +1458,7 @@ async function paneLoad(){
 }
 async function paneActivate(index){
   const r=await api('/api/panes/active',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index})});
-  if(r.status===401){toast('激活画框需要先设置 Bearer token','error');return}
+  if(r.status===401){toast('当前已启用 token，请先设置 Bearer token','error');return}
   if(!r.j||!r.j.ok){toast('激活失败：'+((r.j&&r.j.error&&(r.j.error.message||r.j.error.code))||r.status),'error');return}
   const ch=r.j.channel||'';
   toast(r.j.live?'已激活画框 '+(index+1)+' · '+ch:'已保存画框 '+(index+1)+'，原生窗口未运行');
@@ -1441,11 +1468,12 @@ async function paneActivate(index){
 async function dashLoad(){
   const r=await api('/status'); if(!r.j||!r.j.channels){$('#term').textContent=r.t;toast('状态读取失败','error');return}
   LAST=r.j;const sel=$('#ch');const old=sel.value;sel.innerHTML='';
+  if(r.j.web&&typeof r.j.web.token_required==='boolean'){AUTH_REQUIRED=!!r.j.web.token_required;syncTokenUI()}
   for(const c of r.j.channels){const o=document.createElement('option');o.value=c.name;o.textContent=c.name+' · '+c.state;sel.appendChild(o)}
   if(old&&r.j.channels.some(c=>c.name===old))sel.value=old;else if(!sel.value&&r.j.channels[0])sel.value=r.j.channels[0].name;
   renderChannels(r.j);renderServices(r.j);paneLoad();
   updateRxBadge(sel.value);
-  const ro=!tok();$('#ro').textContent=ro?'只读（无 token）':'可写（带 token）';$('#ro').className='pill '+(ro?'off':'');
+  const ro=!writeReady();$('#ro').textContent=ro?'需要 token':(!AUTH_REQUIRED?'可写 · 无 token':'可写 · 带 token');$('#ro').className='pill '+(ro?'off':'');
   if(sel.value&&(sel.value!==LAST_CH||(!ws&&!WS_TIMER)))connect();
   else if(sel.value)lockRefresh(sel.value);
 }
@@ -1477,7 +1505,7 @@ async function sendRawBytes(data,label){
   }
   const r=await api('/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel:ch,data})});
   if(r.status===423){$('#hint').textContent='写入被 Agent 锁拦截';toast('通道被 Agent 锁住，请先人工接管','error');lockRefresh(ch);return false}
-  if(r.status===401){$('#hint').textContent='写入需要 Bearer token';toast('只读模式：先设置 token','error');return false}
+  if(r.status===401){$('#hint').textContent='写入需要 Bearer token';toast('已启用 token：先在“安全”面板保存令牌','error');return false}
   if(!r.r.ok){$('#hint').textContent='写入失败：'+r.status+' '+r.t;toast('发送失败','error');return false}
   $('#hint').textContent='已写入 '+ch+(label?' · '+label:'');
   return true;
@@ -1566,9 +1594,9 @@ function renderChannelsPage(){
 }
 async function loadChannels(){
   const [a,b]=await Promise.all([api('/api/channels'),api('/status')]);
-  if(a.status===401){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>需要 token</strong><p>在右上角填入 web.token 后再读取通道。</p></div>';$('#chanNote').textContent='只读模式：通道列表需要 token。';return}
+  if(a.status===401){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>需要 token</strong><p>当前已启用 token；在右上角“安全”面板填写并保存令牌后再读取通道。</p></div>';$('#chanNote').textContent='需要 token：通道列表受 token 保护。';return}
   if(!a.j||!a.j.ok){$('#chanCards').innerHTML='<div class="empty" style="grid-column:1/-1"><strong>读取失败</strong></div>';$('#chanNote').textContent='读取失败';return}
-  CHAN=a.j;CHAN_STATUS=b.j||{};$('#chanNote').textContent='配置读写需要 token；保存后约 1 秒重载。';renderChannelsPage();
+  CHAN=a.j;CHAN_STATUS=b.j||{};$('#chanNote').textContent='写操作受 Web 写保护；启用 token 时需令牌；保存后约 1 秒重载。';renderChannelsPage();
 }
 function blankChannel(kind){
   EDIT={kind,old:''};showKind(kind);
@@ -1747,7 +1775,7 @@ agRenderHelp();devLoad();agLoadCfg();
         return R"JS(
 let CFG=null,TAB='basic';
 const BASIC=['default','web','agent','inbound_ssh','ui','boards','ssh'];
-const LABELS={enable:'启用',port:'端口',token:'Token',name:'名称',serial_device:'串口设备',
+const LABELS={enable:'启用',port:'端口',token:'Token',require_token:'要求 Token',name:'名称',serial_device:'串口设备',
   baudrate:'波特率',auto_open:'自动打开',password:'密码',username:'用户名',target_password:'目标密码',
   target_host:'目标主机',target_port:'目标端口',target_username:'目标用户',keepalive:'Keepalive',buffer_size:'缓冲区',
   log_enabled:'写日志',close_to_tray:'关闭到托盘',start_minimized:'启动最小化',window_w:'窗口宽',window_h:'窗口高',font_px:'字号',
@@ -1801,7 +1829,7 @@ function node(path,key,val){
   return field(path,key,val);
 }
 function render(){
-  const box=$('#cfgForm'); if(!CFG){box.innerHTML='<div class="empty"><div class="empty-mark">i</div><strong>还没有读取配置</strong><p>先保存 token，再点“读取配置”。</p></div>';return}
+  const box=$('#cfgForm'); if(!CFG){box.innerHTML='<div class="empty"><div class="empty-mark">i</div><strong>还没有读取配置</strong><p>先点“读取配置”。</p></div>';return}
   const keys=TAB==='basic'?BASIC.filter(k=>k in CFG):Object.keys(CFG);
   const q=($('#cfgSearch').value||'').trim().toLowerCase();
   box.innerHTML=keys.map(k=>node([k],k,CFG[k])).join('')||'<div class="empty"><strong>没有字段</strong><p>当前 Tab 没有可编辑字段。</p></div>';
@@ -1821,7 +1849,7 @@ function render(){
 }
 async function cfgLoad(){
   const r=await api('/api/config');
-  if(!r.r.ok){$('#cfgNote').textContent='读取失败 '+r.status+'：需要 Bearer token';toast('配置读取失败，请先保存 token','error');return}
+  if(!r.r.ok){$('#cfgNote').textContent='读取失败 '+r.status+'：'+((r.j&&r.j.error)||r.t||'写保护');toast('配置读取失败：'+((r.j&&r.j.error)||r.t),'error');return}
   try{CFG=JSON.parse(r.t);$('#cfgNote').textContent='已读取 '+Object.keys(CFG).length+' 个顶层段';render();toast('配置已读取')}
   catch(e){$('#cfgNote').textContent='JSON 解析失败';toast('配置 JSON 解析失败','error')}
 }
@@ -1919,7 +1947,7 @@ function resetForm(a){
 function openActionEditor(a){resetForm(a);$('#actionEditor').scrollIntoView({behavior:'smooth',block:'start'});setTimeout(()=>$('#aLabel').focus(),120)}
 function closeActionEditor(){$('#actionEditor').hidden=true;ACT_EDIT=null}
 async function saveAction(){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const channel=$('#aChannel').value,id=$('#aId').value.trim(),label=$('#aLabel').value.trim(),backend=$('#aBackend').value;
   if(!channel||!id||!label){$('#actionNote').textContent='通道、ID、按钮文字都不能为空';toast('请补齐必填字段','error');return}
   if(!/^[A-Za-z0-9_.-]{1,64}$/.test(id)){$('#actionNote').textContent='ID 只允许字母、数字、点、下划线、短横线';toast('ID 格式不正确','error');return}
@@ -1983,7 +2011,7 @@ async function loadQuick(){
 function openQuickEditor(q){QUICK_EDIT=q||null;$('#quickEditor').hidden=false;$('#qLabel').value=q?q.label:'';$('#qCommand').value=q?q.command:'';$('#quickNote').textContent='';setTimeout(()=>$('#qLabel').focus(),80)}
 function closeQuickEditor(){$('#quickEditor').hidden=true;QUICK_EDIT=null}
 async function saveQuick(){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const channel=$('#quickChannel').value,label=$('#qLabel').value.trim(),command=$('#qCommand').value.trim();
   if(!channel||!label||!command){$('#quickNote').textContent='通道、按钮文字、命令都不能为空';toast('请补齐必填字段','error');return}
   const r=await api('/api/quick/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel,index:QUICK_EDIT?QUICK_EDIT.index:null,label,command})});
@@ -2042,7 +2070,7 @@ function openRelayEditor(d){
 }
 function closeRelayEditor(){$('#relayEditor').hidden=true;RELAY_EDIT=null}
 async function saveRelay(){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const device={name:$('#rName').value.trim(),windows_port:$('#rPort').value.trim(),channels:Number($('#rChannels').value||2),baudrate:Number($('#rBaud').value||9600),enable:$('#rEnable').value==='true',io_inverted:$('#rIoInv').value==='true',polarity_inverted:$('#rPolInv').value==='true',post_write_delay_ms:Number($('#rDelay').value||100)};
   if(!device.name||!device.windows_port){$('#relayNote').textContent='设备名称和端口不能为空';toast('请补齐必填字段','error');return}
   const r=await api('/api/relay/devices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:RELAY_EDIT?RELAY_EDIT.name:'',device})});
@@ -2100,7 +2128,7 @@ async function svcCfgLoad(){
   svcCfgApply(r.j.config||r.j);$('#svcCfgNote').textContent='配置已读取；保存后由 UI 线程重载。';
 }
 async function svcCfgSave(){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const btn=$('#saveSvcCfg');setBusy(btn,true,'保存中…');
   const cfg={enable:$('#svcEnable').value==='true',root:$('#svcRoot').value.trim()};
   if($('#svcPort'))cfg.port=Number($('#svcPort').value||(SVC==='tftp'?69:18082));
@@ -2115,7 +2143,7 @@ async function svcCfgSave(){
   $('#svcCfgNote').textContent='已保存，配置正在重载';toast(SVC_LABEL[SVC]+' 配置已保存');setTimeout(()=>{svcCfgLoad();svcLoad()},1400);setTimeout(()=>{svcCfgLoad();svcLoad()},2600);
 }
 async function svcSet(on){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const note=$('#svcHint');if(note)note.textContent=on?'正在启动…':'正在停止…';
   const r=await api('/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:SVC,on})});
   if(!r.r.ok){if(note)note.textContent='失败：'+(r.j&&r.j.error||r.t);toast('服务操作失败','error');return}
@@ -2143,13 +2171,13 @@ async function tcpLoad(){
   const s=await api('/api/tcp-forward');if(s.j){TCP_STATUS=s.j.status||{};tcpRenderStatus(TCP_STATUS)}
 }
 async function tcpSave(){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const cfg={enable:$('#tEnable').value==='true',listen_ip:$('#tListen').value.trim(),port_base:Number($('#tPortBase').value||22000),target_port:Number($('#tTarget').value||22),board_cidr:$('#tCidr').value.trim()};
   const r=await api('/api/tcp-forward/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
   if(!r.r.ok){$('#tcpNote').textContent='保存失败：'+(r.j&&r.j.error||r.t);toast('保存失败','error');return}
   $('#tcpNote').textContent='已保存，配置正在重载';toast('TCP 配置已保存');setTimeout(tcpLoad,1400);setTimeout(tcpLoad,2400);
 }
-async function tcpSvc(on){if(!tok()){toast('写操作需要 Bearer token','error');return}const r=await api('/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'tcp-forward',on})});if(!r.r.ok){toast('服务操作失败：'+(r.j&&r.j.error||r.t),'error');return}toast(on?'TCP 转发已启动':'TCP 转发已停止');setTimeout(tcpLoad,700)}
+async function tcpSvc(on){if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}const r=await api('/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'tcp-forward',on})});if(!r.r.ok){toast('服务操作失败：'+(r.j&&r.j.error||r.t),'error');return}toast(on?'TCP 转发已启动':'TCP 转发已停止');setTimeout(tcpLoad,700)}
 $('#saveTcp').onclick=tcpSave;$('#startTcp').onclick=()=>tcpSvc(true);$('#stopTcp').onclick=()=>tcpSvc(false);tcpLoad();
 )JS";
     }
@@ -2169,13 +2197,13 @@ async function tunLoad(){
   const s=await api('/api/tunnel');if(s.j)tunRenderStatus(s.j.status||{});
 }
 async function tunSave(){
-  if(!tok()){toast('写操作需要 Bearer token','error');return}
+  if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}
   const cfg={enable:$('#uEnable').value==='true',map_http:$('#uHttp').value==='true',map_inbound_ssh:$('#uSsh').value==='true',exe_path:$('#uExe').value.trim(),server_addr:$('#uServer').value.trim(),server_port:Number($('#uPort').value||7000),token:$('#uToken').value,local_port:Number($('#uLocal').value||18081),remote_port:Number($('#uRemote').value||0),ssh_local_port:Number($('#uSshLocal').value||2222),ssh_remote_port:Number($('#uSshRemote').value||0)};
   const r=await api('/api/tunnel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
   if(!r.r.ok){$('#tunNote').textContent='保存失败：'+(r.j&&r.j.error||r.t);toast('保存失败','error');return}
   $('#tunNote').textContent='已保存，配置正在重载';toast('隧道配置已保存');setTimeout(tunLoad,1400);setTimeout(tunLoad,2400);
 }
-async function tunSvc(on){if(!tok()){toast('写操作需要 Bearer token','error');return}const r=await api('/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'tunnel',on})});if(!r.r.ok){toast('服务操作失败：'+(r.j&&r.j.error||r.t),'error');return}toast(on?'隧道已启动':'隧道已停止');setTimeout(tunLoad,700)}
+async function tunSvc(on){if(!writeReady()){toast('当前已启用 token，请先填写并保存令牌','error');return}const r=await api('/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'tunnel',on})});if(!r.r.ok){toast('服务操作失败：'+(r.j&&r.j.error||r.t),'error');return}toast(on?'隧道已启动':'隧道已停止');setTimeout(tunLoad,700)}
 $('#uTokenEye').onclick=()=>{const i=$('#uToken');const show=i.type==='password';i.type=show?'text':'password';$('#uTokenEye').textContent=show?'隐藏':'显示'};
 $('#saveTun').onclick=tunSave;$('#startTun').onclick=()=>tunSvc(true);$('#stopTun').onclick=()=>tunSvc(false);tunLoad();
 )JS";
