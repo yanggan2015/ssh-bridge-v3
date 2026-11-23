@@ -150,26 +150,19 @@ pre.terminal mark.active{background:#7ee0c8;color:#05332e;box-shadow:0 0 0 2px r
 .terminal-shell .terminal{border:0;border-radius:0;box-shadow:none;margin:0;padding:14px 16px;
   min-height:0;max-height:none;flex:1}
 .terminal-shell>.xterm-host,.terminal-shell>pre.terminal{order:1}
-.terminal-keybar{order:2}
-.terminal-input{order:3}
+/* Desktop input is the terminal itself, exactly like the Win32 TerminalView. The keybar is
+   only a mobile assist strip and never a second text field. */
+.terminal-keybar{order:2;display:none}
 .xterm-host{display:flex;flex:1;min-height:0;padding:8px 10px 4px;background:#081820;overflow:hidden}
 .xterm-host[hidden]{display:none}
 .xterm-host .xterm{width:100%;height:100%}
 .xterm-host .xterm-viewport{overflow-y:auto!important;scrollbar-width:thin}
 .xterm-host .xterm-screen{width:100%}
-.terminal-keybar{display:flex;gap:4px;align-items:center;flex-wrap:nowrap;overflow-x:auto;padding:6px 8px;
+.terminal-keybar{display:none;gap:4px;align-items:center;flex-wrap:nowrap;overflow-x:auto;padding:6px 8px;
   background:#0c2028;border-top:1px solid #16383f;flex:0 0 auto;scrollbar-width:thin}
 .terminal-keybar button{flex:0 0 auto;border:1px solid #24525a;background:#102c34;color:#b9ded6;
   border-radius:7px;padding:4px 8px;font:13px/1.2 ui-monospace,Consolas,monospace;cursor:pointer;min-height:26px}
 .terminal-keybar button:hover{background:#17424b;border-color:#3c7c84;color:#e9fbf7}
-.terminal-input{display:flex;align-items:center;gap:7px;padding:7px 9px 8px;background:#0a1a20;
-  border-top:1px solid #16383f;flex:0 0 auto}
-.terminal-input .prompt{color:#69d8c4;font:600 13px/1 ui-monospace,Consolas,monospace;max-width:140px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.terminal-input input{flex:1;min-width:0;background:#07151b;border:1px solid #24525a;color:#e2f6f1;
-  border-radius:8px;padding:8px 10px;font:13px/1.35 ui-monospace,Consolas,monospace;outline:none}
-.terminal-input input:focus{border-color:#51b3a4;box-shadow:0 0 0 3px rgba(81,179,164,.14)}
-.terminal-input .btn{min-height:34px;padding:5px 11px;font-size:13px}
 .terminal-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 7px}
 .terminal-tools input{flex:1 1 150px;min-width:110px;font-size:13px}
 .terminal-tools .btn{padding:5px 9px;min-height:30px;font-size:13px}
@@ -370,12 +363,8 @@ dialog input{width:100%;margin-top:11px}
   .terminal-tools .btn{flex:0 0 auto}
   .terminal-card{min-height:0;height:calc(100vh - 190px);padding:12px}
   .terminal-shell .terminal{min-height:0;max-height:none;padding:10px 11px}
-  .terminal-keybar{padding:3px 5px;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+  .terminal-keybar{display:flex;padding:3px 5px;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
   .terminal-keybar button{flex:0 0 auto;padding:2px 6px;min-height:24px;scroll-snap-align:start}
-  .terminal-input{padding:4px 5px;gap:5px}
-  .terminal-input .prompt{display:none}
-  .terminal-input input{font-size:13px;padding:6px 8px}
-  .terminal-input .btn{min-height:32px;padding:4px 9px}
   .channel-card{height:auto;min-height:0;max-height:42vh}
   .channel-list{grid-template-columns:1fr}
   .channel-cards,.agent-grid{grid-template-columns:1fr}
@@ -572,19 +561,14 @@ std::string page_body(const std::string& page) {
         <button class="btn ghost" id="fontPlus" type="button" title="增大字号">A+</button>
         <button class="btn ghost" id="fullTerm" type="button" title="全屏终端">全屏</button>
         <button class="btn ghost" id="clearBuf" type="button">清空缓冲</button>
+        <button class="btn ghost" id="clearView" type="button" title="仅清空当前网页显示">清屏</button>
       </div>
     </div>
     <div class="lock-banner" id="lockBanner" hidden><span id="lockText"></span><button class="btn" id="takeLock" type="button">人工接管</button></div>
     <div class="terminal-shell">
-      <div class="terminal-input">
-        <span class="prompt" id="termPrompt">›</span>
-        <input id="cmd" placeholder="直通输入：按键即发送，Enter 执行；方向键/Tab/退格原样下发" aria-label="终端直通输入" autocomplete="off" spellcheck="false" autocapitalize="off">
-        <button class="btn" id="send" type="button">发送</button>
-        <button class="btn ghost" id="clear" type="button">清屏</button>
-      </div>
       <div class="xterm-host" id="xtermHost" hidden></div>
       <pre class="terminal" id="term" aria-live="polite"></pre>
-      <div class="terminal-keybar" id="keyBar" role="toolbar" aria-label="特殊键">
+      <div class="terminal-keybar" id="keyBar" role="toolbar" aria-label="移动端特殊键（桌面直接键盘输入）">
         <button type="button" data-key="esc" title="ESC">Esc</button>
         <button type="button" data-key="tab" title="Tab">Tab</button>
         <button type="button" data-key="ctrl-c" title="中断当前命令">Ctrl+C</button>
@@ -925,7 +909,6 @@ const KEY_SEQ={
   home:'\x1b[H',end:'\x1b[F',pgup:'\x1b[5~',pgdn:'\x1b[6~'
 };
 let XTERM=null,FIT=null,XTERM_MODE=false,XTERM_FAIL=false,XTERM_PROMISE=null,TERM_FIT_RAF=0;
-let XKEY_BUF='',XKEY_TIMER=0;
 const XTERM_CSS='https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css';
 const XTERM_JS='https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
 const XTERM_FIT='https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js';
@@ -957,14 +940,26 @@ function ensureXterm(){
   })();
   return XTERM_PROMISE;
 }
+function focusTerm(auto){
+  if(!XTERM_MODE||!XTERM)return false;
+  if(auto&&window.matchMedia&&window.matchMedia('(pointer:coarse)').matches)return false;
+  try{XTERM.focus();return true}catch(e){return false}
+}
+function enterBytes(){
+  const ch=$('#ch')?$('#ch').value:'';
+  const meta=LAST&&LAST.channels?LAST.channels.find(x=>x.name===ch):null;
+  const mode=(meta&&meta.line_ending)||'crlf';
+  if(mode==='none')return '';
+  if(meta&&meta.kind==='ssh')return mode==='lf'?'\n':'\r';
+  if(mode==='cr')return '\r';
+  if(mode==='lf')return '\n';
+  return '\r\n';
+}
 function queueXtermData(data){
   if(!data)return;
-  XKEY_BUF+=data;
-  if(XKEY_TIMER)return;
-  XKEY_TIMER=setTimeout(async()=>{
-    XKEY_TIMER=0;const buf=XKEY_BUF;XKEY_BUF='';
-    if(buf)await sendRawBytes(buf,'键盘');
-  },12);
+  // Same as Win32 TerminalView WM_CHAR: every key is sent immediately; 8ms only coalesces
+  // a burst, it never waits for Enter and never renders a local edit box.
+  queueInputData(data,'键盘');
 }
 function fitXterm(){
   if(!XTERM||!FIT)return;
@@ -1028,6 +1023,16 @@ async function initXterm(){
       if(ev.type!=='keydown')return true;
       if(ev.ctrlKey&&!ev.shiftKey&&!ev.altKey&&(ev.key==='f'||ev.key==='F')){focusTermFind();return false}
       if(!ev.ctrlKey&&!ev.altKey&&!ev.metaKey&&ev.key==='F3'){doFindNext();return false}
+      if(!ev.ctrlKey&&!ev.altKey&&!ev.metaKey&&ev.key==='Enter'){
+        const b=enterBytes();if(b)queueInputData(b,'Enter');return false;
+      }
+      // Keep the Win32 mapping explicit for keys whose browser/xterm defaults differ.
+      if(!ev.ctrlKey&&!ev.altKey&&!ev.metaKey&&(ev.key==='Home'||ev.key==='End')){
+        queueInputData(ev.key==='Home'?'\x1b[H':'\x1b[F',ev.key);return false;
+      }
+      if(!ev.ctrlKey&&!ev.altKey&&!ev.metaKey&&ev.key==='Backspace'){
+        queueInputData('\x7f','退格');return false;
+      }
       if(ev.ctrlKey&&ev.shiftKey&&(ev.key==='C'||ev.key==='c')){
         if(XTERM.hasSelection()){copyTerm();return false}
       }
@@ -1037,11 +1042,12 @@ async function initXterm(){
     fitXterm();
     setTimeout(fitXterm,60);setTimeout(fitXterm,350);setTimeout(fitXterm,900);
     setTimeout(fitXterm,1500);setTimeout(fitXterm,3000);
+    setTimeout(()=>focusTerm(true),120);
     window.addEventListener('resize',fitXterm);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)fitXterm()});
     if(typeof ResizeObserver!=='undefined'){new ResizeObserver(()=>fitXterm()).observe(host)}
     xtermPaintAll();
-    $('#hint').textContent='xterm 5.3 已启用 · 点会话区可直接输入，键条可左右滑动查看更多特殊键';
+    $('#hint').textContent='xterm 5.3 已启用 · 点会话区直接输入，字符立即下发并在同区回显';
   }catch(e){XTERM_FAIL=true;XTERM_MODE=false;host.hidden=true;fb.hidden=false}
 }
 function copyTerm(){
@@ -1295,7 +1301,7 @@ async function connect(){
   LAST_CH=ch;TERM_TEXT='';TERM_FIND='';TERM_HIT=0;
   if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();
   lockRefresh(ch);
-  $('#activeName').textContent=ch;$('#termPrompt').textContent=ch.length>18?ch.slice(-18):ch;
+  $('#activeName').textContent=ch;
   updateRxBadge(ch);
   $('#hint').textContent='正在连接 '+ch+' …';
   const dl=$('#dlTerm');if(dl)dl.href='/log/download?channel='+encodeURIComponent(ch);
@@ -1303,6 +1309,7 @@ async function connect(){
   if(gen!==WS_GEN)return;
   if(st==='missing'){$('#hint').textContent='通道不存在或已删除：'+ch;setWsState('通道不可用','danger');return}
   openWs(ch,gen);
+  setTimeout(()=>focusTerm(true),80);
 }
 let PANES=null;
 function renderPaneStrip(){
@@ -1346,7 +1353,6 @@ async function dashLoad(){
 $('#reload').onclick=dashLoad;
 if($('#keyHelp'))$('#keyHelp').onclick=()=>toast('F5 刷新通道 · Ctrl+F 查找回显 · Enter/F3 下一个命中 · Ctrl+Shift+B 收起/展开导航 · Ctrl+Shift+C/V 复制/粘贴');
 $('#ch').onchange=connect;
-$('#clear').onclick=()=>{TERM_TEXT='';if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();$('#hint').textContent='已清屏'};
 $('#termFind').oninput=e=>{TERM_FIND=e.target.value;TERM_HIT=0;renderTerm()};
 $('#termFind').onkeydown=e=>{
   if(e.key==='Enter'){e.preventDefault();doFindNext()}
@@ -1358,6 +1364,7 @@ $('#fontMinus').onclick=()=>{applyFont(parseInt(localStorage.getItem(FONT_KEY)||
 $('#fontPlus').onclick=()=>{applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10)+1)};
 $('#fullTerm').onclick=async()=>{const c=$('.terminal-card');if(!document.fullscreenElement){if(c.requestFullscreen)await c.requestFullscreen()}else await document.exitFullscreen()};
 document.addEventListener('fullscreenchange',()=>{const b=$('#fullTerm');if(b)b.textContent=document.fullscreenElement?'退出全屏':'全屏';setTimeout(fitXterm,80)});
+$('#clearView').onclick=()=>{TERM_TEXT='';if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();$('#hint').textContent='已清屏';focusTerm(false)};
 $('#clearBuf').onclick=async()=>{
   const ch=$('#ch').value;if(!ch)return;if(!await askConfirm('清空通道缓冲','将清空 '+ch+' 的共享 ring，所有终端/网页都会看不到旧回显。','清空',true))return;
   const r=await api('/log/clear?channel='+encodeURIComponent(ch),{method:'POST'});if(r.status===200){TERM_TEXT='';if(XTERM_MODE&&XTERM)xtermPaintAll();else renderTerm();toast('缓冲已清空')}else toast('清空失败：'+r.status+' '+r.t,'error');
@@ -1376,8 +1383,6 @@ async function sendRawBytes(data,label){
   $('#hint').textContent='已写入 '+ch+(label?' · '+label:'');
   return true;
 }
-const INPUT_NAV={ArrowUp:'\x1b[A',ArrowDown:'\x1b[B',ArrowRight:'\x1b[C',ArrowLeft:'\x1b[D',
-  Home:'\x1b[H',End:'\x1b[F',Insert:'\x1b[2~',Delete:'\x1b[3~',PageUp:'\x1b[5~',PageDown:'\x1b[6~'};
 let IN_BUF='',IN_LABEL='键盘',IN_TIMER=0,IN_CHAIN=Promise.resolve();
 function flushInput(){
   if(!IN_BUF)return;
@@ -1390,50 +1395,12 @@ function queueInputData(data,label){
   if(IN_TIMER)return;
   IN_TIMER=setTimeout(()=>{IN_TIMER=0;flushInput()},8);
 }
-function inputNow(data,label){if(IN_TIMER){clearTimeout(IN_TIMER);IN_TIMER=0}flushInput();if(data)IN_CHAIN=IN_CHAIN.then(()=>sendRawBytes(data,label||'按键')).catch(()=>{})}
-async function sendTermText(){
-  const input=$('#cmd');if(!input)return;
-  const value=input.value;input.value='';
-  if(value)queueInputData(value,'发送');queueInputData('\r','Enter');input.focus();
-}
-$('#send').onclick=sendTermText;
-$('#cmd').onkeydown=e=>{
-  if(e.isComposing||e.keyCode===229)return;
-  if(e.ctrlKey||e.metaKey){
-    const key=String(e.key||'').toLowerCase();
-    if(key==='c'&&e.shiftKey){e.preventDefault();copyTerm();return}
-    if(key==='v'){e.preventDefault();pasteTerm();return}
-    const seq={c:'\x03',d:'\x04',z:'\x1a',l:'\x0c',u:'\x15',r:'\x12'}[key];
-    if(seq){e.preventDefault();inputNow(seq,'Ctrl+'+key.toUpperCase())}
-    return;
-  }
-  if(e.altKey&&e.key.length===1){e.preventDefault();queueInputData('\x1b'+e.key,'Alt+'+e.key);return}
-  if(e.key==='Enter'){e.preventDefault();queueInputData('\r','Enter');return}
-  if(e.key==='Tab'){e.preventDefault();queueInputData('\t','Tab');return}
-  if(e.key==='Escape'){e.preventDefault();queueInputData('\x1b','Esc');return}
-  if(e.key==='Backspace'){e.preventDefault();queueInputData('\x7f','退格');return}
-  if(INPUT_NAV[e.key]){e.preventDefault();queueInputData(INPUT_NAV[e.key],e.key);return}
-  if(e.key.length===1){e.preventDefault();queueInputData(e.key,'输入')}
-};
-$('#cmd').addEventListener('beforeinput',e=>{
-  if(e.isComposing)return;
-  if(e.inputType==='deleteContentBackward'){e.preventDefault();queueInputData('\x7f','退格')}
-  else if(e.inputType==='insertText'&&e.data){e.preventDefault();queueInputData(e.data,'输入')}
-});
-$('#cmd').addEventListener('paste',e=>{
-  e.preventDefault();const t=(e.clipboardData||window.clipboardData).getData('text');
-  if(t)queueInputData(t,'粘贴');
-});
-$('#cmd').addEventListener('input',e=>{
-  if(e.isComposing)return;
-  const v=e.target.value;if(!v)return;e.target.value='';
-  if(IN_TIMER){clearTimeout(IN_TIMER);IN_TIMER=0}inputNow(v,'输入法');
-});
+function inputNow(data,label){if(!data)return;queueInputData(data,label||'按键')}
 $$('#keyBar [data-key]').forEach(b=>{
-  b.onclick=()=>{const seq=KEY_SEQ[b.dataset.key];if(seq===undefined)return;queueInputData(seq,b.textContent.trim());$('#cmd').focus()};
+  b.onclick=()=>{const seq=KEY_SEQ[b.dataset.key];if(seq===undefined)return;queueInputData(seq,b.textContent.trim());focusTerm(false)};
 });
-$('#term').onclick=()=>$('#cmd').focus();
-if($('#xtermHost'))$('#xtermHost').addEventListener('mousedown',()=>setTimeout(()=>{if(XTERM)XTERM.focus()},0));
+$('#term').onclick=()=>focusTerm(false);
+if($('#xtermHost'))$('#xtermHost').addEventListener('mousedown',()=>setTimeout(()=>focusTerm(false),0));
 $('#takeLock').onclick=takeLock;
 applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10));
 initXterm().catch(()=>{XTERM_FAIL=true});

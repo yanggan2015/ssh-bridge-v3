@@ -849,6 +849,7 @@ std::string AppCore::state_json(bool window_visible) const {
         cJSON_AddStringToObject(o, "name", e.name.c_str());
         cJSON_AddStringToObject(o, "kind", e.kind.c_str());
         cJSON_AddStringToObject(o, "detail", e.detail.c_str());
+        cJSON_AddStringToObject(o, "line_ending", line_ending_for(e.name).c_str());
         const char* st = "idle";
         if (e.bridge) {
             if (e.bridge->running()) st = "ready";
