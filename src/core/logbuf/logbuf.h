@@ -23,6 +23,11 @@ public:
     bool init(std::size_t cap, bool timestamp, bool disk,
               const std::string& dir, const std::string& name);
 
+    // 热应用配置：保留已加工的历史回显，只替换容量/时间戳/落盘目标。
+    // 历史不会重新打时间戳，也不会重复写入新日志文件；epoch 单调递增。
+    bool reinit(std::size_t cap, bool timestamp, bool disk,
+                const std::string& dir, const std::string& name);
+
     // 停线程、关文件；可重复调用
     void shutdown();
 
@@ -57,6 +62,8 @@ public:
 private:
     void write_ring(const char* data, std::size_t n);
     void build_payload(const char* data, std::size_t n, std::vector<char>* out);
+    void import_history(const char* data, std::size_t n);
+    void scan_state(const char* data, std::size_t n);
     void disk_write(const char* data, std::size_t n);
     bool disk_open(const std::string& dir, const std::string& name);
     void disk_close();

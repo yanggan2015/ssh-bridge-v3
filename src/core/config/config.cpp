@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cctype>
 #include <algorithm>
+#include <atomic>
 
 #include "core/util/util.h"
 
@@ -80,7 +81,9 @@ bool read_text(const std::string& path, std::string* out) {
 }
 
 bool write_text(const std::string& path, const std::string& data, std::string* err) {
-    std::string tmp = path + ".tmp";
+    // 每个写者使用独立临时文件：固定 .tmp 会让并发写互相覆盖/删除对方的临时文件。
+    static std::atomic<unsigned long long> seq{0};
+    std::string tmp = path + ".tmp." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(++seq);
     std::FILE* f = _wfopen(to_wide(tmp).c_str(), L"wb");
     if (!f) {
         if (err) *err = "cannot open " + tmp;

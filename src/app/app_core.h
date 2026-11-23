@@ -101,9 +101,16 @@ public:
     // 完整状态快照（给 ui_state.json 与后续网页/Agent 复用）
     std::string state_json(bool window_visible) const;
 
-    const AppConfig& config() const { return cfg_; }
+    // 线程安全的配置快照：持锁复制，避免 UI/Web/Agent 读与配置事务并发时撕裂容器
+    AppConfig config() const {
+        std::lock_guard<std::mutex> g(config_mu_);
+        return cfg_;
+    }
     // 网页只读配置页：当前已知字段导出（不包含未知历史键）
-    std::string config_json_text() const { return config_export_json(cfg_); }
+    std::string config_json_text() const {
+        std::lock_guard<std::mutex> g(config_mu_);
+        return config_export_json(cfg_);
+    }
     // S9 网页配置表单保存：校验 JSON、落盘到当前 abs_path；UI 线程随后 reload_config。
     bool save_config_json(const std::string& text, std::string* err);
     // 以磁盘最新配置为基准做读-改-写，串行化所有配置写，避免并发覆盖。

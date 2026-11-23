@@ -61,6 +61,34 @@ bool LogBuffer::init(std::size_t cap, bool timestamp, bool disk,
     return true;
 }
 
+bool LogBuffer::reinit(std::size_t cap, bool timestamp, bool disk,
+                       const std::string& dir, const std::string& name) {
+    // 热应用只重建容量/落盘/时间戳策略，不重放历史：历史字节已经加工过，
+    // 再走 append 会二次打时间戳，并让同一个日志文件重复写入整段回显。
+    flush_cr_hold();
+    std::string history;
+    read_all(&history);
+    const std::uint64_t old_epoch = epoch();
+    shutdown();
+
+    cap_ = std::max(cap, kMinCap);
+    ring_.assign(cap_, '\0');
+    total_.store(0);
+    epoch_.store(old_epoch + 1, std::memory_order_release);
+    notify_.fetch_add(1, std::memory_order_release);
+    timestamp_ = timestamp;
+    ansi_state_ = 0;
+    at_line_start_ = true;
+    cr_hold_.clear();
+    last_error_.clear();
+    import_history(history.data(), history.size());
+
+    if (disk && !disk_open(dir, name)) {
+        return false;
+    }
+    return true;
+}
+
 void LogBuffer::shutdown() {
     disk_flush_stop_.store(true);
     if (flusher_.joinable()) flusher_.join();
@@ -102,6 +130,31 @@ void LogBuffer::flush_cr_hold() {
     build_payload(one.data(), one.size(), &payload);
     write_ring(payload.data(), payload.size());
     disk_write(payload.data(), payload.size());
+}
+
+void LogBuffer::import_history(const char* data, std::size_t n) {
+    if (cap_ == 0 || data == nullptr || n == 0) return;
+    scan_state(data, n);
+    write_ring(data, n);
+}
+
+void LogBuffer::scan_state(const char* data, std::size_t n) {
+    for (std::size_t i = 0; i < n; ++i) {
+        unsigned char c = static_cast<unsigned char>(data[i]);
+        if (c == 0x1b) {
+            ansi_state_ = 1;
+        } else if (ansi_state_ == 1) {
+            ansi_state_ = (c == '[') ? 2 : (c == ']') ? 3 : 0;
+        } else if (ansi_state_ == 2) {
+            if (c >= 0x40 && c <= 0x7e) ansi_state_ = 0;
+        } else if (ansi_state_ == 3) {
+            if (c == 0x07) ansi_state_ = 0;
+        } else if (c == '\n') {
+            at_line_start_ = true;
+        } else if (c != '\r') {
+            at_line_start_ = false;
+        }
+    }
 }
 
 void LogBuffer::build_payload(const char* data, std::size_t n, std::vector<char>* out) {

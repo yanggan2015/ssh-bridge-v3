@@ -137,10 +137,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int nShow) {
     boot_log("core.start_auto done");
 
     sb3::Shell shell;
-    if (!shell.create(hInst, (nShow == SW_SHOWMINIMIZED || nShow == SW_SHOWMINNOACTIVE)
-                                  ? SW_SHOW
-                                  : nShow,
-                      &core)) {
+    int show = (nShow == SW_SHOWMINIMIZED || nShow == SW_SHOWMINNOACTIVE) ? SW_SHOW : nShow;
+    if (core.config().ui.start_minimized) show = SW_HIDE;   // 托盘/服务模式：窗口不弹出
+    if (!shell.create(hInst, show, &core)) {
         boot_log("shell.create FAILED");
         core.stop_all();
         sb3::release_single_instance();

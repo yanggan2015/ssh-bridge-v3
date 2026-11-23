@@ -145,6 +145,58 @@ bool ring_disk() {
     return got == line;
 }
 
+bool count_text(const std::string& hay, const std::string& needle) {
+    if (needle.empty()) return false;
+    int n = 0;
+    std::size_t pos = 0;
+    while ((pos = hay.find(needle, pos)) != std::string::npos) {
+        ++n;
+        pos += needle.size();
+    }
+    return n > 0;
+}
+
+bool ring_reinit() {
+    std::string dir = temp_root("ring");
+    std::string file = util::join_path(dir, "reinit.log");
+    std::remove(file.c_str());
+
+    LogBuffer log;
+    if (!log.init(64 * 1024, true, true, dir, "reinit")) return false;
+    std::string line = "HISTORY-A\r\nHISTORY-B\r\n";
+    log.append(line.data(), line.size());
+    log.flush_cr_hold();
+    Sleep(400);
+    std::string before;
+    log.read_all(&before);
+    const std::uint64_t old_epoch = log.epoch();
+
+    // 热应用：保留已加工历史，不重新打时间戳，也不把历史重复写进日志文件。
+    if (!log.reinit(64 * 1024, true, true, dir, "reinit")) return false;
+    std::string after;
+    log.read_all(&after);
+    if (after != before) return false;
+    if (log.epoch() <= old_epoch) return false;
+
+    log.append("AFTER\r\n", 7);
+    log.flush_cr_hold();
+    Sleep(400);
+    log.shutdown();
+
+    std::FILE* f = std::fopen(file.c_str(), "rb");
+    if (!f) return false;
+    std::string got;
+    char buf[512];
+    std::size_t n = 0;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) got.append(buf, n);
+    std::fclose(f);
+    // 历史各出现一次，且热应用后的新输出继续追加。
+    return count_text(got, "HISTORY-A") && count_text(got, "HISTORY-B") &&
+           count_text(got, "AFTER") &&
+           got.find("HISTORY-A") == got.rfind("HISTORY-A") &&
+           got.find("HISTORY-B") == got.rfind("HISTORY-B");
+}
+
 bool run_ring() {
     bool ok = true;
     bool basic = ring_basic();
@@ -159,6 +211,9 @@ bool run_ring() {
     bool disk = ring_disk();
     report("T1-6", "落盘与 ring 一致", disk, "");
     ok = ok && disk;
+    bool reinit = ring_reinit();
+    report("T1-7", "热应用保留历史且不重复落盘", reinit, "");
+    ok = ok && reinit;
     return ok;
 }
 

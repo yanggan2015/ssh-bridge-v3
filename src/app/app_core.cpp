@@ -194,6 +194,7 @@ void AppCore::stop_all() {
 }
 
 AppCore::ReloadResult AppCore::reload_config() {
+    std::lock_guard<std::mutex> g(config_mu_);
     ReloadResult r;
 
     AppConfig next;
@@ -718,6 +719,7 @@ bool AppCore::clear(const std::string& name) {
 }
 
 std::string AppCore::line_ending_for(const std::string& name) const {
+    std::lock_guard<std::mutex> g(config_mu_);
     for (const BoardConfig& b : cfg_.boards) {
         if (b.name == name && !b.line_ending.empty()) return b.line_ending;
     }
@@ -794,6 +796,8 @@ bool AppCore::patch_config_json(const std::function<bool(cJSON*)>& apply, std::s
         if (err) *err = "写配置文件失败";
         return false;
     }
+    // 内存视图必须跟上已落盘事务，避免 Web/Agent 在 UI 重载前读到旧配置。
+    cfg_ = next;
     if (err) err->clear();
     return true;
 }
@@ -812,6 +816,7 @@ bool AppCore::save_config_json(const std::string& text, std::string* err) {
         if (err) *err = "写配置文件失败";
         return false;
     }
+    cfg_ = next;
     if (err) err->clear();
     return true;
 }
@@ -825,13 +830,18 @@ std::string AppCore::summary() const {
 }
 
 std::string AppCore::state_json(bool window_visible) const {
+    std::string cfg_path;
+    {
+        std::lock_guard<std::mutex> g(config_mu_);
+        cfg_path = cfg_.abs_path;
+    }
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "app", "ssh-bridge3");
     cJSON_AddStringToObject(root, "step", "S6");
     cJSON_AddStringToObject(root, "title", "ssh-bridge v3 · 终端工作台");
     cJSON_AddBoolToObject(root, "visible", window_visible);
     cJSON_AddStringToObject(root, "summary", summary().c_str());
-    cJSON_AddStringToObject(root, "config", cfg_.abs_path.c_str());
+    cJSON_AddStringToObject(root, "config", cfg_path.c_str());
 
     cJSON* arr = cJSON_AddArrayToObject(root, "channels");
     for (const Entry& e : entries_) {

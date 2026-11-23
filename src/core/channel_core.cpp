@@ -17,7 +17,7 @@ void ChannelCore::shutdown() {
 bool ChannelCore::reinit(const std::string& name, std::size_t cap, bool timestamp, bool disk,
                          const std::string& dir, const std::string& file) {
     name_ = name;
-    return log_.init(cap, timestamp, disk, dir, file);
+    return log_.reinit(cap, timestamp, disk, dir, file);
 }
 
 void ChannelCore::mark_tx(std::size_t n) {

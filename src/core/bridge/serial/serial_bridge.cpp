@@ -188,9 +188,7 @@ void SerialBridge::reconnect() {
 }
 
 void SerialBridge::apply_config(const BoardConfig& cfg) {
-    std::string old;
     bool was_running = running_.load();
-    if (was_running) core_.log().read_all(&old);
     stop();
 
     cfg_ = cfg;
@@ -202,7 +200,6 @@ void SerialBridge::apply_config(const BoardConfig& cfg) {
     if (log_dir.empty()) log_dir = util::join_path(project_root_, "work\\logs");
     core_.reinit(cfg_.name.empty() ? std::string("serial") : cfg_.name, cap,
                  cfg_.timestamp, cfg_.log_enabled, log_dir, cfg_.name);
-    if (!old.empty()) core_.log().append(old.data(), old.size());
 
     {
         std::lock_guard<std::mutex> lk(err_mu_);

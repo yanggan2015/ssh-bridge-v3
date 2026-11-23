@@ -959,8 +959,9 @@ void RelayPanel::load_bind(int action_index) {
         if (sel < 0 && SendMessageW(relay, CB_GETCOUNT, 0, 0) > 0) sel = 0;
         if (sel >= 0) SendMessageW(relay, CB_SETCURSEL, sel, 0);
     }
+    AppConfig cfg = core_->config();
     int channels = 2;
-    if (const RelayDeviceConfig* d = find_relay(core_->config(), a.relay)) channels = d->channels;
+    if (const RelayDeviceConfig* d = find_relay(cfg, a.relay)) channels = d->channels;
     fill_channels(relay_ui::kIdBindChannel, channels);
     if (a.channel >= 1 && a.channel <= channels)
         SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdBindChannel), CB_SETCURSEL, a.channel - 1, 0);
@@ -984,8 +985,9 @@ void RelayPanel::preset_bind(const std::string& id) {
     if (id == "power_on") { a.label = "上电"; a.mode = "hold_on"; a.channel = 1; a.hold_seconds = 1.0; }
     if (id == "power_off") { a.label = "下电"; a.mode = "hold_off"; a.channel = 1; a.hold_seconds = 1.0; }
     if (id == "reboot") { a.label = "重启"; a.mode = "pulse"; a.channel = 2; a.hold_seconds = 1.0; }
-    if (!core_->config().relays.empty()) a.relay = core_->config().relays[0].name;
-    if (const RelayDeviceConfig* d = find_relay(core_->config(), a.relay)) {
+    AppConfig cfg = core_->config();
+    if (!cfg.relays.empty()) a.relay = cfg.relays[0].name;
+    if (const RelayDeviceConfig* d = find_relay(cfg, a.relay)) {
         a.polarity_inverted = d->polarity_inverted;
         if (a.channel > d->channels) a.channel = 1;
     }
@@ -1018,7 +1020,8 @@ void RelayPanel::save_bind() {
     if (a.hold_seconds <= 0) a.hold_seconds = 1.0;
     if (!valid_id(a.id)) { note(L"ID 只能包含字母、数字、下划线和点", true); return; }
     if (a.label.empty()) { note(L"按钮文字不能为空", true); return; }
-    const RelayDeviceConfig* dev = find_relay(core_->config(), a.relay);
+    AppConfig cfg = core_->config();
+    const RelayDeviceConfig* dev = find_relay(cfg, a.relay);
     if (!dev) { note(L"请选择有效的继电器设备", true); return; }
     if (a.channel < 1 || a.channel > dev->channels) { note(L"继电器通道超出范围", true); return; }
     std::vector<BoardActionConfig> list = actions_of(channel);
@@ -1077,9 +1080,10 @@ void RelayPanel::generate_standard() {
     if (!core_) return;
     std::string channel = (page_ == 2 ? script_target() : bind_target());
     if (channel.empty()) { note(L"目标通道为空", true); return; }
+    AppConfig cfg = core_->config();
     std::string relay = wide_to_utf8(get_text(relay_ui::kIdBindRelay));
-    if (relay.empty() && !core_->config().relays.empty()) relay = core_->config().relays[0].name;
-    const RelayDeviceConfig* dev = find_relay(core_->config(), relay);
+    if (relay.empty() && !cfg.relays.empty()) relay = cfg.relays[0].name;
+    const RelayDeviceConfig* dev = find_relay(cfg, relay);
     if (!dev) { note(L"请先选择继电器设备", true); return; }
     std::vector<BoardActionConfig> list = actions_of(channel);
     auto make = [&](const char* id, const char* label, const char* mode, int ch, double hold) {
@@ -1107,9 +1111,10 @@ void RelayPanel::generate_upgrade_script() {
     if (!core_) return;
     std::string channel = (page_ == 2 ? script_target() : bind_target());
     if (channel.empty()) { note(L"目标通道为空", true); return; }
+    AppConfig cfg = core_->config();
     std::string relay = wide_to_utf8(get_text(relay_ui::kIdBindRelay));
-    if (relay.empty() && !core_->config().relays.empty()) relay = core_->config().relays[0].name;
-    const RelayDeviceConfig* dev = find_relay(core_->config(), relay);
+    if (relay.empty() && !cfg.relays.empty()) relay = cfg.relays[0].name;
+    const RelayDeviceConfig* dev = find_relay(cfg, relay);
     if (!dev) { note(L"请先选择继电器设备", true); return; }
     std::string body = upgrade_mode_body(relay, dev->channels);
     if (body.empty()) { note(L"进升级模式至少需要 2 路继电器", true); return; }
@@ -1204,9 +1209,10 @@ void RelayPanel::load_script(int action_index) {
 
 void RelayPanel::preset_script(int preset) {
     if (!core_) return;
+    AppConfig cfg = core_->config();
     std::string relay;
-    if (!core_->config().relays.empty()) relay = core_->config().relays[0].name;
-    const RelayDeviceConfig* dev = find_relay(core_->config(), relay);
+    if (!cfg.relays.empty()) relay = cfg.relays[0].name;
+    const RelayDeviceConfig* dev = find_relay(cfg, relay);
     int channels = dev ? dev->channels : 2;
     std::string id, label, body;
     int kind = 0;

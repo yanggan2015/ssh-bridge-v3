@@ -2084,6 +2084,11 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_CLOSE:
+        // ui.close_to_tray=false 时关闭即退出；托盘退出仍会走 stop_all。
+        if (core_ && !core_->config().ui.close_to_tray) {
+            DestroyWindow(hwnd_);
+            return 0;
+        }
         hide_self();
         return 0;
 

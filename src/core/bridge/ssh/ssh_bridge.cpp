@@ -84,9 +84,6 @@ void SshBridge::reconnect() {
 }
 
 void SshBridge::apply_config(const SSHLinkConfig& cfg) {
-    std::string old;
-    bool was_running = rx_thread_.joinable() || tx_thread_.joinable();
-    if (was_running) core_.log().read_all(&old);
     stop();
 
     cfg_ = cfg;
@@ -95,7 +92,6 @@ void SshBridge::apply_config(const SSHLinkConfig& cfg) {
     if (log_dir.empty()) log_dir = util::join_path(project_root_, "work\\logs");
     core_.reinit(cfg_.name.empty() ? std::string("ssh") : cfg_.name, cap, true,
                  cfg_.log_enabled, log_dir, cfg_.name);
-    if (!old.empty()) core_.log().append(old.data(), old.size());
     { std::lock_guard<std::mutex> lk(err_mu_); error_.clear(); }
     start();
 }
