@@ -105,6 +105,16 @@ void ServiceManager::stop_tftp() {
 
 bool ServiceManager::tftp_running() const { return tftp_ && tftp_svc_running(tftp_); }
 
+std::string ServiceManager::tftp_root() const {
+    const char* r = tftp_running() && tftp_ ? tftp_svc_root(tftp_) : nullptr;
+    if (r && *r) return std::string(r);
+    return share_root_;
+}
+
+int ServiceManager::tftp_port() const {
+    return tftp_running() ? tftp_svc_port(tftp_) : 0;
+}
+
 bool ServiceManager::start_share(const ShareConfig& cfg, std::string* err) {
     if (!share_) share_ = new ShareServer();
     std::string root = cfg.root.empty() ? share_root_ : resolve_against(project_root_, cfg.root);

@@ -42,6 +42,8 @@ public:
     bool start_tftp(const TftpConfig& cfg, std::string* err);
     void stop_tftp();
     bool tftp_running() const;
+    std::string tftp_root() const;
+    int tftp_port() const;
     bool start_share(const ShareConfig& cfg, std::string* err);
     void stop_share();
     bool share_running() const;

@@ -43,6 +43,7 @@
 #include "services/agent/agent_scan.h"
 #include "services/board_actions/board_action_runner.h"
 #include "services/service_manager.h"
+#include "services/tftp/tftp_svc.h"
 #include "ui/ui_messages.h"
 
 namespace sb3 {
@@ -365,6 +366,41 @@ bool safe_share_path(ServiceManager* services, const std::string& rel,
     }
 }
 
+bool safe_tftp_path(ServiceManager* services, const std::string& rel,
+                    std::filesystem::path* out, std::string* err) {
+    if (!services || !out) {
+        if (err) *err = "服务未就绪";
+        return false;
+    }
+    std::string root = services->tftp_root();
+    if (root.empty()) {
+        if (err) *err = "TFTP 根目录未就绪";
+        return false;
+    }
+    char joined[8192] = "";
+    if (tftp_safe_join(root.c_str(), rel.c_str(), joined, sizeof(joined)) != 0) {
+        if (err) *err = "路径越出 TFTP 根目录";
+        return false;
+    }
+    *out = std::filesystem::u8path(joined);
+    return true;
+}
+
+std::string url_encode(const std::string& s) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : s) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out.push_back('%');
+            out.push_back(hex[c >> 4]);
+            out.push_back(hex[c & 0x0F]);
+        }
+    }
+    return out;
+}
+
 bool reply_file_bytes(mg_connection* c, const std::string& data, const std::string& name) {
     std::string safe;
     for (char ch : name) safe += (ch == '"' || ch == '\\' || ch == '\r' || ch == '\n') ? '_' : ch;
@@ -389,6 +425,13 @@ std::string json_text(cJSON* root, bool formatted = false) {
 
 std::string query_var(const mg_http_message* hm, const char* name, std::string def = "") {
     char buf[256] = "";
+    int n = mg_http_get_var(&hm->query, name, buf, sizeof(buf));
+    return n > 0 ? std::string(buf, static_cast<std::size_t>(n)) : def;
+}
+
+// 工件路径可能超过 256 字节，单独给 8KB 缓冲；mg_http_get_var 会做 URL 解码。
+std::string query_var_long(const mg_http_message* hm, const char* name, std::string def = "") {
+    char buf[8192] = "";
     int n = mg_http_get_var(&hm->query, name, buf, sizeof(buf));
     return n > 0 ? std::string(buf, static_cast<std::size_t>(n)) : def;
 }
@@ -479,6 +522,16 @@ struct Job {
 };
 
 enum class TaskKind { Action, Command, CommandBlock, Exec, SendKeys };
+
+struct TransferProgress {
+    std::string path;
+    std::string direction;   // upload / download
+    std::string state;       // running / done / failed
+    std::string error;
+    std::uint64_t sent = 0;
+    std::uint64_t total = 0;
+    std::int64_t updated_ms = 0;
+};
 
 struct Task {
     std::shared_ptr<Job> job;
@@ -691,6 +744,40 @@ struct WebConsole::Impl {
     std::map<int, mg_connection*> pending_job_conn;
     std::map<int, std::shared_ptr<Job>> jobs;
     int next_job = 1;
+    mutable std::mutex prog_mu;
+    TransferProgress xfer;
+
+    void xfer_set(const std::string& path, const std::string& direction, const std::string& state,
+                  const std::string& error, std::uint64_t sent, std::uint64_t total) {
+        std::lock_guard<std::mutex> g(prog_mu);
+        xfer.path = path;
+        xfer.direction = direction;
+        xfer.state = state;
+        xfer.error = error;
+        xfer.sent = sent;
+        xfer.total = total;
+        xfer.updated_ms = now_ms();
+    }
+    std::string xfer_json() const {
+        std::lock_guard<std::mutex> g(prog_mu);
+        cJSON* o = cJSON_CreateObject();
+        cJSON_AddBoolToObject(o, "ok", true);
+        cJSON* cur = cJSON_AddObjectToObject(o, "current");
+        cJSON_AddStringToObject(cur, "path", xfer.path.c_str());
+        cJSON_AddStringToObject(cur, "direction", xfer.direction.c_str());
+        cJSON_AddStringToObject(cur, "state", xfer.state.empty() ? "idle" : xfer.state.c_str());
+        cJSON_AddStringToObject(cur, "error", xfer.error.c_str());
+        cJSON_AddNumberToObject(cur, "sent", static_cast<double>(xfer.sent));
+        cJSON_AddNumberToObject(cur, "total", static_cast<double>(xfer.total));
+        cJSON_AddNumberToObject(cur, "percent",
+                                xfer.total == 0
+                                    ? 0.0
+                                    : (100.0 * static_cast<double>(xfer.sent) /
+                                       static_cast<double>(xfer.total)));
+        cJSON_AddNumberToObject(cur, "updated_ms", static_cast<double>(xfer.updated_ms));
+        cJSON_AddItemToObject(o, "last", cJSON_Duplicate(cur, 1));
+        return json_text(o);
+    }
 
     bool write_ok(mg_http_message* hm) const {
         if (token.empty()) return false;
@@ -3533,6 +3620,406 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         reply_json_text(c, 200, "{\"ok\":true,\"path\":\"" + rel + "\"}");
+        return;
+    }
+    // C8：Agent 工件面（TFTP 根目录内的浏览/上传/下载/MD5/删除 + 传输进度）。
+    if (path == "/tftp/status") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        const auto& cfg = core->config();
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        if (!services) {
+            cJSON_AddBoolToObject(root, "running", false);
+            cJSON_AddStringToObject(root, "error", "服务未就绪");
+            reply_json(c, 200, root);
+            return;
+        }
+        bool running = services->tftp_running();
+        std::string root_dir = services->tftp_root();
+        cJSON_AddBoolToObject(root, "running", running);
+        cJSON_AddStringToObject(root, "protocol", "udp");
+        cJSON_AddStringToObject(root, "root", root_dir.c_str());
+        cJSON_AddNumberToObject(root, "port", running ? services->tftp_port() : cfg.tftp.port);
+        cJSON_AddStringToObject(root, "bind_ip", cfg.tftp.bind_ip.c_str());
+        cJSON_AddBoolToObject(root, "allow_write", cfg.tftp.allow_write);
+        cJSON_AddStringToObject(root, "note", services->tftp_status().c_str());
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/tftp/files") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        std::string rel = query_var_long(hm, "path");
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_tftp_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_directory(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"directory not found\"}");
+            return;
+        }
+        struct Row {
+            std::string name, path, mtime;
+            std::uintmax_t size = 0;
+            bool dir = false;
+        };
+        std::vector<Row> rows;
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(
+                     p, std::filesystem::directory_options::skip_permission_denied, ec)) {
+                Row r;
+                r.name = entry.path().filename().u8string();
+                r.path = rel.empty() ? r.name : (rel + "/" + r.name);
+                r.dir = entry.is_directory(ec);
+                if (!r.dir) {
+                    r.size = entry.file_size(ec);
+                    if (ec) r.size = 0;
+                }
+                r.mtime = now_text(entry.last_write_time(ec));
+                if (ec) r.mtime.clear();
+                rows.push_back(std::move(r));
+                if (rows.size() >= 2000) break;
+            }
+        } catch (const std::exception&) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"list failed\"}");
+            return;
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+            if (a.dir != b.dir) return a.dir;
+            return a.name < b.name;
+        });
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "root", services ? services->tftp_root().c_str() : "");
+        cJSON_AddStringToObject(root, "path", rel.c_str());
+        std::filesystem::path parent = std::filesystem::u8path(rel).parent_path();
+        cJSON_AddStringToObject(root, "parent", parent.generic_u8string().c_str());
+        cJSON* items = cJSON_AddArrayToObject(root, "items");
+        for (const Row& r : rows) {
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "name", r.name.c_str());
+            cJSON_AddStringToObject(o, "path", r.path.c_str());
+            cJSON_AddBoolToObject(o, "dir", r.dir);
+            cJSON_AddNumberToObject(o, "size", static_cast<double>(r.size));
+            cJSON_AddStringToObject(o, "mtime", r.mtime.c_str());
+            cJSON_AddItemToArray(items, o);
+        }
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/tftp/md5") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        std::string rel = query_var_long(hm, "path");
+        if (rel.empty()) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_tftp_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        char md5[33] = "";
+        long long sz = 0;
+        if (tftp_file_md5(p.u8string().c_str(), md5, &sz) != 0) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"md5 failed\"}");
+            return;
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "path", rel.c_str());
+        cJSON_AddStringToObject(root, "md5", md5);
+        cJSON_AddNumberToObject(root, "size", static_cast<double>(sz));
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/tftp/download") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        std::string rel = query_var_long(hm, "path");
+        if (rel.empty()) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_tftp_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"file not found\"}");
+            return;
+        }
+        std::uintmax_t sz = std::filesystem::file_size(p, ec);
+        if (ec) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"stat failed\"}");
+            return;
+        }
+        std::ifstream in(p, std::ios::binary);
+        if (!in) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"open failed\"}");
+            return;
+        }
+        std::string fname = p.filename().u8string();
+        xfer_set(rel, "download", "running", "", 0, static_cast<std::uint64_t>(sz));
+        std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+                          "Content-Length: " + std::to_string(sz) +
+                          "\r\nContent-Disposition: attachment; filename=\"" +
+                          url_encode(fname) + "\"; filename*=UTF-8''" + url_encode(fname) +
+                          "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+        mg_send(c, hdr.data(), hdr.size());
+        std::uint64_t sent = 0;
+        std::vector<char> buf(65536);
+        while (in) {
+            in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+            std::streamsize n = in.gcount();
+            if (n <= 0) break;
+            mg_send(c, buf.data(), static_cast<size_t>(n));
+            sent += static_cast<std::uint64_t>(n);
+            xfer_set(rel, "download", "running", "", sent,
+                           static_cast<std::uint64_t>(sz));
+        }
+        xfer_set(rel, "download", "done", "", sent, static_cast<std::uint64_t>(sz));
+        c->is_draining = 1;
+        return;
+    }
+    if (path == "/tftp/upload") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        if (hm->body.len > 16ull * 1024 * 1024) {
+            reply_json_text(c, 413, "{\"ok\":false,\"error\":\"chunk too large (max 16MB)\"}");
+            return;
+        }
+        std::string rel = query_var_long(hm, "path");
+        if (rel.empty()) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_tftp_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (std::filesystem::is_directory(p, ec)) {
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"path is a directory\"}");
+            return;
+        }
+        std::uintmax_t cur = 0;
+        if (std::filesystem::exists(p, ec)) {
+            cur = std::filesystem::file_size(p, ec);
+            if (ec) cur = 0;
+        }
+        std::uintmax_t offset = 0;
+        std::string off_s = query_var(hm, "offset");
+        if (!off_s.empty()) {
+            try {
+                offset = static_cast<std::uintmax_t>(std::stoull(off_s));
+            } catch (...) {
+                reply_json_text(c, 400, "{\"ok\":false,\"error\":\"offset 非法\"}");
+                return;
+            }
+        }
+        if (offset > cur) {
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddBoolToObject(o, "ok", false);
+            cJSON_AddStringToObject(o, "error", "offset 超过已有长度");
+            cJSON_AddNumberToObject(o, "size", static_cast<double>(cur));
+            reply_json(c, 409, o);
+            return;
+        }
+        xfer_set(rel, "upload", "running", "", offset, offset + hm->body.len);
+        if (offset == 0) {
+            std::filesystem::path parent = p.parent_path();
+            if (!parent.empty() && !std::filesystem::exists(parent, ec)) {
+                xfer_set(rel, "upload", "failed", "parent directory not found", 0, 0);
+                reply_json_text(c, 404, "{\"ok\":false,\"error\":\"parent directory not found\"}");
+                return;
+            }
+            std::ofstream trunc(p, std::ios::binary | std::ios::trunc);
+            if (!trunc) {
+                xfer_set(rel, "upload", "failed", "open failed", 0, 0);
+                reply_json_text(c, 500, "{\"ok\":false,\"error\":\"open failed\"}");
+                return;
+            }
+        }
+        std::fstream out(p, std::ios::binary | std::ios::in | std::ios::out);
+        if (!out) {
+            xfer_set(rel, "upload", "failed", "open failed", offset, offset);
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"open failed\"}");
+            return;
+        }
+        out.seekp(static_cast<std::streamoff>(offset));
+        out.write(reinterpret_cast<const char*>(hm->body.buf),
+                  static_cast<std::streamsize>(hm->body.len));
+        out.flush();
+        if (!out) {
+            xfer_set(rel, "upload", "failed", "write failed", offset, offset);
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"write failed\"}");
+            return;
+        }
+        out.close();
+        std::uintmax_t now_size = std::filesystem::file_size(p, ec);
+        if (ec) now_size = offset + hm->body.len;
+        std::string want_md5 = query_var(hm, "md5");
+        std::string got_md5;
+        if (!want_md5.empty()) {
+            char md5[33] = "";
+            long long dummy = 0;
+            if (tftp_file_md5(p.u8string().c_str(), md5, &dummy) == 0) got_md5 = md5;
+            if (got_md5 != want_md5) {
+                xfer_set(rel, "upload", "failed", "md5 mismatch", now_size, now_size);
+                cJSON* o = cJSON_CreateObject();
+                cJSON_AddBoolToObject(o, "ok", false);
+                cJSON_AddStringToObject(o, "error", "md5_mismatch");
+                cJSON_AddStringToObject(o, "md5", got_md5.c_str());
+                reply_json(c, 400, o);
+                return;
+            }
+        }
+        xfer_set(rel, "upload", "done", "", now_size, now_size);
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "path", rel.c_str());
+        cJSON_AddNumberToObject(root, "size", static_cast<double>(now_size));
+        cJSON_AddNumberToObject(root, "offset", static_cast<double>(offset));
+        cJSON_AddNumberToObject(root, "next_offset", static_cast<double>(now_size));
+        if (!got_md5.empty()) cJSON_AddStringToObject(root, "md5", got_md5.c_str());
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/tftp/mkdir") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string rel = json_str(body, "path");
+        cJSON_Delete(body);
+        if (rel.empty()) rel = query_var_long(hm, "path");
+        if (rel.empty()) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_tftp_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec)) {
+            reply_json_text(c, 409, "{\"ok\":false,\"error\":\"already exists\"}");
+            return;
+        }
+        if (!std::filesystem::create_directories(p, ec) || ec) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"create failed\"}");
+            return;
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "path", rel.c_str());
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/tftp/delete") {
+        if (!(method_is(hm, "POST") || method_is(hm, "DELETE"))) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"POST or DELETE required\"}");
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, "{\"ok\":false,\"error\":\"write requires Bearer token\"}");
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string rel = json_str(body, "path");
+        cJSON_Delete(body);
+        if (rel.empty()) rel = query_var_long(hm, "path");
+        if (rel.empty()) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"path required\"}");
+            return;
+        }
+        std::filesystem::path p;
+        std::string err;
+        if (!safe_tftp_path(services, rel, &p, &err)) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"" + err + "\"}");
+            return;
+        }
+        std::filesystem::path root_path;
+        std::string root_err;
+        if (!safe_tftp_path(services, "", &root_path, &root_err)) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"TFTP 根目录未就绪\"}");
+            return;
+        }
+        std::error_code root_ec;
+        if (std::filesystem::equivalent(p, root_path, root_ec) && !root_ec) {
+            reply_json_text(c, 400, "{\"ok\":false,\"error\":\"不能删除根目录\"}");
+            return;
+        }
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec)) {
+            reply_json_text(c, 404, "{\"ok\":false,\"error\":\"not found\"}");
+            return;
+        }
+        bool is_dir = std::filesystem::is_directory(p, ec);
+        if (is_dir) {
+            if (!std::filesystem::is_empty(p, ec)) {
+                reply_json_text(c, 409, "{\"ok\":false,\"error\":\"directory not empty\"}");
+                return;
+            }
+            std::filesystem::remove(p, ec);
+        } else {
+            std::filesystem::remove(p, ec);
+        }
+        if (ec) {
+            reply_json_text(c, 500, "{\"ok\":false,\"error\":\"delete failed\"}");
+            return;
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "path", rel.c_str());
+        cJSON_AddBoolToObject(root, "dir", is_dir);
+        reply_json(c, 200, root);
+        return;
+    }
+    if (path == "/send_file/progress") {
+        if (!method_is(hm, "GET")) {
+            reply_json_text(c, 405, "{\"ok\":false,\"error\":\"GET required\"}");
+            return;
+        }
+        reply_json_text(c, 200, xfer_json());
         return;
     }
     if (path == "/api/tftp/config" || path == "/api/nfs/config" || path == "/api/share/config") {

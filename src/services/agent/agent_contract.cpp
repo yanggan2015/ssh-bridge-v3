@@ -151,6 +151,14 @@ const OperationSpec kOperations[] = {
     {"serial.break.post", "POST", "/serial/break", "发送 Break；1..1000ms", "token", "channel,duration_ms", "ok,channel,duration_ms,loop"},
     {"serial.lines.post", "POST", "/serial/lines", "设置/回读 DTR/RTS", "token", "channel,dtr,rts", "ok,channel,dtr,rts"},
     {"serial.configure.post", "POST", "/serial/configure", "改波特率/数据位/校验/停止位/流控并热重开", "token", "channel,baudrate,databits,parity,stopbits_x10,flowcontrol", "ok,channel,running"},
+    {"tftp.status.get", "GET", "/tftp/status", "TFTP 工件面状态：运行/端口/根目录/可写", "public", "", "ok,running,protocol,root,port,bind_ip,allow_write,note"},
+    {"tftp.files.get", "GET", "/tftp/files", "浏览 TFTP 根目录与子目录文件，返回 dir/size/mtime", "public", "path", "ok,root,path,parent,items"},
+    {"tftp.md5.get", "GET", "/tftp/md5", "计算 TFTP 根目录内文件 MD5 与字节数", "public", "path", "ok,path,md5,size"},
+    {"tftp.download.get", "GET", "/tftp/download", "直接下载 TFTP 根目录内文件；进度见 /send_file/progress", "public", "path", "binary"},
+    {"tftp.upload.post", "POST", "/tftp/upload", "分块上传到 TFTP 根目录，body 最大 16MB，支持 offset/md5 续传校验", "token", "path,offset,md5", "ok,path,size,offset,next_offset,md5"},
+    {"tftp.mkdir.post", "POST", "/tftp/mkdir", "在 TFTP 根目录内创建目录", "token", "path", "ok,path"},
+    {"tftp.delete.post", "POST", "/tftp/delete", "删除空目录或文件；支持 DELETE 方法", "token", "path", "ok,path,dir"},
+    {"sendfile.progress.get", "GET", "/send_file/progress", "最近一次上传/下载的进度快照", "public", "", "ok,current,last"},
     {"job.get", "GET", "/job", "查询 job 状态、输出与审计摘要；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,done,ok,timed_out,output,audit"},
 };
 

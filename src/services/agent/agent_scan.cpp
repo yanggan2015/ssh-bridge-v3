@@ -248,7 +248,7 @@ void add_features(cJSON* o, const AppCore::Entry& e, AppCore* core) {
     cJSON_AddBoolToObject(f, "command", true);
     cJSON_AddBoolToObject(f, "lock", true);
     cJSON_AddBoolToObject(f, "jobs", true);
-    cJSON_AddBoolToObject(f, "tftp_artifacts", false);
+    cJSON_AddBoolToObject(f, "tftp_artifacts", true);
 }
 
 cJSON* channel_json(AppCore* core, const AppCore::Entry& e, bool full, int tail_limit,
@@ -361,7 +361,7 @@ void add_global_features(cJSON* root) {
     cJSON_AddBoolToObject(f, "lock", true);
     cJSON_AddBoolToObject(f, "jobs", true);
     cJSON_AddBoolToObject(f, "serial_control", true);
-    cJSON_AddBoolToObject(f, "tftp_artifacts", false);
+    cJSON_AddBoolToObject(f, "tftp_artifacts", true);
 }
 
 }  // namespace

@@ -142,12 +142,26 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A8-1 | TFTP 状态/列表 | `/tftp/status`、`/tftp/files`；安全路径 | `agent_artifacts.cpp` | 69/root/running 正确；`..` 400 | 计划 |
-| A8-2 | 分片上传 | `offset`、`Content-Range` 可选、16MB/片、临时文件 | `agent_artifacts.cpp` | 两片拼接后 MD5 正确 | 计划 |
-| A8-3 | 上传完成校验 | `md5` 参数与服务端 `md5` 比对 | `agent_artifacts.cpp` | 错 MD5 400；正确 200 | 计划 |
-| A8-4 | 下载/MD5 | `/tftp/download`、`/tftp/md5`；大文件流式 | `agent_artifacts.cpp` | 上传→下载→MD5 一致 | 计划 |
-| A8-5 | 目录操作 | `mkdir/delete`；非空目录拒绝 | `agent_artifacts.cpp` | 409/200 正确 | 计划 |
-| A8-6 | 传输进度 | `/send_file/progress`；最近任务 | `agent_jobs.cpp` | sent/total/state/error | 计划 |
+| A8-1 | TFTP 状态/列表 | `/tftp/status`、`/tftp/files`；安全路径 | `web_console.cpp` | 69/root/running 正确；`..` 400 | 已完成 |
+| A8-2 | 分片上传 | `offset`、`Content-Range` 可选、16MB/片、临时文件 | `web_console.cpp` | 两片拼接后 MD5 正确 | 已完成 |
+| A8-3 | 上传完成校验 | `md5` 参数与服务端 `md5` 比对 | `web_console.cpp` | 错 MD5 400；正确 200 | 已完成 |
+| A8-4 | 下载/MD5 | `/tftp/download`、`/tftp/md5`；大文件流式 | `web_console.cpp` | 上传→下载→MD5 一致 | 已完成 |
+| A8-5 | 目录操作 | `mkdir/delete`；非空目录拒绝 | `web_console.cpp` | 409/200 正确 | 已完成 |
+| A8-6 | 传输进度 | `/send_file/progress`；最近任务 | `web_console.cpp` | sent/total/state/error | 已完成 |
+
+**C8 完成记录（2026-11-23）**
+
+- 新增 8 个路由：`GET /tftp/status`、`GET /tftp/files`、`GET /tftp/md5`、`GET /tftp/download`、`POST /tftp/upload`、`POST /tftp/mkdir`、`POST|DELETE /tftp/delete`、`GET /send_file/progress`。
+- 工件根目录统一取 `ServiceManager::tftp_root()`：TFTP 运行中用实际 `tftp_svc_root`，否则用 share 根；端口同理。路径用 `tftp_safe_join` 校验，拒绝 `..`、绝对路径和盘符；查询参数另设 8KB 动态缓冲，避免长路径被 256 字节截断。
+- 上传为原始字节分片，单片 16MB；`offset` 必须不超过已有长度，0 偏移截断重建，正偏移续写；父目录不存在 404；带 `md5` 时写后校验，错配 400 `md5_mismatch` 并返回实际 MD5。
+- 下载按 64KB 流式发送，`Content-Length` 精确，文件名同时给 ASCII 与 RFC 5987；目录路径 404。`/tftp/md5` 返回 `{md5,size}`。
+- `mkdir` 支持多级创建；`delete` 支持 POST 与 DELETE，拒绝根目录、非空目录和不存在路径；删除文件/空目录返回 `dir` 标记。
+- 传输进度为进程内单槽快照（互斥锁保护），输出 `path/direction/state/error/sent/total/percent/updated_ms`，初态 `idle`，上传/下载完成后 `done`。
+- `features.tftp_artifacts` 完整/全局均为 true；operations 70→78。
+- 验证：`output/webtest/agent-artifacts-smoke.js` 51/51，结果 `output/ux-audit/agent-artifacts-result.json`；18096 关闭隔离复跑 51/51，证据 `output/ux-audit/agent-artifacts-ui-disabled.json`。
+- 回归：C7 49/49、C6 39/39、C5 51/51、C4 84/84、C2 73/73、C1 82/82、C3 59/59、api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120。
+- 工件面全程只走 18081 与本地文件系统，不调用 18096，不使用 `/ui-tree`、`/control`、`X-Ui-Token`。
+- 提交：`feat(agent): add tftp artifact api with chunk upload and progress`。
 
 ## 9. P1-I：帮助、Agent 页与 Skill
 
