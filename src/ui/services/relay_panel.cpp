@@ -718,7 +718,9 @@ void RelayPanel::load_device(int index) {
     SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdDevEnable),
                  BM_SETCHECK, dev.enable ? BST_CHECKED : BST_UNCHECKED, 0);
     fill_channels(relay_ui::kIdDevTestCh, dev.channels);
-    set_text(relay_ui::kIdDevInfo, utf8_to_wide("设备已加载：" + dev.name));
+    set_text(relay_ui::kIdDevInfo,
+             utf8_to_wide((index >= 0 ? "设备已加载：" : "新设备草稿：") + dev.name +
+                          (index >= 0 ? "" : "（未保存）")));
     updating_ = false;
 }
 
