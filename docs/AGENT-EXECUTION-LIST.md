@@ -167,19 +167,19 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A9-1 | Agent 页双面展示 | 上：18081 设备面扫描/探测/作业/锁；下：18096 只读自检 | `web_pages.cpp` | 两面独立；18096 关闭不报设备错 | 已完成 |
+| A9-1 | Agent 页双面展示 | 上：18081 设备面扫描/探测/作业/锁；下：18096 仅状态（不代理、不探测） | `web_pages.cpp` | 两面独立；18096 关闭不报设备错 | 已完成 |
 | A9-2 | 帮助页 | `/help` 展示闭环、危险项、通道 curl | `agent_contract.cpp`、`web_console.cpp` | 内容与当前配置一致 | 已完成 |
 | A9-3 | Skill 对齐 | 更新 `skills/` 或文档，只使用 `/api/help` 公布的路径 | `skills/ssh-bridge/SKILL.md` | 无硬编码过期按钮 id | 已完成 |
 | A9-4 | 锁提示 | Web 终端显示“Agent 操作中”；人工接管按钮 | `web_pages.cpp` | 不静默冲突；接管生效 | 已完成 |
 
 **C9 完成记录（2026-11-23）**
 
-- Agent 页重构为四段：上方 `18081 设备控制面`（通道/在线、作业、锁、TFTP、已公布操作 78、通道与终端态表、租约锁表），下方 `18096 桌面 UI 桥（只读自检）`，再接 18081 接口速查与 18096 调试接口。两套数据独立读取；18096 关闭时顶部设备面照常渲染。
+- Agent 页重构为四段：上方 `18081 设备控制面`（通道/在线、作业、锁、TFTP、已公布操作 78、通道与终端态表、租约锁表），下方 `18096 桌面 UI 桥（状态只读）`（仅显示启用/端口/鉴权需求，不提供 18096 地址、UI token 输入或探针按钮），再接 18081 接口速查与 18096 边界说明。18096 关闭时顶部设备面照常渲染。
 - 设备面 `devLoad()` 并行读取 `/agent/scan`、`/jobs?limit=100`、`/tftp/status`、`/api/help`、`/health`；只在地址栏同源 18081 取数，不代理 18096。
 - 帮助文本补齐：短命令闭环（scan/probe → lock → command/jobs → log → unlock）、危险项（Tunnel、delete、log clear、配置保存）、18096 边界、TFTP 工件、`/help/<channel>` 可复制 curl。`/help?format=text` 强制文本；浏览器 `Accept: text/html` 返回带导航的 `<pre>` 帮助页并做 HTML 转义。
 - 终端 meta 增加 `termLock` 芯片与 `lockBanner`；每 5 秒随 `/agent/scan` 刷新当前通道租约。持锁时显示 owner/剩余时间，发送前拦截并提示“Agent 操作中”，提供“人工接管”按钮；按钮调用 `/lock/takeover`，成功后清锁并恢复写入。
 - 新增 `skills/ssh-bridge/SKILL.md`：只走 18081，先 `/health`→`/api/help`，覆盖 discover/scan/probe/lock/command/jobs/log/action/TFTP/serial 与错误契约；明确禁止 18096、`/ui-tree`、`/control`、`X-Ui-Token`。
-- 验证：`output/webtest/agent-ui-smoke.js` 33/33，结果 `output/ux-audit/agent-ui-result.json`；截图 `output/ux-audit/c9-agent-device-page.png`、`c9-terminal-lock.png`；无 pageerror/console error。
+- 验证：`agent-ui-smoke.js` C9 首版 33/33；C10 收紧边界后 35/35，结果 `output/ux-audit/agent-ui-result.json`；18096 关闭隔离 35/35，`agent-ui-ui-disabled.json`；截图 `output/ux-audit/c9-agent-device-page.png`、`c9-terminal-lock.png`；无 pageerror/console error。
 - 回归：C8 51/51、C7 49/49、C6 39/39、C5 51/51、C4 84/84、C2 73/73、C1 82/82、C3 59/59、api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120。
 - 提交：`feat(agent): show device surface help and terminal lock takeover`。
 
@@ -187,17 +187,17 @@
 
 | ID | 事项 | 覆盖 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A10-1 | 契约测试 | health/help/scan/probe/state/log/command/exec/lock/jobs/boards/tftp | `output/webtest/agent-device-smoke.js` | 每个路由正常/错误路径 | 计划 |
-| A10-2 | Shell 场景 | scan→probe shell→exec `uname -a`→state/log | 同上 | 输出完整、状态仍 shell | 计划 |
-| A10-3 | U-Boot 场景 | probe uboot→command→log；exec 409 | 同上 | 不误用 exec | 计划 |
-| A10-4 | 多 Agent 锁 | A lock→B 423→A unlock→B 202；TTL 过期 | 同上 | 锁语义全通过 | 计划 |
-| A10-5 | 文件场景 | 分片上传→MD5→下载→本地 MD5 | 同上 + TFTP | 字节一致 | 计划 |
-| A10-6 | 长任务 | 命令/传输期间 `/health` 延迟 | 同上 | P95 < 100ms；job 状态推进 | 计划 |
-| A10-7 | 关闭 18096 | 只开 18081，跑 A10-1…6 | 测试脚本 | 全通过 | 计划 |
-| A10-8 | 关闭 18081 | 只开 18096，跑 63/64 项 | `agent-smoke.js` | 全通过 | 计划 |
-| A10-9 | 四组合 | 双开/单开 18081/单开 18096/双关 | PowerShell | 端口/功能互不影响 | 计划 |
-| A10-10 | 代码隔离扫描 | 18081 路由无 18096/UI 调用 | `scripts` grep | 0 命中 | 计划 |
-| A10-11 | 回归 | 58 + 43 + 120 + 63/64 | 现有测试 | 不下降 | 计划 |
+| A10-1 | 契约测试 | health/help/scan/probe/state/log/command/exec/lock/jobs/boards/tftp/serial | `output/webtest/agent-device-smoke.js` | 每个路由正常/错误路径 | 已完成 |
+| A10-2 | Shell 场景 | scan→probe shell→exec `uname -a`→state/log | 同上 | 输出完整、状态仍 shell | 已完成 |
+| A10-3 | U-Boot 场景 | probe uboot→command→log；exec 409 | 同上 | 不误用 exec | 已完成 |
+| A10-4 | 多 Agent 锁 | A lock→B 423→A unlock→B 202；TTL 过期 | 同上 | 锁语义全通过 | 已完成 |
+| A10-5 | 文件场景 | 分片上传→MD5→下载→本地 MD5 | 同上 + TFTP | 字节一致 | 已完成 |
+| A10-6 | 长任务 | 命令/传输期间 `/health` 延迟 | 同上 | P95 < 100ms；job 状态推进 | 已完成 |
+| A10-7 | 关闭 18096 | 只开 18081，跑 A10-1…6 | 测试脚本 | 全通过 | 已完成 |
+| A10-8 | 关闭 18081 | 只开 18096，跑 63/64 项 | `agent-smoke.js` | 全通过 | 已完成 |
+| A10-9 | 四组合 | 双开/单开 18081/单开 18096/双关 | PowerShell | 端口/功能互不影响 | 已完成 |
+| A10-10 | 代码隔离扫描 | 18081 路由无 18096/UI 调用 | `scripts` grep | 0 命中 | 已完成 |
+| A10-11 | 回归 | 58 + 43 + 120 + 63/64 | 现有测试 | 不下降 | 已完成 |
 
 ## 11. 提交批次
 
@@ -274,3 +274,23 @@ C1 完成前不写 C2；C4 完成前不做 C5；A10-7（关闭 18096）必须在
 - 隔离验证：18096 关闭时 18081 的 health/help/status/scan/log 全部可用，6/6；证据 `output/ux-audit/agent-log-ui-disabled.json`。
 - 脚本/结果：`output/webtest/agent-log-smoke.js`、`output/ux-audit/agent-log-result.json`；构建日志 `output/wc-build.log`。
 - 测试后已恢复基线配置，SHA-256 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`；当前运行仅 18096，18081 关闭。
+## 16. C10 完成记录（2026-11-23）
+
+- 新增 `output/webtest/agent-device-smoke.js`：一个脚本覆盖 A10-1…A10-6，全部只访问 18081，不读取 18096。
+  - 契约：health/help/status/scan/state/probe/log/boards/jobs/tftp 正常路径；未知通道 404、POST 405、无 token 401、坏游标 reset。
+  - Shell：`ssh-demo1` 上 scan→probe shell→`/agent/exec` 执行 `uname -a`→state/log，执行后仍为 shell。
+  - U-Boot：向 `loop-chars` 注入 `U-Boot>`，probe 为 uboot/high；`/agent/exec` 409 `state_mismatch`，`/command` 202 后 job done，日志含命令。
+  - 多 Agent 锁：A 持锁时 B `/command` 423，A `/unlock` 后 B 202；600ms TTL 到期后 B 可直接写。
+  - 文件：两段上传 + 最终 MD5→服务端 md5→下载→本地 md5 字节一致→列表→删除。
+  - 长任务：12 键 `send_keys` 与 8MB 上传期间采样 `/health`，P95 < 100ms；job `progress.sent` 从中间值推进到 12/12。
+- 边界复核发现并修正 C9 违例：18081 Agent 页原先在浏览器侧直接请求 18096，并调用 `/ui-tree`、发送 `X-Ui-Token`。C10 改为 18096 状态只读，仅由 `/api/agent/status` 展示启用/端口/鉴权需求，不提供地址、token 输入或探针按钮；`/api/help` 与 `/api/agent/status` 的端点列表移除 `/ui-tree`、`/control`、UI token 字段。
+- 隔离证据：
+  - 双开：`agent-device-smoke` 71/71，`output/ux-audit/agent-device-result.json`。
+  - A10-7 只开 18081：18096=False，`agent-device-smoke` 71/71，`agent-device-ui-disabled.json`；`agent-ui-smoke` 35/35，`agent-ui-ui-disabled.json`。
+  - A10-8 只开 18096：18081 连接失败，`agent-smoke.js` 63/63。
+  - A10-9 四组合：双开 True/True、只开 Web True/False、只开 Agent False/True、双关 False/False，全部 ok；`output/ux-audit/a10-four-combos.json`。
+  - A10-10 源码扫描：`web_console.cpp`、`web_pages.cpp`、`agent_contract.cpp`、`agent_scan.cpp`、`service_manager.cpp` 对 `/ui-tree`、`/control`、`X-Ui-Token`、字面 18096 URL 共 0 命中；`output/ux-audit/a10-isolation-scan.json`。
+- 全量回归：contract 82/82、context 73/73、log 59/59、command 84/84、lock 51/51、jobs 39/39、lifecycle 49/49、artifacts 51/51、device 71/71、UI 35/35、api 58/58、api-v3 43/43、agent 63/63、web-v3 120/120；0 失败。
+- 文档：`详细设计.md` §11.15 同步为 18096 状态只读；`功能清单.md` Q18 收口、Q19 更新、新增 Q20。
+- 恢复基线：停进程后覆盖 `output/ux-audit/config-before-web.json`，校验 SHA-256 `2D50FDA278A11F4887F0734EA6E3669B7B59B33064640608C81AEE5443B6743A`，重启后仅 18096 监听，18081 关闭。
+- 提交：`test(agent): prove 18081 and 18096 isolation and full regression`。

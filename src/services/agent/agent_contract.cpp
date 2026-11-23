@@ -203,7 +203,6 @@ std::string help_json(AppCore* core, int web_port, const UiBridgeInfo& ui, bool 
     cJSON_AddNumberToObject(ui_json, "port", ui.port);
     cJSON_AddStringToObject(ui_json, "base_url", ("http://127.0.0.1:" + std::to_string(ui.port)).c_str());
     cJSON_AddStringToObject(ui_json, "protocol", kProtocol);
-    cJSON_AddStringToObject(ui_json, "auth", ui.token_required ? "x-ui-token" : "optional-token");
 
     cJSON* ops = cJSON_AddArrayToObject(root, "operations");
     for (const OperationSpec& spec : kOperations) {
@@ -265,8 +264,7 @@ std::string status_json(AppCore* core, int web_port, const UiBridgeInfo& ui, boo
     cJSON_AddBoolToObject(ui_json, "token_required", ui.token_required);
     cJSON_AddStringToObject(ui_json, "base_url", ("http://127.0.0.1:" + std::to_string(ui.port)).c_str());
     cJSON* ueps = cJSON_AddArrayToObject(ui_json, "endpoints");
-    for (const char* e : {"/ping", "/capabilities", "/ui-tree", "/control?id=ID", "/state",
-                          "/action", "/logs?since=N"})
+    for (const char* e : {"/ping", "/capabilities", "/state", "/logs?since=N"})
         cJSON_AddItemToArray(ueps, cJSON_CreateString(e));
 
     // 兼容旧 Agent 页面字段；这些字段只描述 18096，不代表 18081 板控面。
@@ -275,8 +273,7 @@ std::string status_json(AppCore* core, int web_port, const UiBridgeInfo& ui, boo
     cJSON_AddBoolToObject(root, "token_required", ui.token_required);
     cJSON_AddStringToObject(root, "base_url", ("http://127.0.0.1:" + std::to_string(ui.port)).c_str());
     cJSON* eps = cJSON_AddArrayToObject(root, "endpoints");
-    for (const char* e : {"/ping", "/capabilities", "/ui-tree", "/control?id=ID", "/state",
-                          "/action", "/logs?since=N"})
+    for (const char* e : {"/ping", "/capabilities", "/state", "/logs?since=N"})
         cJSON_AddItemToArray(eps, cJSON_CreateString(e));
     return json_text(root);
 }
@@ -419,3 +416,4 @@ std::string error_json(const std::string& code, const std::string& message,
 
 }  // namespace agent
 }  // namespace sb3
+

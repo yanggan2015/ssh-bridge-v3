@@ -544,33 +544,23 @@ std::string page_body(const std::string& page) {
 </section>
 <section class="card">
   <div class="card-head">
-    <div class="card-title"><div><h2>18096 桌面 UI 桥（只读自检）</h2><div class="card-sub">独立调试面：capabilities → tree → state。18096 不参与板控闭环，关闭它不影响上方设备面。</div></div></div>
+    <div class="card-title"><div><h2>18096 桌面 UI 桥（状态只读）</h2><div class="card-sub">18081 不调用、不代理 18096；这里只显示 /api/agent/status 返回的启用状态与端口，窗口自检在桌面端完成。</div></div></div>
     <span class="chip" id="agentChip">读取中</span>
   </div>
   <div class="agent-grid" id="agentMetrics">
-    <div class="agent-card"><div class="k">协议</div><div class="v" id="agProto">--</div></div>
-    <div class="agent-card"><div class="k">控件数</div><div class="v" id="agTree">--</div></div>
-    <div class="agent-card"><div class="k">通道</div><div class="v" id="agChannels">--</div></div>
-    <div class="agent-card"><div class="k">动作次数</div><div class="v" id="agActions">--</div></div>
+    <div class="agent-card"><div class="k">启用</div><div class="v" id="agEnabled">--</div></div>
+    <div class="agent-card"><div class="k">端口</div><div class="v" id="agPort">--</div></div>
+    <div class="agent-card"><div class="k">鉴权</div><div class="v" id="agToken">--</div></div>
+    <div class="agent-card"><div class="k">边界</div><div class="v" id="agBoundary">--</div></div>
   </div>
-  <div class="form-grid" style="margin-top:14px">
-    <label class="field"><span>UI 桥地址</span><input id="agBase" placeholder="http://127.0.0.1:18096"><span class="help">浏览器需与 ssh-bridge 在同一台机器；远程访问时 127.0.0.1 指向浏览器本机。</span></label>
-    <label class="field"><span>X-Ui-Token</span><input id="agToken" type="password" autocomplete="off" placeholder="agent.token 为空时留空"></label>
-  </div>
-  <div class="editor-actions">
-    <button class="btn" id="agProbe" type="button">运行 UI 自检</button>
-    <button class="btn ghost" id="agCaps" type="button">查看 capabilities</button>
-    <button class="btn ghost" id="agReloadCfg" type="button">从应用读取端口</button>
-    <span class="form-status" id="agNote"></span>
-  </div>
-  <pre id="agentJson" class="agent-log" style="margin-top:12px">运行 UI 自检后显示 capabilities / tree / state / logs 摘要。</pre>
+  <div class="form-status" id="agNote"></div>
 </section>
 <section class="card">
   <div class="card-head"><div class="card-title"><div><h2>18081 接口速查</h2><div class="card-sub">优先从 /api/help 动态读取；下方只列闭环主路径。写操作需要 Bearer token，通道写还要过租约锁。</div></div></div><a class="btn ghost" href="/help" target="_blank">文本帮助</a></div>
   <div class="help-list" id="deviceHelp"></div>
 </section>
 <section class="card">
-  <div class="card-head"><div class="card-title"><div><h2>18096 调试接口</h2><div class="card-sub">桌面窗口调试用；Agent 不得用这些接口代做板控。</div></div></div></div>
+  <div class="card-head"><div class="card-title"><div><h2>18096 边界</h2><div class="card-sub">18081 不代理桌面窗口；下列仅说明边界，不是 Agent 可调用接口。</div></div></div></div>
   <div class="help-list" id="agentHelp"></div>
 </section>
 )HTML";
@@ -1028,15 +1018,11 @@ loadChannels();
     }
     if (page == "agent") {
         return R"JS(
-let AG_CFG=null, AG_LAST=null, DEV_LAST=null;
+let AG_CFG=null, DEV_LAST=null;
 const AG_HELP=[
- ['GET','/ping','存活与协议版本'],
- ['GET','/capabilities','动作白名单与端口'],
- ['GET','/ui-tree','扁平控件树'],
- ['GET','/control?id=ID','单控件完整快照'],
- ['GET','/state','业务真值：通道、分屏、服务、Web'],
- ['POST','/action','{id,action,text,value}；一次只允许一个'],
- ['GET','/logs?since=N','环形动作日志']
+ ['边界','18096','仅桌面窗口调试；18081 不调用、不代理、不下发该端口端点'],
+ ['边界','关闭','18096 关闭不影响 18081、设备面、锁与作业'],
+ ['边界','板控','Agent 只走 18081；不得用 18096 代做板控']
 ];
 const DEV_HELP=[
  ['GET','/health','发现入口：版本、构建、18081/18096 边界'],
@@ -1052,19 +1038,12 @@ const DEV_HELP=[
  ['GET','/send_file/progress','最近一次上传/下载的 sent/total/state'],
  ['POST','/unlock','只释放自己的租约；人工接管走 /lock/takeover']
 ];
-function agBase(){return ($('#agBase').value||'http://127.0.0.1:18096').trim().replace(/\/+$/,'')}
-function agHeaders(){const h={};const t=($('#agToken').value||'').trim();if(t)h['X-Ui-Token']=t;return h}
-async function agFetch(path,opt){
-  opt=opt||{};
-  try{const r=await fetch(agBase()+path,{...opt,headers:{...agHeaders(),...(opt.headers||{})},cache:'no-store'});const text=await r.text();let j=null;try{j=JSON.parse(text)}catch(e){};return {status:r.status,j,text}}
-  catch(e){return {status:0,j:null,text:String(e)}}
-}
 function agMetric(id,v){const e=$('#'+id);if(e)e.textContent=v}
 function helpCards(box,rows,label){
   if(!box)return;box.innerHTML='';
   rows.forEach(row=>{const d=document.createElement('div');d.className='help-item';d.innerHTML='<code></code><div class="card-sub" style="margin-top:5px"></div><div class="tiny" style="margin-top:4px"></div>';d.querySelector('code').textContent=row[0]+' '+row[1];d.querySelector('.card-sub').textContent=row[2];d.querySelector('.tiny').textContent=label||'';box.appendChild(d)})
 }
-function agRenderHelp(){helpCards($('#agentHelp'),AG_HELP.map(r=>[r[0],r[1],r[2]]),'仅桌面调试；需 X-Ui-Token（若 agent.token 非空）')}
+function agRenderHelp(){helpCards($('#agentHelp'),AG_HELP.map(r=>[r[0],r[1],r[2]]),'边界说明；18081 不提供 18096 控制入口')}
 function devRenderHelp(ops){
   const wanted=['health.get','api.help.get','agent.scan.get','agent.probe.get','lock.post','command.post','jobs.list.get','log.get','action.post','tftp.files.get','sendfile.progress.get','unlock.post'];
   const byId={};(ops||[]).forEach(o=>byId[o.id]=o);
@@ -1131,25 +1110,6 @@ async function devLoad(){
   devRenderChannels(s,leases);devRenderLocks(s);devRenderHelp(hp.operations);
   DEV_LAST={scan:s,jobs:jb,tftp:tf,help:hp,health:hh};setBusy(btn,false);
 }
-async function agProbe(){
-  const btn=$('#agProbe');setBusy(btn,true,'自检中…');$('#agNote').textContent='正在请求 '+agBase()+' …';
-  const caps=await agFetch('/capabilities'),tree=await agFetch('/ui-tree'),state=await agFetch('/state'),logs=await agFetch('/logs?since=0');
-  const cfgOn=AG_CFG&&(AG_CFG.ui_bridge?AG_CFG.ui_bridge.enabled:AG_CFG.enable);
-  const ok=caps.status===200&&tree.status===200&&state.status===200&&logs.status===200;
-  $('#agentChip').textContent=ok?'UI 桥自检通过':(cfgOn===false?'UI 桥未启用':'UI 桥自检失败');
-  $('#agentChip').className='chip '+(ok?'on':(cfgOn===false?'off':'danger'));
-  agMetric('agProto',caps.j?caps.j.protocol:'--');agMetric('agTree',tree.j?tree.j.count:'--');
-  const ch=(state.j&&state.j.state&&Array.isArray(state.j.state.channels))?state.j.state.channels.length:'--';
-  agMetric('agChannels',ch);agMetric('agActions',state.j?state.j.action_count:'--');
-  const errs=[caps,tree,state,logs].filter(x=>x.status!==200).map(x=>x.status?x.status+' '+x.text.slice(0,80):x.text.slice(0,80));
-  $('#agNote').textContent=ok?'四个只读探针均通过；动作测试请在 Agent/脚本侧串行执行。':'失败：'+errs.join(' | ');
-  AG_LAST={caps:caps.j,uiTree:tree.j,state:state.j,logs:logs.j,errors:errs};
-  $('#agentJson').textContent=JSON.stringify(AG_LAST,null,2);
-  setBusy(btn,false);
-}
-async function agCaps(){
-  const r=await agFetch('/capabilities');$('#agentJson').textContent=r.text||'(empty)';$('#agNote').textContent='HTTP '+r.status;
-}
 async function agLoadCfg(){
   const r=await api('/api/agent/status');
   if(!r.j||!r.j.ok){
@@ -1157,15 +1117,15 @@ async function agLoadCfg(){
     $('#agNote').textContent='读取 18096 配置需要右上角 web token；设备面不受影响。';return
   }
   AG_CFG=r.j;const ui=r.j.ui_bridge||r.j;
-  if(!$('#agBase').value)$('#agBase').value=ui.base_url||r.j.base_url||'http://127.0.0.1:18096';
+  agMetric('agEnabled',ui.enabled?'启用':'关闭');
+  agMetric('agPort',ui.port||r.j.port||'--');
+  agMetric('agToken',ui.token_required?'需要 UI token':'无 token');
+  agMetric('agBoundary','仅桌面调试');
   $('#agentChip').textContent=ui.enabled?'已启用':'未启用（不影响设备面）';
   $('#agentChip').className='chip '+(ui.enabled?'on':'off');
-  $('#agNote').textContent='端口 '+(ui.port||r.j.port)+' · '+(ui.token_required?'需要 X-Ui-Token':'无 token')+' · '+(ui.base_url||r.j.base_url||'');
+  $('#agNote').textContent='端口 '+(ui.port||r.j.port)+' · 18081 不探测、不代理；桌面窗口自检请在本机完成。';
 }
 $('#devRefresh').onclick=devLoad;
-$('#agProbe').onclick=agProbe;
-$('#agCaps').onclick=agCaps;
-$('#agReloadCfg').onclick=agLoadCfg;
 agRenderHelp();devLoad();agLoadCfg();
 )JS";
     }
