@@ -30,7 +30,7 @@
 
 ```mermaid
 flowchart LR
-  CFG[ssh_bridge_config.json<br/>powerShell / telnet] --> AC[AppCore 装配]
+  CFG[ssh_bridge_config.json<br/>powershell / telnet] --> AC[AppCore 装配]
   AC --> PSB[PowerShellBridge]
   AC --> TNB[TelnetBridge]
   AC --> SB[SerialBridge]
@@ -50,7 +50,7 @@ flowchart LR
 
 ```json
 {
-  "powerShell": [
+  "powershell": [
     {
       "name": "ps-local",
       "enable": true,
@@ -184,7 +184,7 @@ while ($true) {
 
 ## 7. Web / Agent
 
-- `/api/channels` GET 新增 `powerShell`、`telnet` 两个数组；POST/delete 接受四种 `kind`。
+- `/api/channels` GET 新增 `powershell`、`telnet` 两个数组；POST/delete 接受四种 `kind`。
 - Web 通道页新增两个按钮与字段组；卡片按 kind 显示详情。
 - Agent 的 `/state`、`/scan` 自动包含新 Entry；`features` 增 `telnet_link`、`powershell_link`；`/write`、`/command`、`/log` 通过统一 `IBridge` 生效，不新增专用协议。
 - Agent 的 `serial_control` 只对串口为 true，避免把本地 shell 误当串口控制。
