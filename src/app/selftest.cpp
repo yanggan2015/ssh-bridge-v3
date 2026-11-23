@@ -398,13 +398,14 @@ bool run_upsert_preserve() {
         edit.log_enabled = false;
         std::string err;
         bool upsert = init_ok && core.upsert_serial(edit, "b1", &err);
-        const BoardConfig* after = core.board_of("b1");
-        ok = upsert && after &&
-             after->serial_device == "COM6" &&
-             after->username == "root" && after->password == "secret" && after->password_present &&
-             after->buffer_size == 65536 && after->log_dir == "logs" && !after->timestamp &&
-             after->quick_commands.size() == 1 && after->quick_commands[0].command == "ls -l" &&
-             after->buttons.size() == 1 && after->buttons[0].label == "BTN";
+        BoardConfig after;
+        bool have_after = core.board_of("b1", &after);
+        ok = upsert && have_after &&
+             after.serial_device == "COM6" &&
+             after.username == "root" && after.password == "secret" && after.password_present &&
+             after.buffer_size == 65536 && after.log_dir == "logs" && !after.timestamp &&
+             after.quick_commands.size() == 1 && after.quick_commands[0].command == "ls -l" &&
+             after.buttons.size() == 1 && after.buttons[0].label == "BTN";
         detail = "init=" + std::to_string(init_ok) + " upsert=" + std::to_string(upsert) +
                  (err.empty() ? "" : " err=" + err);
     }

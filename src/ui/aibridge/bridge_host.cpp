@@ -433,13 +433,12 @@ std::string build_state_json() {
         cJSON_AddStringToObject(quick, "channel", channel.c_str());
         cJSON* arr = cJSON_AddArrayToObject(quick, "buttons");
         if (g_core && !channel.empty()) {
-            if (const auto* cmds = g_core->quick_commands_of(channel)) {
-                for (const QuickCommandConfig& q : *cmds) {
-                    cJSON* b = cJSON_CreateObject();
-                    cJSON_AddStringToObject(b, "label", q.label.c_str());
-                    cJSON_AddStringToObject(b, "command", q.command.c_str());
-                    cJSON_AddItemToArray(arr, b);
-                }
+            const std::vector<QuickCommandConfig> cmds = g_core->quick_commands_of(channel);
+            for (const QuickCommandConfig& q : cmds) {
+                cJSON* b = cJSON_CreateObject();
+                cJSON_AddStringToObject(b, "label", q.label.c_str());
+                cJSON_AddStringToObject(b, "command", q.command.c_str());
+                cJSON_AddItemToArray(arr, b);
             }
         }
     }

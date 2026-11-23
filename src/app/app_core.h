@@ -47,8 +47,9 @@ public:
     void start_auto();
     void stop_all();
 
-    std::size_t channel_count() const { return entries_.size(); }
-    const std::vector<Entry>& entries() const { return entries_; }
+    // 通道表快照：Web/Agent 线程与 UI 热应用并发时，不能把 entries_ 的引用交出去。
+    std::size_t channel_count() const;
+    std::vector<Entry> entries() const;
 
     // 把"有新数据"通知接到 UI：fn(idx) 只会被合并后调用
     void set_kick(std::function<void(std::size_t)> fn);
@@ -74,8 +75,9 @@ public:
                       std::string* err);
     bool delete_relay(const std::string& name, std::string* err);
 
-    const BoardConfig*   board_of(const std::string& name) const;
-    const SSHLinkConfig* link_of(const std::string& name) const;
+    // 配置值快照：调用方拿到的是副本，不再跨线程持有 cfg_ 内部指针。
+    bool board_of(const std::string& name, BoardConfig* out) const;
+    bool link_of(const std::string& name, SSHLinkConfig* out) const;
     bool is_ssh_name(const std::string& name) const;
     // S8 入站 SSH：用户名=通道名；返回该通道对象与入站密码（空=允许 none）。
     bool resolve_inbound(const std::string& name, std::shared_ptr<IBridge>* bridge,
@@ -83,13 +85,13 @@ public:
     // 指定 COM 口是否正被本程序某个运行中的串口通道占用（板控按钮执行前检查）
     bool port_in_use(const std::string& port) const;
 
-    // S12 板卡按钮：读取当前启用按钮；保存按钮不重建通道，只落盘并更新内存配置
-    const std::vector<BoardActionConfig>* buttons_of(const std::string& name) const;
+    // S12 板卡按钮：读取当前启用按钮；返回副本，避免与配置热应用竞态
+    std::vector<BoardActionConfig> buttons_of(const std::string& name) const;
     bool set_buttons(const std::string& name, const std::vector<BoardActionConfig>& buttons,
                      std::string* err);
 
-    // S13 底部快捷指令：按通道保存，不重建通道
-    const std::vector<QuickCommandConfig>* quick_commands_of(const std::string& name) const;
+    // S13 底部快捷指令：按通道保存，不重建通道；返回副本
+    std::vector<QuickCommandConfig> quick_commands_of(const std::string& name) const;
     bool set_quick_commands(const std::string& name,
                             const std::vector<QuickCommandConfig>& commands, std::string* err);
 
@@ -131,7 +133,7 @@ public:
 
 private:
     void build_entries();
-    void rebind_kicks();
+    void rebind_kicks_locked();
     void start_entry(Entry& e, bool serial_auto);
 
     AppConfig cfg_;
@@ -139,6 +141,7 @@ private:
     std::vector<Entry> entries_;
     std::function<void(std::size_t)> kick_fn_;
     mutable std::mutex config_mu_;   // 配置读-改-写事务锁
+    mutable std::mutex entries_mu_;  // 通道表与 kick 回调锁；reload 时整体替换
 };
 
 }  // namespace sb3

@@ -856,8 +856,7 @@ std::string RelayPanel::script_target() const { return wide_to_utf8(get_text(rel
 
 std::vector<BoardActionConfig> RelayPanel::actions_of(const std::string& channel) const {
     if (!core_) return {};
-    const std::vector<BoardActionConfig>* p = core_->buttons_of(channel);
-    return p ? *p : std::vector<BoardActionConfig>{};
+    return core_->buttons_of(channel);
 }
 
 bool RelayPanel::save_actions(const std::string& channel,
@@ -1401,4 +1400,3 @@ void RelayPanel::refresh() {
 }
 
 }  // namespace sb3
-

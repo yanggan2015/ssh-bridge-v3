@@ -105,8 +105,6 @@ const OperationSpec kOperations[] = {
     {"command.block.post", "POST", "/command_block", "写入命令并等待回显/空闲，默认 2000ms 最大 60000ms", "token", "channel,command,line_ending,timeout_ms", "ok,output,timed_out,elapsed_ms,marker"},
     {"agent.exec.post", "POST", "/agent/exec", "仅 shell 态执行命令，追加结束标记并等待完成", "token", "channel,command,line_ending,timeout_ms", "ok,output,timed_out,elapsed_ms,marker"},
     {"send.keys.post", "POST", "/send_keys", "按 key 数组发送按键/控制序列；间隔 10..1000ms；duration_ms/repeat 支持按住连发", "token", "channel,keys,interval_ms,duration_ms,repeat", "ok,count,repeat,job_id,request_id"},
-    {"api.config.get", "GET", "/api/config", "完整配置 JSON（含密钥，需 token）", "token", "", "config"},
-    {"config.save.post", "POST", "/api/config/save", "保存完整配置 JSON", "token", "body", "ok"},
     {"api.channels.get", "GET", "/api/channels", "串口/SSH 通道列表", "token", "", "channels"},
     {"api.channels.post", "POST", "/api/channels", "新增或编辑通道", "token", "kind,old_name,channel", "ok,channel"},
     {"channels.delete.post", "POST", "/api/channels/delete", "删除通道", "token", "kind,name", "ok"},
@@ -339,11 +337,11 @@ std::string channel_help(AppCore* core, const std::string& channel, int web_port
     out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"session_id\":\"$SID\"}' \\\n";
     out += "    http://127.0.0.1:" + std::to_string(web_port) + "/unlock\n";
     out += "\n按钮:\n";
-    const std::vector<BoardActionConfig>* btns = core ? core->buttons_of(e->name) : nullptr;
-    if (!btns || btns->empty()) {
+    const std::vector<BoardActionConfig> btns = core ? core->buttons_of(e->name) : std::vector<BoardActionConfig>{};
+    if (btns.empty()) {
         out += "  (none)\n";
     } else {
-        for (const BoardActionConfig& b : *btns) {
+        for (const BoardActionConfig& b : btns) {
             out += "  - " + b.id + "  " + b.label + "  backend=" + b.backend +
                    (b.enable ? "" : "  disabled") + "\n";
             out += "    curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
@@ -414,4 +412,3 @@ std::string error_json(const std::string& code, const std::string& message,
 
 }  // namespace agent
 }  // namespace sb3
-

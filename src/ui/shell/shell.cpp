@@ -1061,8 +1061,7 @@ void Shell::refresh_quick_buttons() {
         return;
     }
 
-    if (const auto* cmds = core_->quick_commands_of(quick_channel_))
-        quick_commands_ = *cmds;
+    if (core_) quick_commands_ = core_->quick_commands_of(quick_channel_);
     std::wstring label = L"快捷指令 · " + widen(quick_channel_);
     SetWindowTextW(quick_label_, label.c_str());
     ShowWindow(quick_label_, SW_SHOWNA);
@@ -1093,9 +1092,9 @@ void Shell::refresh_board_buttons() {    for (HWND h : board_buttons_) {
     board_actions_.clear();
 
     const std::string sel = current_channel();
-    const std::vector<BoardActionConfig>* all = sel.empty() ? nullptr : core_->buttons_of(sel);
-    if (all) {
-        for (const BoardActionConfig& a : *all) {
+    const std::vector<BoardActionConfig> all = sel.empty() ? std::vector<BoardActionConfig>{} : core_->buttons_of(sel);
+    if (!all.empty()) {
+        for (const BoardActionConfig& a : all) {
             if (!a.enable || a.label.empty()) continue;
             board_actions_.push_back(a);
             int id = kIdcBoardBase + static_cast<int>(board_buttons_.size());
@@ -1194,19 +1193,21 @@ void Shell::open_quick_dialog(std::size_t edit_index, bool editing) {
         note_status(L"当前画框没有绑定通道，无法添加快捷指令");
         return;
     }
-    const std::vector<QuickCommandConfig>* src = core_->quick_commands_of(channel);
-    if (!src) {
+    BoardConfig board;
+    SSHLinkConfig link;
+    if (!core_->board_of(channel, &board) && !core_->link_of(channel, &link)) {
         note_status(L"当前通道不在配置中，无法添加快捷指令");
         return;
     }
-    if (editing && edit_index >= src->size()) return;
+    const std::vector<QuickCommandConfig> src = core_->quick_commands_of(channel);
+    if (editing && edit_index >= src.size()) return;
 
     QuickCommandConfig value;
-    if (editing) value = (*src)[edit_index];
+    if (editing) value = src[edit_index];
     std::wstring title = editing ? L"编辑快捷指令" : L"添加快捷指令";
     if (!quick_dlg::show(inst_, hwnd_, font_, dpi_, title, &value)) return;
 
-    std::vector<QuickCommandConfig> next = *src;
+    std::vector<QuickCommandConfig> next = src;
     if (editing) next[edit_index] = value;
     else next.push_back(value);
     std::string err;
@@ -2189,6 +2190,3 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 }  // namespace sb3
-
-
-

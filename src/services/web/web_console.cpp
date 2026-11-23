@@ -909,9 +909,8 @@ std::string WebConsole::Impl::actions() const {
     cJSON* items = cJSON_AddArrayToObject(root, "items");
     if (core) {
         for (const AppCore::Entry& e : core->entries()) {
-            const std::vector<BoardActionConfig>* btns = core->buttons_of(e.name);
-            if (!btns) continue;
-            for (const BoardActionConfig& a : *btns) {
+            const std::vector<BoardActionConfig> btns = core->buttons_of(e.name);
+            for (const BoardActionConfig& a : btns) {
                 cJSON* o = cJSON_CreateObject();
                 cJSON_AddStringToObject(o, "channel", e.name.c_str());
                 add_action_json(o, a);
@@ -928,10 +927,9 @@ std::string WebConsole::Impl::quick() const {
     cJSON* items = cJSON_AddArrayToObject(root, "items");
     if (core) {
         for (const AppCore::Entry& e : core->entries()) {
-            const std::vector<QuickCommandConfig>* qs = core->quick_commands_of(e.name);
-            if (!qs) continue;
-            for (std::size_t i = 0; i < qs->size(); ++i) {
-                const QuickCommandConfig& q = (*qs)[i];
+            const std::vector<QuickCommandConfig> qs = core->quick_commands_of(e.name);
+            for (std::size_t i = 0; i < qs.size(); ++i) {
+                const QuickCommandConfig& q = qs[i];
                 cJSON* o = cJSON_CreateObject();
                 cJSON_AddStringToObject(o, "channel", e.name.c_str());
                 cJSON_AddNumberToObject(o, "index", static_cast<double>(i));
@@ -1176,13 +1174,11 @@ int WebConsole::Impl::spawn_action(const std::string& channel, const std::string
                                    const std::string& request_id, const std::string& session) {
     if (!core) return -1;
     const BoardActionConfig* found = nullptr;
-    const std::vector<BoardActionConfig>* btns = core->buttons_of(channel);
-    if (btns) {
-        for (const BoardActionConfig& a : *btns) {
-            if (a.id == id) {
-                found = &a;
-                break;
-            }
+    const std::vector<BoardActionConfig> btns = core->buttons_of(channel);
+    for (const BoardActionConfig& a : btns) {
+        if (a.id == id) {
+            found = &a;
+            break;
         }
     }
     if (!found) return 0;
@@ -1244,13 +1240,11 @@ void WebConsole::Impl::worker_loop() {
 
         if (task.kind == TaskKind::Action) {
             const BoardActionConfig* found = nullptr;
-            const std::vector<BoardActionConfig>* btns = core ? core->buttons_of(task.channel) : nullptr;
-            if (btns) {
-                for (const BoardActionConfig& a : *btns) {
-                    if (a.id == task.action_id) {
-                        found = &a;
-                        break;
-                    }
+            const std::vector<BoardActionConfig> btns = core ? core->buttons_of(task.channel) : std::vector<BoardActionConfig>{};
+            for (const BoardActionConfig& a : btns) {
+                if (a.id == task.action_id) {
+                    found = &a;
+                    break;
                 }
             }
             if (!found) {
@@ -2379,11 +2373,12 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         }
         bool saved = false;
         if (kind == "serial") {
-            const BoardConfig* old = core->board_of(old_name.empty() ? nm : old_name);
-            BoardConfig b = old ? *old : BoardConfig{};
+            BoardConfig old;
+            bool has_old = core->board_of(old_name.empty() ? nm : old_name, &old);
+            BoardConfig b = has_old ? old : BoardConfig{};
             b.name = nm;
             std::string dev = util::trim(json_str(chobj, "serial_device"));
-            if (dev.empty() && old) dev = old->serial_device;
+            if (dev.empty() && has_old) dev = old.serial_device;
             if (dev.empty()) {
                 cJSON_Delete(body);
                 reply_json_text(c, 400, agent::error_json("invalid_argument", "serial_device required", rid));
@@ -2410,11 +2405,12 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             }
             saved = core->upsert_serial(b, old_name, &err);
         } else if (kind == "ssh") {
-            const SSHLinkConfig* old = core->link_of(old_name.empty() ? nm : old_name);
-            SSHLinkConfig s = old ? *old : SSHLinkConfig{};
+            SSHLinkConfig old;
+            bool has_old = core->link_of(old_name.empty() ? nm : old_name, &old);
+            SSHLinkConfig s = has_old ? old : SSHLinkConfig{};
             s.name = nm;
             std::string host = util::trim(json_str(chobj, "host"));
-            if (host.empty() && old) host = old->host;
+            if (host.empty() && has_old) host = old.host;
             if (host.empty()) {
                 cJSON_Delete(body);
                 reply_json_text(c, 400, agent::error_json("invalid_argument", "host required", rid));
@@ -2423,8 +2419,14 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             s.host = host;
             s.port = json_int(chobj, "port", s.port);
             s.username = json_str(chobj, "username").empty() ? s.username : json_str(chobj, "username");
-            s.password = json_str(chobj, "password").empty() ? s.password : json_str(chobj, "password");
-            s.password_present = true;
+            const std::string supplied_password = json_str(chobj, "password");
+            if (json_bool(chobj, "clear_password", false)) {
+                s.password.clear();
+                s.password_present = false;
+            } else if (!supplied_password.empty()) {
+                s.password = supplied_password;
+                s.password_present = true;
+            }
             s.term = json_str(chobj, "term").empty() ? s.term : json_str(chobj, "term");
             s.width = json_int(chobj, "width", s.width);
             s.height = json_int(chobj, "height", s.height);
@@ -2637,13 +2639,13 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         // /serial/configure：只改本次给出的参数，保留按钮/密码等未暴露字段。
-        const BoardConfig* cur = core ? core->board_of(ch) : nullptr;
-        if (!cur) {
+        BoardConfig cur;
+        if (!core || !core->board_of(ch, &cur)) {
             cJSON_Delete(body);
             reply_json_text(c, 409, agent::error_json("channel_conflict", "board config not found", rid));
             return;
         }
-        BoardConfig nb = *cur;
+        BoardConfig nb = cur;
         bool touched = false;
         if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(body, "baudrate"))) {
             nb.baudrate = json_int(body, "baudrate", nb.baudrate); touched = true;
@@ -2771,46 +2773,81 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             }
             if (kind == "serial") {
                 std::string dev = util::trim(json_str(ch, "serial_device"));
+                if (dev.empty() && !created) dev = util::trim(json_str(target, "serial_device"));
                 if (dev.empty()) {
                     err = "串口设备不能为空";
                     return false;
                 }
                 copy_str_field(target, ch, "serial_device");
-                copy_int_field(target, ch, "baudrate", 115200, 50, 4000000);
-                copy_int_field(target, ch, "databits", 8, 5, 8);
-                copy_str_field(target, ch, "parity");
-                copy_int_field(target, ch, "stopbits_x10", 10, 10, 20);
-                copy_str_field(target, ch, "flowcontrol");
-                copy_bool_field(target, ch, "dtr", true);
-                copy_bool_field(target, ch, "rts", true);
-                copy_str_field(target, ch, "line_ending");
-                copy_str_field(target, ch, "encoding");
-                copy_bool_field(target, ch, "auto_open", true);
-                copy_bool_field(target, ch, "timestamp", false);
-                copy_bool_field(target, ch, "discoverable", false);
-                copy_str_field(target, ch, "username");
-                copy_str_field(target, ch, "password");
-                copy_bool_field(target, ch, "log_enabled", true);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "baudrate")))
+                    copy_int_field(target, ch, "baudrate", 115200, 50, 4000000);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "databits")))
+                    copy_int_field(target, ch, "databits", 8, 5, 8);
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "parity")))
+                    copy_str_field(target, ch, "parity");
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "stopbits_x10")))
+                    copy_int_field(target, ch, "stopbits_x10", 10, 10, 20);
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "flowcontrol")))
+                    copy_str_field(target, ch, "flowcontrol");
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "dtr")))
+                    copy_bool_field(target, ch, "dtr", true);
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "rts")))
+                    copy_bool_field(target, ch, "rts", true);
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "line_ending")))
+                    copy_str_field(target, ch, "line_ending");
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "encoding")))
+                    copy_str_field(target, ch, "encoding");
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "auto_open")))
+                    copy_bool_field(target, ch, "auto_open", false);
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "timestamp")))
+                    copy_bool_field(target, ch, "timestamp", true);
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "discoverable")))
+                    copy_bool_field(target, ch, "discoverable", false);
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "username")))
+                    copy_str_field(target, ch, "username");
+                if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ch, "clear_password")))
+                    cJSON_DeleteItemFromObjectCaseSensitive(target, "password");
+                else if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "password")) &&
+                         !util::trim(json_str(ch, "password")).empty())
+                    copy_str_field(target, ch, "password");
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "log_enabled")))
+                    copy_bool_field(target, ch, "log_enabled", true);
             } else {
                 std::string host = util::trim(json_str(ch, "host"));
+                if (host.empty() && !created) host = util::trim(json_str(target, "host"));
                 if (host.empty()) {
                     err = "SSH 主机不能为空";
                     return false;
                 }
                 copy_str_field(target, ch, "host");
-                copy_int_field(target, ch, "port", 22, 1, 65535);
-                copy_str_field(target, ch, "username");
-                copy_str_field(target, ch, "password");
-                copy_str_field(target, ch, "term");
-                copy_int_field(target, ch, "width", 120, 40, 500);
-                copy_int_field(target, ch, "height", 32, 10, 200);
-                copy_int_field(target, ch, "connect_timeout_ms", 5000, 100, 120000);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "port")))
+                    copy_int_field(target, ch, "port", 22, 1, 65535);
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "username")))
+                    copy_str_field(target, ch, "username");
+                if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ch, "clear_password")))
+                    cJSON_DeleteItemFromObjectCaseSensitive(target, "password");
+                else if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "password")) &&
+                         !util::trim(json_str(ch, "password")).empty())
+                    copy_str_field(target, ch, "password");
+                if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(ch, "term")))
+                    copy_str_field(target, ch, "term");
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "width")))
+                    copy_int_field(target, ch, "width", 120, 40, 500);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "height")))
+                    copy_int_field(target, ch, "height", 32, 10, 200);
+                if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(ch, "connect_timeout_ms")))
+                    copy_int_field(target, ch, "connect_timeout_ms", 5000, 100, 120000);
                 const cJSON* ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive");
                 if (!cJSON_IsNumber(ka)) ka = cJSON_GetObjectItemCaseSensitive(ch, "keepalive_s");
-                copy_int_field(target, ch, "keepalive", cJSON_IsNumber(ka) ? static_cast<int>(ka->valuedouble) : 3,
-                              0, 3600);
-                copy_bool_field(target, ch, "discoverable", false);
-                copy_bool_field(target, ch, "log_enabled", true);
+                if (cJSON_IsNumber(ka)) {
+                    cJSON* ka_copy = cJSON_CreateNumber(ka->valuedouble);
+                    cJSON_DeleteItemFromObjectCaseSensitive(target, "keepalive");
+                    cJSON_AddItemToObject(target, "keepalive", ka_copy);
+                }
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "discoverable")))
+                    copy_bool_field(target, ch, "discoverable", false);
+                if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(ch, "log_enabled")))
+                    copy_bool_field(target, ch, "log_enabled", true);
             }
             // 改名时同步分屏画框里保存的通道名。
             if (!old_name.empty() && old_name != name) {
@@ -3146,13 +3183,11 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
         cJSON_Delete(body);
         std::string rid = request_id_of(hm);
         const BoardActionConfig* found = nullptr;
-        const auto* btns = core ? core->buttons_of(ch) : nullptr;
-        if (btns) {
-            for (const BoardActionConfig& a : *btns) {
-                if (a.id == id) {
-                    found = &a;
-                    break;
-                }
+        const auto btns = core ? core->buttons_of(ch) : std::vector<BoardActionConfig>{};
+        for (const BoardActionConfig& a : btns) {
+            if (a.id == id) {
+                found = &a;
+                break;
             }
         }
         if (!found) {
@@ -4606,6 +4641,3 @@ std::string WebConsole::status_json() const {
 }
 
 }  // namespace sb3
-
-
-

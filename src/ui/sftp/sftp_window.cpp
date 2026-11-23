@@ -775,13 +775,13 @@ void SftpWindow::layout() {
 void SftpWindow::ensure_target() {
     std::string name = channel_name();
     if (name.empty()) return;
-    if (const SSHLinkConfig* link = core_->link_of(name)) {
-        target_.host = link->host;
-        target_.port = link->port;
-        target_.username = link->username;
-        target_.password = link->password;
-        target_.connect_timeout_ms = link->connect_timeout_ms;
-        target_.keepalive_s = link->keepalive_s;
+    if (SSHLinkConfig link; core_->link_of(name, &link)) {
+        target_.host = link.host;
+        target_.port = link.port;
+        target_.username = link.username;
+        target_.password = link.password;
+        target_.connect_timeout_ms = link.connect_timeout_ms;
+        target_.keepalive_s = link.keepalive_s;
     }
 }
 

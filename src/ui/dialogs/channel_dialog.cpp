@@ -447,49 +447,49 @@ bool ChannelDialog::is_ssh() const {
 void ChannelDialog::load_from_config() {
     if (!core_) return;
     set_text(chan_dlg::kIdName, widen(edit_name_));
-    if (const SSHLinkConfig* s = core_->link_of(edit_name_)) {
+    if (SSHLinkConfig s; core_->link_of(edit_name_, &s)) {
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdKind), CB_SETCURSEL, 1, 0);
-        set_text(chan_dlg::kIdHost, widen(s->host));
-        set_text(chan_dlg::kIdPort, std::to_wstring(s->port));
-        set_text(chan_dlg::kIdUser, widen(s->username));
-        set_text(chan_dlg::kIdPassword, widen(s->password));
-        set_text(chan_dlg::kIdTerm, widen(s->term));
-        set_text(chan_dlg::kIdTimeout, std::to_wstring(s->connect_timeout_ms));
-        set_text(chan_dlg::kIdWidth, std::to_wstring(s->width));
-        set_text(chan_dlg::kIdHeight, std::to_wstring(s->height));
-        set_text(chan_dlg::kIdKeepalive, std::to_wstring(s->keepalive_s));
+        set_text(chan_dlg::kIdHost, widen(s.host));
+        set_text(chan_dlg::kIdPort, std::to_wstring(s.port));
+        set_text(chan_dlg::kIdUser, widen(s.username));
+        set_text(chan_dlg::kIdPassword, widen(s.password));
+        set_text(chan_dlg::kIdTerm, widen(s.term));
+        set_text(chan_dlg::kIdTimeout, std::to_wstring(s.connect_timeout_ms));
+        set_text(chan_dlg::kIdWidth, std::to_wstring(s.width));
+        set_text(chan_dlg::kIdHeight, std::to_wstring(s.height));
+        set_text(chan_dlg::kIdKeepalive, std::to_wstring(s.keepalive_s));
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLog), BM_SETCHECK,
-                     s->log_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    } else if (const BoardConfig* b = core_->board_of(edit_name_)) {
+                     s.log_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    } else if (BoardConfig b; core_->board_of(edit_name_, &b)) {
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdKind), CB_SETCURSEL, 0, 0);
-        set_text(chan_dlg::kIdDevice, widen(b->serial_device));
-        set_text(chan_dlg::kIdBaud, std::to_wstring(b->baudrate));
+        set_text(chan_dlg::kIdDevice, widen(b.serial_device));
+        set_text(chan_dlg::kIdBaud, std::to_wstring(b.baudrate));
         HWND db = GetDlgItem(hwnd_, chan_dlg::kIdDatabits);
         SendMessageW(db, CB_SETCURSEL,
-                     static_cast<WPARAM>(std::max(0, std::min(3, b->databits - 5))), 0);
+                     static_cast<WPARAM>(std::max(0, std::min(3, b.databits - 5))), 0);
         int pidx = 0;
-        if (b->parity == "E") pidx = 1;
-        else if (b->parity == "O") pidx = 2;
-        else if (b->parity == "M") pidx = 3;
-        else if (b->parity == "S") pidx = 4;
+        if (b.parity == "E") pidx = 1;
+        else if (b.parity == "O") pidx = 2;
+        else if (b.parity == "M") pidx = 3;
+        else if (b.parity == "S") pidx = 4;
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdParity), CB_SETCURSEL, static_cast<WPARAM>(pidx), 0);
-        int sidx = b->stopbits_x10 == 15 ? 1 : (b->stopbits_x10 == 20 ? 2 : 0);
+        int sidx = b.stopbits_x10 == 15 ? 1 : (b.stopbits_x10 == 20 ? 2 : 0);
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdStopbits), CB_SETCURSEL, static_cast<WPARAM>(sidx), 0);
-        int fidx = b->flowcontrol == "rtscts" ? 1 : (b->flowcontrol == "xonxoff" ? 2 : 0);
+        int fidx = b.flowcontrol == "rtscts" ? 1 : (b.flowcontrol == "xonxoff" ? 2 : 0);
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdFlow), CB_SETCURSEL, static_cast<WPARAM>(fidx), 0);
-        int lidx = b->line_ending == "lf" ? 1 : (b->line_ending == "cr" ? 2 :
-                   (b->line_ending == "none" ? 3 : 0));
+        int lidx = b.line_ending == "lf" ? 1 : (b.line_ending == "cr" ? 2 :
+                   (b.line_ending == "none" ? 3 : 0));
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLineEnd), CB_SETCURSEL, static_cast<WPARAM>(lidx), 0);
-        int eidx = b->encoding == "gbk" ? 1 : 0;
+        int eidx = b.encoding == "gbk" ? 1 : 0;
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdEncoding), CB_SETCURSEL, static_cast<WPARAM>(eidx), 0);
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdAutoOpen), BM_SETCHECK,
-                     b->auto_open ? BST_CHECKED : BST_UNCHECKED, 0);
+                     b.auto_open ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdDtr), BM_SETCHECK,
-                     b->dtr ? BST_CHECKED : BST_UNCHECKED, 0);
+                     b.dtr ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdRts), BM_SETCHECK,
-                     b->rts ? BST_CHECKED : BST_UNCHECKED, 0);
+                     b.rts ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessageW(GetDlgItem(hwnd_, chan_dlg::kIdLog), BM_SETCHECK,
-                     b->log_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+                     b.log_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
     }
 }
 
@@ -821,7 +821,3 @@ LRESULT ChannelDialog::handle(UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 }  // namespace sb3
-
-
-
-

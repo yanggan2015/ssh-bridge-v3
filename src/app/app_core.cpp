@@ -132,7 +132,7 @@ void AppCore::build_entries() {
     }
 }
 
-void AppCore::rebind_kicks() {
+void AppCore::rebind_kicks_locked() {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         Entry& e = entries_[i];
         if (!e.bridge) continue;
@@ -153,11 +153,13 @@ void AppCore::rebind_kicks() {
 }
 
 void AppCore::set_kick(std::function<void(std::size_t)> fn) {
+    std::lock_guard<std::mutex> g(entries_mu_);
     kick_fn_ = std::move(fn);
-    rebind_kicks();
+    rebind_kicks_locked();
 }
 
 void AppCore::clear_pending(std::size_t idx) {
+    std::lock_guard<std::mutex> g(entries_mu_);
     if (idx < entries_.size() && entries_[idx].wake) {
         entries_[idx].wake->store(false, std::memory_order_release);
     }
@@ -175,6 +177,7 @@ void AppCore::start_entry(Entry& e, bool serial_auto) {
 }
 
 void AppCore::start_auto() {
+    std::lock_guard<std::mutex> g(entries_mu_);
     std::size_t idx = 0;
     for (const BoardConfig& b : cfg_.boards) {
         if (idx >= entries_.size()) break;
@@ -187,6 +190,7 @@ void AppCore::start_auto() {
 }
 
 void AppCore::stop_all() {
+    std::lock_guard<std::mutex> g(entries_mu_);
     for (Entry& e : entries_) {
         if (e.bridge) e.bridge->stop();
         e.started = false;
@@ -195,6 +199,7 @@ void AppCore::stop_all() {
 
 AppCore::ReloadResult AppCore::reload_config() {
     std::lock_guard<std::mutex> g(config_mu_);
+    std::lock_guard<std::mutex> ge(entries_mu_);
     ReloadResult r;
 
     AppConfig next;
@@ -297,16 +302,16 @@ AppCore::ReloadResult AppCore::reload_config() {
     }
 
     cfg_ = next;
-    rebind_kicks();
+    rebind_kicks_locked();
 
     for (std::size_t idx : changed_idx) {
         Entry& e = entries_[idx];
         if (!e.bridge) continue;
         if (e.kind == "serial") {
-            const BoardConfig* b = board_of(e.name);
+            const BoardConfig* b = find_board(cfg_, e.name);
             if (b) static_cast<SerialBridge*>(e.bridge.get())->apply_config(*b);
         } else {
-            const SSHLinkConfig* s = link_of(e.name);
+            const SSHLinkConfig* s = find_link(cfg_, e.name);
             if (s) static_cast<SshBridge*>(e.bridge.get())->apply_config(*s);
         }
         e.started = e.bridge->running();
@@ -316,7 +321,7 @@ AppCore::ReloadResult AppCore::reload_config() {
         Entry& e = entries_[idx];
         bool auto_open = true;
         if (e.kind == "serial") {
-            const BoardConfig* b = board_of(e.name);
+            const BoardConfig* b = find_board(cfg_, e.name);
             auto_open = b ? b->auto_open : false;
         }
         start_entry(e, auto_open);
@@ -570,35 +575,60 @@ bool AppCore::set_active_pane(int index, std::string* err) {
     return true;
 }
 
-const BoardConfig* AppCore::board_of(const std::string& name) const {
-    for (const BoardConfig& b : cfg_.boards) if (b.name == name) return &b;
-    return nullptr;
+std::size_t AppCore::channel_count() const {
+    std::lock_guard<std::mutex> g(entries_mu_);
+    return entries_.size();
 }
 
-const SSHLinkConfig* AppCore::link_of(const std::string& name) const {
-    for (const SSHLinkConfig& s : cfg_.links) if (s.name == name) return &s;
-    return nullptr;
+std::vector<AppCore::Entry> AppCore::entries() const {
+    std::lock_guard<std::mutex> g(entries_mu_);
+    return entries_;
 }
 
-bool AppCore::is_ssh_name(const std::string& name) const {
-    return link_of(name) != nullptr;
-}
-
-bool AppCore::port_in_use(const std::string& port) const {
-    if (port.empty()) return false;
-    for (const Entry& e : entries_) {
-        if (e.kind != "serial" || !e.bridge || !e.bridge->running()) continue;
-        const BoardConfig* b = board_of(e.name);
-        if (!b) continue;
-        if (util::lower(b->serial_device) == util::lower(port)) return true;
+bool AppCore::board_of(const std::string& name, BoardConfig* out) const {
+    std::lock_guard<std::mutex> g(config_mu_);
+    for (const BoardConfig& b : cfg_.boards) {
+        if (b.name == name) {
+            if (out) *out = b;
+            return true;
+        }
     }
     return false;
 }
 
-const std::vector<BoardActionConfig>* AppCore::buttons_of(const std::string& name) const {
-    if (const BoardConfig* b = board_of(name)) return &b->buttons;
-    if (const SSHLinkConfig* s = link_of(name)) return &s->buttons;
-    return nullptr;
+bool AppCore::link_of(const std::string& name, SSHLinkConfig* out) const {
+    std::lock_guard<std::mutex> g(config_mu_);
+    for (const SSHLinkConfig& s : cfg_.links) {
+        if (s.name == name) {
+            if (out) *out = s;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AppCore::is_ssh_name(const std::string& name) const {
+    return link_of(name, nullptr);
+}
+
+bool AppCore::port_in_use(const std::string& port) const {
+    if (port.empty()) return false;
+    const AppConfig snapshot = config();
+    const std::vector<Entry> es = entries();
+    for (const Entry& e : es) {
+        if (e.kind != "serial" || !e.bridge || !e.bridge->running()) continue;
+        for (const BoardConfig& b : snapshot.boards) {
+            if (b.name == e.name && util::lower(b.serial_device) == util::lower(port)) return true;
+        }
+    }
+    return false;
+}
+
+std::vector<BoardActionConfig> AppCore::buttons_of(const std::string& name) const {
+    std::lock_guard<std::mutex> g(config_mu_);
+    for (const BoardConfig& b : cfg_.boards) if (b.name == name) return b.buttons;
+    for (const SSHLinkConfig& s : cfg_.links) if (s.name == name) return s.buttons;
+    return {};
 }
 
 bool AppCore::set_buttons(const std::string& name,
@@ -618,10 +648,11 @@ bool AppCore::set_buttons(const std::string& name,
     return saved;
 }
 
-const std::vector<QuickCommandConfig>* AppCore::quick_commands_of(const std::string& name) const {
-    if (const BoardConfig* b = board_of(name)) return &b->quick_commands;
-    if (const SSHLinkConfig* s = link_of(name)) return &s->quick_commands;
-    return nullptr;
+std::vector<QuickCommandConfig> AppCore::quick_commands_of(const std::string& name) const {
+    std::lock_guard<std::mutex> g(config_mu_);
+    for (const BoardConfig& b : cfg_.boards) if (b.name == name) return b.quick_commands;
+    for (const SSHLinkConfig& s : cfg_.links) if (s.name == name) return s.quick_commands;
+    return {};
 }
 
 bool AppCore::set_quick_commands(const std::string& name,
@@ -643,6 +674,7 @@ bool AppCore::set_quick_commands(const std::string& name,
 }
 
 IBridge* AppCore::find(const std::string& name) {
+    std::lock_guard<std::mutex> g(entries_mu_);
     for (Entry& e : entries_) {
         if (e.name == name) return e.bridge.get();
     }
@@ -650,6 +682,7 @@ IBridge* AppCore::find(const std::string& name) {
 }
 
 std::shared_ptr<IBridge> AppCore::find_shared(const std::string& name) {
+    std::lock_guard<std::mutex> g(entries_mu_);
     for (Entry& e : entries_) {
         if (e.name == name) return e.bridge;
     }
@@ -662,16 +695,18 @@ bool AppCore::resolve_inbound(const std::string& name, std::shared_ptr<IBridge>*
         if (err) *err = "用户名为空（应为通道名）";
         return false;
     }
-    for (const Entry& e : entries_) {
+    const AppConfig snapshot = config();
+    const std::vector<Entry> es = entries();
+    for (const Entry& e : es) {
         if (e.name != name || !e.bridge) continue;
         std::string pass;
-        for (const BoardConfig& b : cfg_.boards) {
+        for (const BoardConfig& b : snapshot.boards) {
             if (b.name == name) {
-                pass = config_resolve_password(cfg_, b);
+                pass = config_resolve_password(snapshot, b);
                 break;
             }
         }
-        for (const SSHLinkConfig& s : cfg_.links) {
+        for (const SSHLinkConfig& s : snapshot.links) {
             if (s.name == name) {
                 pass = s.password;
                 break;
@@ -687,32 +722,56 @@ bool AppCore::resolve_inbound(const std::string& name, std::shared_ptr<IBridge>*
 }
 
 bool AppCore::reconnect(const std::string& name) {
-    for (Entry& e : entries_) {
-        if (e.name != name || !e.bridge) continue;
-        if (e.bridge->running()) {
-            e.bridge->reconnect();
-        } else if (!e.bridge->start()) {
-            return false;
+    std::shared_ptr<IBridge> b;
+    {
+        std::lock_guard<std::mutex> g(entries_mu_);
+        for (Entry& e : entries_) {
+            if (e.name != name || !e.bridge) continue;
+            b = e.bridge;
+            break;
         }
-        e.started = true;
-        return true;
     }
-    return false;
+    if (!b) return false;
+    if (b->running()) {
+        b->reconnect();
+    } else if (!b->start()) {
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> g(entries_mu_);
+        for (Entry& e : entries_) {
+            if (e.name == name) e.started = true;
+        }
+    }
+    return true;
 }
 
 bool AppCore::disconnect(const std::string& name) {
-    for (Entry& e : entries_) {
-        if (e.name != name || !e.bridge) continue;
-        e.bridge->stop();
-        e.started = false;
-        e.state   = "idle";
-        return true;
+    bool found = false;
+    std::shared_ptr<IBridge> b;
+    {
+        std::lock_guard<std::mutex> g(entries_mu_);
+        for (Entry& e : entries_) {
+            if (e.name != name || !e.bridge) continue;
+            b = e.bridge;
+            found = true;
+            break;
+        }
     }
-    return false;
+    if (!found) return false;
+    b->stop();
+    std::lock_guard<std::mutex> g(entries_mu_);
+    for (Entry& e : entries_) {
+        if (e.name == name) {
+            e.started = false;
+            e.state = "idle";
+        }
+    }
+    return true;
 }
 
 bool AppCore::clear(const std::string& name) {
-    IBridge* b = find(name);
+    std::shared_ptr<IBridge> b = find_shared(name);
     if (!b) return false;
     b->clear();
     return true;
@@ -822,11 +881,12 @@ bool AppCore::save_config_json(const std::string& text, std::string* err) {
 }
 
 std::string AppCore::summary() const {
+    const std::vector<Entry> es = entries();
     std::size_t online = 0;
-    for (const Entry& e : entries_) {
+    for (const Entry& e : es) {
         if (e.bridge && e.bridge->running()) ++online;
     }
-    return "通道 " + std::to_string(entries_.size()) + " · 在线 " + std::to_string(online);
+    return "通道 " + std::to_string(es.size()) + " · 在线 " + std::to_string(online);
 }
 
 std::string AppCore::state_json(bool window_visible) const {
@@ -835,6 +895,7 @@ std::string AppCore::state_json(bool window_visible) const {
         std::lock_guard<std::mutex> g(config_mu_);
         cfg_path = cfg_.abs_path;
     }
+    const std::vector<Entry> es = entries();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "app", "ssh-bridge3");
     cJSON_AddStringToObject(root, "step", "S6");
@@ -844,7 +905,7 @@ std::string AppCore::state_json(bool window_visible) const {
     cJSON_AddStringToObject(root, "config", cfg_path.c_str());
 
     cJSON* arr = cJSON_AddArrayToObject(root, "channels");
-    for (const Entry& e : entries_) {
+    for (const Entry& e : es) {
         cJSON* o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "name", e.name.c_str());
         cJSON_AddStringToObject(o, "kind", e.kind.c_str());
@@ -877,8 +938,3 @@ std::string AppCore::state_json(bool window_visible) const {
 }
 
 }  // namespace sb3
-
-
-
-
-

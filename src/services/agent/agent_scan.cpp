@@ -218,9 +218,8 @@ void add_counters(cJSON* o, const cJSON* st) {
 
 void add_buttons(cJSON* o, AppCore* core, const std::string& channel) {
     cJSON* arr = cJSON_AddArrayToObject(o, "buttons");
-    const std::vector<BoardActionConfig>* btns = core ? core->buttons_of(channel) : nullptr;
-    if (!btns) return;
-    for (const BoardActionConfig& a : *btns) {
+    const std::vector<BoardActionConfig> btns = core ? core->buttons_of(channel) : std::vector<BoardActionConfig>{};
+    for (const BoardActionConfig& a : btns) {
         cJSON* b = cJSON_CreateObject();
         cJSON_AddStringToObject(b, "id", a.id.c_str());
         cJSON_AddStringToObject(b, "label", a.label.c_str());
@@ -240,7 +239,8 @@ void add_features(cJSON* o, const AppCore::Entry& e, AppCore* core) {
     cJSON_AddBoolToObject(f, "write", true);
     cJSON_AddBoolToObject(f, "scan", true);
     cJSON_AddBoolToObject(f, "probe", true);
-    cJSON_AddBoolToObject(f, "board_actions", core && core->buttons_of(e.name) && !core->buttons_of(e.name)->empty());
+    const std::vector<BoardActionConfig> btns = core ? core->buttons_of(e.name) : std::vector<BoardActionConfig>{};
+    cJSON_AddBoolToObject(f, "board_actions", !btns.empty());
     cJSON_AddBoolToObject(f, "serial_control", true);
     cJSON_AddBoolToObject(f, "ssh_link", e.kind == "ssh");
     cJSON_AddBoolToObject(f, "incremental_log", true);
@@ -291,7 +291,8 @@ cJSON* channel_json(AppCore* core, const AppCore::Entry& e, bool full, int tail_
         add_features(o, e, core);
     } else {
         cJSON* f = cJSON_AddObjectToObject(o, "features");
-        cJSON_AddBoolToObject(f, "board_actions", core && core->buttons_of(e.name) && !core->buttons_of(e.name)->empty());
+        const std::vector<BoardActionConfig> btns = core ? core->buttons_of(e.name) : std::vector<BoardActionConfig>{};
+        cJSON_AddBoolToObject(f, "board_actions", !btns.empty());
     }
     cJSON_Delete(st);
     return o;
@@ -465,9 +466,8 @@ std::string actions_agent_json(AppCore* core, const std::string& channel) {
     if (core) {
         for (const AppCore::Entry& e : core->entries()) {
             if (!channel.empty() && e.name != channel) continue;
-            const std::vector<BoardActionConfig>* btns = core->buttons_of(e.name);
-            if (!btns) continue;
-            for (const BoardActionConfig& a : *btns) {
+            const std::vector<BoardActionConfig> btns = core->buttons_of(e.name);
+            for (const BoardActionConfig& a : btns) {
                 cJSON* o = cJSON_CreateObject();
                 cJSON_AddStringToObject(o, "channel", e.name.c_str());
                 cJSON_AddStringToObject(o, "channel_kind", e.kind.c_str());
