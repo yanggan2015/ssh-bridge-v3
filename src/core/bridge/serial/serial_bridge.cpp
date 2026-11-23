@@ -54,7 +54,7 @@ bool wait_io(HANDLE port, OVERLAPPED* ov, DWORD timeout_ms, DWORD* got) {
 // ---------------- SerialBridge ----------------
 
 SerialBridge::SerialBridge(const BoardConfig& cfg, std::string project_root)
-    : cfg_(cfg), project_root_(std::move(project_root)) {
+    : cfg_(cfg), project_root_(std::move(project_root)), dtr_(cfg.dtr), rts_(cfg.rts) {
     std::size_t cap = cfg_.buffer_size ? cfg_.buffer_size : (1u << 20);
     std::string log_dir = cfg_.log_dir;
     if (log_dir.empty()) log_dir = util::join_path(project_root_, "work\\logs");
@@ -195,6 +195,8 @@ void SerialBridge::apply_config(const BoardConfig& cfg) {
 
     cfg_ = cfg;
     loop_ = false;
+    dtr_.store(cfg_.dtr);
+    rts_.store(cfg_.rts);
     std::size_t cap = cfg_.buffer_size ? cfg_.buffer_size : (1u << 20);
     std::string log_dir = cfg_.log_dir;
     if (log_dir.empty()) log_dir = util::join_path(project_root_, "work\\logs");
@@ -207,6 +209,58 @@ void SerialBridge::apply_config(const BoardConfig& cfg) {
         last_error_.clear();
     }
     if (was_running || cfg_.auto_open) start();
+}
+
+bool SerialBridge::set_lines(bool dtr, bool rts, std::string* err) {
+    if (port_ != INVALID_HANDLE_VALUE) {
+        if (dtr != dtr_.load() && !EscapeCommFunction(port_, dtr ? SETDTR : CLRDTR)) {
+            if (err) *err = "EscapeCommFunction SETDTR/CLRDTR failed";
+            return false;
+        }
+        if (rts != rts_.load() && !EscapeCommFunction(port_, rts ? SETRTS : CLRRTS)) {
+            if (err) *err = "EscapeCommFunction SETRTS/CLRRTS failed";
+            return false;
+        }
+    }
+    dtr_.store(dtr);
+    rts_.store(rts);
+    return true;
+}
+
+bool SerialBridge::send_break(int duration_ms, std::string* err) {
+    int ms = std::max(1, std::min(1000, duration_ms));
+    last_break_ms_.store(ms);
+    if (loop_ || port_ == INVALID_HANDLE_VALUE) {
+        if (loop_) return true;
+        if (err) *err = "serial port is not open";
+        return false;
+    }
+    if (!EscapeCommFunction(port_, SETBREAK)) {
+        if (err) *err = "EscapeCommFunction SETBREAK failed";
+        return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    if (!EscapeCommFunction(port_, CLRBREAK)) {
+        if (err) *err = "EscapeCommFunction CLRBREAK failed";
+        return false;
+    }
+    return true;
+}
+
+std::string SerialBridge::lines_json() const {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "ok", true);
+    cJSON_AddStringToObject(o, "channel", cfg_.name.c_str());
+    cJSON_AddBoolToObject(o, "dtr", dtr_.load());
+    cJSON_AddBoolToObject(o, "rts", rts_.load());
+    cJSON_AddBoolToObject(o, "loop", loop_);
+    cJSON_AddStringToObject(o, "port", cfg_.serial_device.c_str());
+    cJSON_AddNumberToObject(o, "last_break_ms", last_break_ms_.load());
+    char* p = cJSON_PrintUnformatted(o);
+    std::string s = p ? p : "{}";
+    cJSON_free(p);
+    cJSON_Delete(o);
+    return s;
 }
 
 void SerialBridge::rx_loop() {

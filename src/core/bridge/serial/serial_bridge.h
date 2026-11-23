@@ -35,6 +35,12 @@ public:
     // 热应用：换 DCB / 行尾 / ring 参数，保留 ring 内容（旧内容重灌）
     void apply_config(const BoardConfig& cfg);
 
+    // C7：串口生命周期与线控。loop: 端点只记录状态，不触碰真实硬件。
+    bool set_lines(bool dtr, bool rts, std::string* err);
+    bool send_break(int duration_ms, std::string* err);
+    std::string lines_json() const;
+    bool is_loop() const { return loop_; }
+
     const std::string& name() const override { return cfg_.name; }
 
     std::size_t write(const void* data, std::size_t n) override;
@@ -88,6 +94,9 @@ private:
     std::deque<std::string> loop_in_;
     std::atomic<std::uint64_t> rx_bytes_{0};
     std::atomic<std::uint64_t> tx_bytes_{0};
+    std::atomic<bool> dtr_{true};
+    std::atomic<bool> rts_{true};
+    std::atomic<int> last_break_ms_{0};
     mutable std::mutex err_mu_;
     std::string last_error_;
 };

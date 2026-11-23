@@ -141,6 +141,16 @@ const OperationSpec kOperations[] = {
     {"jobs.list.get", "GET", "/jobs", "作业摘要列表；支持 state/channel/limit/before_id 过滤与分页", "public", "state,channel,limit,before_id", "ok,jobs,count,limit,total"},
     {"jobs.get", "GET", "/jobs/{id}", "单个作业详情；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,ok,output,progress,audit"},
     {"jobs.cancel.post", "POST", "/jobs/{id}/cancel", "请求取消排队/运行中的作业；已结束 409", "token", "id", "ok,id,state,cancel_requested"},
+    {"boards.get", "GET", "/boards", "通道列表；与 /agent/scan 同源的 Agent 只读发现", "public", "", "ok,boards"},
+    {"boards.post", "POST", "/boards", "新增/编辑串口板或 SSH 通道；复用配置落盘与热应用", "token", "kind,old_name,channel", "ok,name,kind"},
+    {"boards.delete.post", "POST", "/boards/delete", "删除通道；清理画框引用并释放端口", "token", "name", "ok,name"},
+    {"reload.post", "POST", "/reload", "重新读配置并手术式热应用；返回 added/removed/changed/kept", "token", "", "ok,added,removed,changed,kept"},
+    {"reconnect.post", "POST", "/reconnect", "单通道重连；返回 running/attempts/last_error", "token", "channel,session", "ok,channel,running,attempts,last_error"},
+    {"serial.open.post", "POST", "/serial/open", "打开串口；失败返回 serial_open_failed", "token", "channel,session", "ok,channel,running,already_open"},
+    {"serial.close.post", "POST", "/serial/close", "关闭串口；保留 ring", "token", "channel,session", "ok,channel,running"},
+    {"serial.break.post", "POST", "/serial/break", "发送 Break；1..1000ms", "token", "channel,duration_ms", "ok,channel,duration_ms,loop"},
+    {"serial.lines.post", "POST", "/serial/lines", "设置/回读 DTR/RTS", "token", "channel,dtr,rts", "ok,channel,dtr,rts"},
+    {"serial.configure.post", "POST", "/serial/configure", "改波特率/数据位/校验/停止位/流控并热重开", "token", "channel,baudrate,databits,parity,stopbits_x10,flowcontrol", "ok,channel,running"},
     {"job.get", "GET", "/job", "查询 job 状态、输出与审计摘要；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,done,ok,timed_out,output,audit"},
 };
 

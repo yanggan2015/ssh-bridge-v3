@@ -116,13 +116,27 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A7-1 | `/boards` 兼容 | 复用 `/api/channels` GET/POST/delete；board/link 映射 | `agent_routes.cpp` | 与 `/api/channels` 等价 | 计划 |
-| A7-2 | `/reload` | 读配置、diff、手术式热应用；返回变更列表 | `agent_routes.cpp`、core | 其它通道 ring 不断 | 计划 |
-| A7-3 | `/reconnect` | 单通道重连；attempts/last_error | `agent_routes.cpp`、bridge | 断线后恢复；不影响其它通道 | 计划 |
-| A7-4 | `/serial/open` `/serial/close` | 开/关串口；锁与通道态校验 | `agent_routes.cpp`、serial | 真实 COM/loop 生效 | 计划 |
-| A7-5 | `/serial/break` | 发送 Break；长度/时长可配 | serial | 回环可验证 | 计划 |
-| A7-6 | `/serial/lines` | DTR/RTS 设置与回读 | serial | 状态一致 | 计划 |
-| A7-7 | `/serial/configure` | 波特率/数据位/校验/停止位/流控；热重开 | serial、config | 配置落盘；重开成功 | 计划 |
+| A7-1 | `/boards` 兼容 | 复用 `/api/channels` GET/POST/delete；board/link 映射 | `web_console.cpp` | 与 `/api/channels` 等价 | 已完成 |
+| A7-2 | `/reload` | 读配置、diff、手术式热应用；返回变更列表 | `web_console.cpp`、core | 其它通道 ring 不断 | 已完成 |
+| A7-3 | `/reconnect` | 单通道重连；attempts/last_error | `web_console.cpp`、bridge | 断线后恢复；不影响其它通道 | 已完成 |
+| A7-4 | `/serial/open` `/serial/close` | 开/关串口；锁与通道态校验 | `web_console.cpp`、serial | 真实 COM/loop 生效 | 已完成 |
+| A7-5 | `/serial/break` | 发送 Break；长度/时长可配 | serial | 回环可验证 | 已完成 |
+| A7-6 | `/serial/lines` | DTR/RTS 设置与回读 | serial | 状态一致 | 已完成 |
+| A7-7 | `/serial/configure` | 波特率/数据位/校验/停止位/流控；热重开 | serial、config | 配置落盘；重开成功 | 已完成 |
+
+**C7 完成记录（2026-11-23）**
+
+- `/boards`：GET 公开，复用 `agent::scan_json` 的通道对象，输出版 `kind/name/running/state/detail/connection/peer`；POST/`/boards/delete` 需 token，调用 `AppCore::upsert_serial/upsert_ssh/delete_channel`，复用配置落盘、ring 保留与手术式热应用。支持 `{kind, channel, old_name}` 和直接 board 对象。
+- `/reload`：token；直接调用 `AppCore::reload_config()`，返回 `added/removed/changed/kept + error`；未变通道走 `kept`，其 ring 不重建。
+- `/reconnect`：token + 通道锁；调用 `AppCore::reconnect`，返回 `running/attempts/last_error`；缺失 404，失败 502。
+- `/serial/open/close`：仅串口通道，非串口 400 `not_serial`；锁与 token 校验；open 幂等返回 `already_open`，失败 500 `serial_open_failed`；close 保留 ring。
+- `/serial/break`：`duration_ms` 1–1000；真实口 `SETBREAK → sleep → CLRBREAK`，`loop:` 端点记录 `last_break_ms` 并返回 `loop:true`；端口未开 409。
+- `/serial/lines`：DTR/RTS 至少给一个，真实口 `EscapeCommFunction`，loop 端点记录状态；回读 `dtr/rts/loop/port/last_break_ms`。
+- `/serial/configure`：只改给出的 baud/databits/parity/stopbits/flowcontrol/dtr/rts；校验范围后 `AppCore::upsert_serial` 落盘并热重开，未暴露字段（按钮/密码/快捷指令）保留。
+- `features.serial_control` 完整/全局均为 true；operations 60→70，新增 10 个生命周期/串口操作。
+- 测试：`output/webtest/agent-lifecycle-smoke.js` 49/49，结果 `output/ux-audit/agent-lifecycle-result.json`；覆盖 boards 发现/创建/删除（运行中需 confirm）、reload、reconnect、open/close、break、DTR/RTS、configure 热生效、锁拦截、非串口与参数边界。
+- 回归：C6 39/39、C5 51/51、C4 84/84、C2 73/73、C1 82/82、C3 59/59、api 58/58、api-v3 43/43、agent 63/63。
+- 提交：`feat(agent): add board lifecycle and serial controls`。
 
 ## 8. P1-H：工件面
 

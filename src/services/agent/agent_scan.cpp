@@ -241,7 +241,7 @@ void add_features(cJSON* o, const AppCore::Entry& e, AppCore* core) {
     cJSON_AddBoolToObject(f, "scan", true);
     cJSON_AddBoolToObject(f, "probe", true);
     cJSON_AddBoolToObject(f, "board_actions", core && core->buttons_of(e.name) && !core->buttons_of(e.name)->empty());
-    cJSON_AddBoolToObject(f, "serial_control", false);
+    cJSON_AddBoolToObject(f, "serial_control", true);
     cJSON_AddBoolToObject(f, "ssh_link", e.kind == "ssh");
     cJSON_AddBoolToObject(f, "incremental_log", true);
     cJSON_AddBoolToObject(f, "log_disk", true);
@@ -360,7 +360,7 @@ void add_global_features(cJSON* root) {
     cJSON_AddBoolToObject(f, "command", true);
     cJSON_AddBoolToObject(f, "lock", true);
     cJSON_AddBoolToObject(f, "jobs", true);
-    cJSON_AddBoolToObject(f, "serial_control", false);
+    cJSON_AddBoolToObject(f, "serial_control", true);
     cJSON_AddBoolToObject(f, "tftp_artifacts", false);
 }
 

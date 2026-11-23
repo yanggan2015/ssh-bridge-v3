@@ -35,6 +35,7 @@
 
 #include "app/app_core.h"
 #include "core/bridge/bridge.h"
+#include "core/bridge/serial/serial_bridge.h"
 #include "core/util/key_chars.h"
 #include "core/util/util.h"
 #include "services/agent/agent_contract.h"
@@ -2055,6 +2056,429 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         reply_json_text(c, 200, agent::status_json(core, port, ui_info(), !token.empty()));
+        return;
+    }
+    if (path == "/boards" || path == "/boards/delete") {
+        if (!core) {
+            reply_json_text(c, 500, agent::error_json("core_not_ready", "core not ready", request_id_of(hm)));
+            return;
+        }
+        if (method_is(hm, "GET") && path == "/boards") {
+            // Agent 只读发现：直接复用 C2 扫描的通道对象，保证与 /agent/scan 同源。
+            std::string scan = agent::scan_json(core, services);
+            cJSON* sj = cJSON_Parse(scan.c_str());
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", true);
+            cJSON* arr = cJSON_AddArrayToObject(out, "boards");
+            cJSON* chans = sj ? cJSON_GetObjectItemCaseSensitive(sj, "channels") : nullptr;
+            if (cJSON_IsArray(chans)) {
+                cJSON* it = nullptr;
+                cJSON_ArrayForEach(it, chans) {
+                    cJSON* b = cJSON_CreateObject();
+                    cJSON_AddStringToObject(b, "kind", json_str(it, "kind").c_str());
+                    cJSON_AddStringToObject(b, "name", json_str(it, "name").c_str());
+                    cJSON_AddBoolToObject(b, "running", json_bool(it, "running", false));
+                    cJSON_AddStringToObject(b, "state", json_str(it, "state").c_str());
+                    cJSON_AddStringToObject(b, "detail", json_str(it, "detail").c_str());
+                    const cJSON* conn = cJSON_GetObjectItemCaseSensitive(it, "connection");
+                    cJSON_AddItemToObject(b, "connection", conn ? cJSON_Duplicate(conn, 1) : cJSON_CreateObject());
+                    std::string peer;
+                    if (conn) {
+                        peer = json_str(conn, "peer");
+                        if (peer.empty()) peer = json_str(conn, "port");
+                    }
+                    cJSON_AddStringToObject(b, "peer", peer.c_str());
+                    cJSON_AddItemToArray(arr, b);
+                }
+            }
+            cJSON_Delete(sj);
+            reply_json(c, 200, out);
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", request_id_of(hm)));
+            return;
+        }
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", request_id_of(hm)));
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string rid = request_id_of(hm);
+        std::string name = util::trim(json_str(body, "name"));
+        cJSON* chobj = cJSON_GetObjectItemCaseSensitive(body, "channel");
+        if (!cJSON_IsObject(chobj)) chobj = cJSON_GetObjectItemCaseSensitive(body, "board");
+        if (!cJSON_IsObject(chobj) && path == "/boards/delete") chobj = body;
+        std::string err;
+        if (path == "/boards/delete") {
+            std::string del = name;
+            if (del.empty()) del = util::trim(json_str(chobj, "name"));
+            if (del.empty()) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "name required", rid));
+                return;
+            }
+            bool running = bridge(del) && bridge(del)->running();
+            bool referenced = false;
+            if (core) {
+                for (const std::string& pane : core->config().ui.pane_channels)
+                    if (pane == del) referenced = true;
+            }
+            if ((running || referenced) && !json_bool(body, "confirm", false)) {
+                cJSON_Delete(body);
+                cJSON* out = cJSON_CreateObject();
+                cJSON_AddBoolToObject(out, "ok", false);
+                cJSON* errj = cJSON_AddObjectToObject(out, "error");
+                cJSON_AddStringToObject(errj, "code", "channel_in_use");
+                cJSON_AddStringToObject(errj, "message", "channel is running or referenced by a pane; confirm required");
+                cJSON_AddBoolToObject(errj, "running", running);
+                cJSON_AddBoolToObject(errj, "referenced", referenced);
+                cJSON_AddStringToObject(out, "request_id", rid.c_str());
+                reply_json(c, 409, out);
+                return;
+            }
+            cJSON_Delete(body);
+            bool ok = core->delete_channel(del, &err);
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", ok);
+            cJSON_AddStringToObject(out, "name", del.c_str());
+            if (!ok) cJSON_AddStringToObject(out, "error", err.c_str());
+            cJSON_AddStringToObject(out, "request_id", rid.c_str());
+            reply_json(c, ok ? 200 : 404, out);
+            return;
+        }
+        std::string kind = json_str(body, "kind");
+        if (kind.empty()) kind = json_str(chobj, "kind");
+        if (kind.empty()) kind = "serial";
+        std::string nm = name.empty() ? util::trim(json_str(chobj, "name")) : name;
+        std::string old_name = util::trim(json_str(body, "old_name"));
+        if (!valid_channel_name(nm, &err)) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("invalid_argument", err.empty() ? "invalid name" : err, rid));
+            return;
+        }
+        if (!cJSON_IsObject(chobj)) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "channel object required", rid));
+            return;
+        }
+        bool saved = false;
+        if (kind == "serial") {
+            const BoardConfig* old = core->board_of(old_name.empty() ? nm : old_name);
+            BoardConfig b = old ? *old : BoardConfig{};
+            b.name = nm;
+            std::string dev = util::trim(json_str(chobj, "serial_device"));
+            if (dev.empty() && old) dev = old->serial_device;
+            if (dev.empty()) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "serial_device required", rid));
+                return;
+            }
+            b.serial_device = dev;
+            b.baudrate = json_int(chobj, "baudrate", b.baudrate);
+            b.databits = json_int(chobj, "databits", b.databits);
+            b.parity = json_str(chobj, "parity").empty() ? b.parity : json_str(chobj, "parity");
+            b.stopbits_x10 = json_int(chobj, "stopbits_x10", b.stopbits_x10);
+            b.flowcontrol = json_str(chobj, "flowcontrol").empty() ? b.flowcontrol : json_str(chobj, "flowcontrol");
+            b.line_ending = json_str(chobj, "line_ending").empty() ? b.line_ending : json_str(chobj, "line_ending");
+            b.dtr = json_bool(chobj, "dtr", b.dtr);
+            b.rts = json_bool(chobj, "rts", b.rts);
+            b.auto_open = json_bool(chobj, "auto_open", b.auto_open);
+            b.timestamp = json_bool(chobj, "timestamp", b.timestamp);
+            b.log_enabled = json_bool(chobj, "log_enabled", b.log_enabled);
+            b.discoverable = json_bool(chobj, "discoverable", b.discoverable);
+            if (b.baudrate < 50 || b.baudrate > 4000000 || b.databits < 5 || b.databits > 8 ||
+                b.stopbits_x10 < 10 || b.stopbits_x10 > 20) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "serial parameters out of range", rid));
+                return;
+            }
+            saved = core->upsert_serial(b, old_name, &err);
+        } else if (kind == "ssh") {
+            const SSHLinkConfig* old = core->link_of(old_name.empty() ? nm : old_name);
+            SSHLinkConfig s = old ? *old : SSHLinkConfig{};
+            s.name = nm;
+            std::string host = util::trim(json_str(chobj, "host"));
+            if (host.empty() && old) host = old->host;
+            if (host.empty()) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "host required", rid));
+                return;
+            }
+            s.host = host;
+            s.port = json_int(chobj, "port", s.port);
+            s.username = json_str(chobj, "username").empty() ? s.username : json_str(chobj, "username");
+            s.password = json_str(chobj, "password").empty() ? s.password : json_str(chobj, "password");
+            s.password_present = true;
+            s.term = json_str(chobj, "term").empty() ? s.term : json_str(chobj, "term");
+            s.width = json_int(chobj, "width", s.width);
+            s.height = json_int(chobj, "height", s.height);
+            s.connect_timeout_ms = json_int(chobj, "connect_timeout_ms", s.connect_timeout_ms);
+            s.keepalive_s = json_int(chobj, "keepalive", s.keepalive_s);
+            s.log_enabled = json_bool(chobj, "log_enabled", s.log_enabled);
+            s.discoverable = json_bool(chobj, "discoverable", s.discoverable);
+            saved = core->upsert_ssh(s, old_name, &err);
+        } else {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "kind must be serial or ssh", rid));
+            return;
+        }
+        cJSON_Delete(body);
+        if (!saved) {
+            reply_json_text(c, 409, agent::error_json("channel_conflict", err.empty() ? "channel rejected" : err, rid));
+            return;
+        }
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", true);
+        cJSON_AddStringToObject(out, "name", nm.c_str());
+        cJSON_AddStringToObject(out, "kind", kind.c_str());
+        cJSON_AddStringToObject(out, "request_id", rid.c_str());
+        reply_json(c, 200, out);
+        return;
+    }
+    if (path == "/reload") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", request_id_of(hm)));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", request_id_of(hm)));
+            return;
+        }
+        if (!core) {
+            reply_json_text(c, 500, agent::error_json("core_not_ready", "core not ready", request_id_of(hm)));
+            return;
+        }
+        AppCore::ReloadResult rr = core->reload_config();
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", rr.ok());
+        cJSON_AddNumberToObject(out, "added", rr.added);
+        cJSON_AddNumberToObject(out, "removed", rr.removed);
+        cJSON_AddNumberToObject(out, "changed", rr.changed);
+        cJSON_AddNumberToObject(out, "kept", rr.kept);
+        if (!rr.ok()) cJSON_AddStringToObject(out, "error", rr.error.c_str());
+        cJSON_AddStringToObject(out, "request_id", request_id_of(hm).c_str());
+        reply_json(c, rr.ok() ? 200 : 500, out);
+        return;
+    }
+    if (path == "/reconnect") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", request_id_of(hm)));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", request_id_of(hm)));
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string ch = json_str(body, "channel");
+        std::string session = json_str(body, "session");
+        if (session.empty()) session = header_text(hm, "X-Agent-Session");
+        cJSON_Delete(body);
+        std::string rid = request_id_of(hm);
+        if (ch.empty()) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "channel required", rid));
+            return;
+        }
+        auto b = bridge(ch);
+        if (!b) {
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", rid));
+            return;
+        }
+        if (!allow_channel_write(c, ch, session, rid)) return;
+        bool re = core->reconnect(ch);
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", re);
+        cJSON_AddStringToObject(out, "channel", ch.c_str());
+        cJSON_AddBoolToObject(out, "running", b->running());
+        int attempts = 0;
+        std::string last_error;
+        cJSON* st = cJSON_Parse(b->status_json().c_str());
+        if (st) {
+            attempts = json_int(st, "reconnects", json_int(st, "attempts", 0));
+            last_error = json_str(st, "last_error");
+            cJSON_Delete(st);
+        }
+        cJSON_AddNumberToObject(out, "attempts", attempts);
+        cJSON_AddStringToObject(out, "last_error", last_error.c_str());
+        cJSON_AddStringToObject(out, "request_id", rid.c_str());
+        reply_json(c, re ? 200 : 502, out);
+        return;
+    }
+    if (path == "/serial/open" || path == "/serial/close" || path == "/serial/break" ||
+        path == "/serial/lines" || path == "/serial/configure") {
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", request_id_of(hm)));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", request_id_of(hm)));
+            return;
+        }
+        cJSON* body = cJSON_Parse(body_string(hm).c_str());
+        std::string ch = json_str(body, "channel");
+        std::string session = json_str(body, "session");
+        if (session.empty()) session = header_text(hm, "X-Agent-Session");
+        std::string rid = request_id_of(hm);
+        if (ch.empty()) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "channel required", rid));
+            return;
+        }
+        auto b = bridge(ch);
+        if (!b) {
+            cJSON_Delete(body);
+            reply_json_text(c, 404, agent::error_json("channel_not_found", "channel not found", rid));
+            return;
+        }
+        SerialBridge* sb = dynamic_cast<SerialBridge*>(b.get());
+        if (!sb) {
+            cJSON_Delete(body);
+            reply_json_text(c, 400, agent::error_json("not_serial", "channel is not a serial board", rid));
+            return;
+        }
+        if (!allow_channel_write(c, ch, session, rid)) {
+            cJSON_Delete(body);
+            return;
+        }
+        if (path == "/serial/open") {
+            bool was = sb->running();
+            bool ok = sb->start();
+            cJSON_Delete(body);
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", ok);
+            cJSON_AddStringToObject(out, "channel", ch.c_str());
+            cJSON_AddBoolToObject(out, "running", sb->running());
+            cJSON_AddBoolToObject(out, "already_open", was && ok);
+            if (!ok) {
+                cJSON_AddStringToObject(out, "error", "serial_open_failed");
+                cJSON_AddStringToObject(out, "message", sb->last_error().c_str());
+            }
+            cJSON_AddStringToObject(out, "request_id", rid.c_str());
+            reply_json(c, ok ? 200 : 500, out);
+            return;
+        }
+        if (path == "/serial/close") {
+            sb->stop();
+            cJSON_Delete(body);
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", true);
+            cJSON_AddStringToObject(out, "channel", ch.c_str());
+            cJSON_AddBoolToObject(out, "running", false);
+            cJSON_AddStringToObject(out, "request_id", rid.c_str());
+            reply_json(c, 200, out);
+            return;
+        }
+        if (!sb->running()) {
+            cJSON_Delete(body);
+            reply_json_text(c, 409, agent::error_json("channel_down", "serial port is not open", rid));
+            return;
+        }
+        if (path == "/serial/break") {
+            int duration = json_int(body, "duration_ms", json_int(body, "ms", 100));
+            cJSON_Delete(body);
+            if (duration < 1 || duration > 1000) {
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "duration_ms must be 1..1000", rid));
+                return;
+            }
+            std::string err;
+            bool ok = sb->send_break(duration, &err);
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", ok);
+            cJSON_AddStringToObject(out, "channel", ch.c_str());
+            cJSON_AddNumberToObject(out, "duration_ms", duration);
+            cJSON_AddBoolToObject(out, "loop", sb->is_loop());
+            if (!ok) cJSON_AddStringToObject(out, "message", err.c_str());
+            cJSON_AddStringToObject(out, "request_id", rid.c_str());
+            reply_json(c, ok ? 200 : 500, out);
+            return;
+        }
+        if (path == "/serial/lines") {
+            const cJSON* dv = cJSON_GetObjectItemCaseSensitive(body, "dtr");
+            const cJSON* rv = cJSON_GetObjectItemCaseSensitive(body, "rts");
+            bool has_d = cJSON_IsBool(dv) || cJSON_IsNumber(dv);
+            bool has_r = cJSON_IsBool(rv) || cJSON_IsNumber(rv);
+            if (!has_d && !has_r) {
+                cJSON_Delete(body);
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "dtr or rts required", rid));
+                return;
+            }
+            cJSON* lj = cJSON_Parse(sb->lines_json().c_str());
+            bool cur_dtr = cJSON_IsObject(lj) ? json_bool(lj, "dtr", true) : true;
+            bool cur_rts = cJSON_IsObject(lj) ? json_bool(lj, "rts", true) : true;
+            bool dtr = has_d ? json_bool(body, "dtr", true) : cur_dtr;
+            bool rts = has_r ? json_bool(body, "rts", true) : cur_rts;
+            cJSON_Delete(lj);
+            cJSON_Delete(body);
+            std::string err;
+            bool ok = sb->set_lines(dtr, rts, &err);
+            cJSON* out = cJSON_Parse(sb->lines_json().c_str());
+            if (!cJSON_IsObject(out)) out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "ok", ok);
+            cJSON_AddBoolToObject(out, "running", sb->running());
+            if (!ok) cJSON_AddStringToObject(out, "message", err.c_str());
+            cJSON_AddStringToObject(out, "request_id", rid.c_str());
+            reply_json(c, ok ? 200 : 500, out);
+            return;
+        }
+        // /serial/configure：只改本次给出的参数，保留按钮/密码等未暴露字段。
+        const BoardConfig* cur = core ? core->board_of(ch) : nullptr;
+        if (!cur) {
+            cJSON_Delete(body);
+            reply_json_text(c, 409, agent::error_json("channel_conflict", "board config not found", rid));
+            return;
+        }
+        BoardConfig nb = *cur;
+        bool touched = false;
+        if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(body, "baudrate"))) {
+            nb.baudrate = json_int(body, "baudrate", nb.baudrate); touched = true;
+        }
+        if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(body, "databits"))) {
+            nb.databits = json_int(body, "databits", nb.databits); touched = true;
+        }
+        if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(body, "parity"))) {
+            nb.parity = json_str(body, "parity"); touched = true;
+        }
+        if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(body, "stopbits_x10"))) {
+            nb.stopbits_x10 = json_int(body, "stopbits_x10", nb.stopbits_x10); touched = true;
+        }
+        if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(body, "flowcontrol"))) {
+            nb.flowcontrol = json_str(body, "flowcontrol"); touched = true;
+        }
+        if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(body, "dtr"))) {
+            nb.dtr = json_bool(body, "dtr", nb.dtr); touched = true;
+        }
+        if (cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(body, "rts"))) {
+            nb.rts = json_bool(body, "rts", nb.rts); touched = true;
+        }
+        cJSON_Delete(body);
+        if (!touched) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "no serial parameter supplied", rid));
+            return;
+        }
+        if (nb.baudrate < 50 || nb.baudrate > 4000000 || nb.databits < 5 || nb.databits > 8 ||
+            nb.stopbits_x10 < 10 || nb.stopbits_x10 > 20 ||
+            (nb.parity != "N" && nb.parity != "E" && nb.parity != "O" && nb.parity != "M" && nb.parity != "S") ||
+            (nb.flowcontrol != "none" && nb.flowcontrol != "rtscts" && nb.flowcontrol != "xonxoff")) {
+            reply_json_text(c, 400, agent::error_json("invalid_argument", "serial parameters out of range", rid));
+            return;
+        }
+        std::string err;
+        bool ok = core->upsert_serial(nb, ch, &err);
+        auto nb2 = bridge(ch);
+        SerialBridge* sb2 = dynamic_cast<SerialBridge*>(nb2.get());
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddBoolToObject(out, "ok", ok);
+        cJSON_AddStringToObject(out, "channel", ch.c_str());
+        cJSON_AddNumberToObject(out, "baudrate", nb.baudrate);
+        cJSON_AddNumberToObject(out, "databits", nb.databits);
+        cJSON_AddStringToObject(out, "parity", nb.parity.c_str());
+        cJSON_AddNumberToObject(out, "stopbits_x10", nb.stopbits_x10);
+        cJSON_AddStringToObject(out, "flowcontrol", nb.flowcontrol.c_str());
+        cJSON_AddBoolToObject(out, "running", sb2 ? sb2->running() : false);
+        if (!ok) cJSON_AddStringToObject(out, "error", err.empty() ? "configure_failed" : err.c_str());
+        cJSON_AddStringToObject(out, "request_id", rid.c_str());
+        reply_json(c, ok ? 200 : 500, out);
         return;
     }
     if (path == "/api/channels") {
