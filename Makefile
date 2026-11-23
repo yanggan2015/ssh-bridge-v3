@@ -133,6 +133,8 @@ DIRS := $(BUILDDIR) \
         $(BUILDDIR)/core/bridge \
         $(BUILDDIR)/core/bridge/serial \
         $(BUILDDIR)/core/bridge/ssh \
+        $(BUILDDIR)/core/bridge/powershell \
+        $(BUILDDIR)/core/bridge/telnet \
         $(BUILDDIR)/ui \
         $(BUILDDIR)/ui/shell \
         $(BUILDDIR)/ui/dialogs \

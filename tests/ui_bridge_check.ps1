@@ -67,6 +67,7 @@ function Act([string]$id, [string]$action, $text = $null, $value = $null, [hasht
 function State { return (Get-Json '/state').state }
 
 function Write-Config([string]$dir, [string]$agentJson) {
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $dir 'output') | Out-Null
     $json = @"
 {

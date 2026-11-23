@@ -174,6 +174,14 @@ $cfg = [ordered]@{
                           font_size = 15; split = 1 }
 }
 $cfg | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $cfgPath -Encoding utf8
+$uiCfg = [ordered]@{
+    schema = 'ssh-bridge-ui/1'
+    ui = [ordered]@{ close_to_tray = $true; start_minimized = $false; scrollback_lines = 5000;
+                     font_size = 15; split = 1; active_pane = 0; show_statusbar = $true;
+                     pane_channels = @('loop1') }
+    window = [ordered]@{ rect = '' }
+}
+$uiCfg | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runDir 'ssh_bridge_ui.json') -Encoding utf8
 
 Kill-App
 $proc = Start-Process -FilePath $exe -WorkingDirectory $runDir -PassThru

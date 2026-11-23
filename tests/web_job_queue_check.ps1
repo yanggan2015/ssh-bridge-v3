@@ -42,7 +42,9 @@ $cfg.web.port = $port
 $cfg.web.token = $token
 $cfg.agent.enable = $false
 $cfg.inbound_ssh.enable = $false
-$cfg.ui.pane_channels = @('loop1')
+$uiCfg = [pscustomobject]@{ split = 1; active_pane = 0; pane_channels = @('loop1') }
+[System.IO.File]::WriteAllText((Join-Path $run 'ssh_bridge_ui.json'),
+    ($uiCfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
 $loop = $cfg.boards | Where-Object { $_.name -eq 'loop1' }
 if (-not $loop) { throw '示例配置缺少 loop1' }
 $loop.buttons = @(
@@ -76,28 +78,35 @@ if (-not $ok) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; thr
 $headers = @{ Authorization = "Bearer $token" }
 function Post-Action([string]$id) {
     $body = @{ channel = 'loop1'; id = $id } | ConvertTo-Json -Compress
-    Invoke-RestMethod -Method Post -Uri "$base/action" -Headers $headers `
-        -ContentType 'application/json' -Body $body -TimeoutSec 5
+    Invoke-WebRequest -Method Post -Uri "$base/action" -Headers $headers `
+        -ContentType 'application/json' -Body $body -TimeoutSec 5 -SkipHttpErrorCheck
 }
 function Get-Job([int]$id) {
     Invoke-RestMethod -Uri "$base/job?id=$id" -TimeoutSec 5
 }
 
 $r1 = Post-Action 'slow1'
+$b1 = $r1.Content | ConvertFrom-Json
 $r2 = Post-Action 'slow2'
-Check 'WJ-2' '两次 /action 均受理' ($r1.ok -and $r2.ok -and $r1.job -gt 0 -and $r2.job -gt 0) `
-      "job1=$($r1.job) job2=$($r2.job)"
+$b2 = $r2.Content | ConvertFrom-Json
+Check 'WJ-2' '第 1 个受理、同通道第 2 个按并发上限拒绝' `
+      ($r1.StatusCode -eq 202 -and $b1.ok -and $b1.job -gt 0 -and
+       $r2.StatusCode -eq 429 -and -not $b2.ok -and $b2.error.code -eq 'channel_busy') `
+      "job1=$($b1.job) second_http=$($r2.StatusCode) code=$($b2.error.code)"
 
 Start-Sleep -Milliseconds 1600
-$j1 = Get-Job ([int]$r1.job)
-$j2 = Get-Job ([int]$r2.job)
+$j1 = Get-Job ([int]$b1.job)
 Check 'WJ-3' '第 1 个动作已完成' ([bool]$j1.done -and [bool]$j1.ok -and $j1.output -match 'JOB_1') `
       "done=$($j1.done) ok=$($j1.ok)"
-Check 'WJ-4' '第 2 个动作仍在排队' (-not [bool]$j2.done) "done=$($j2.done)"
+Check 'WJ-4' '第 2 个动作未被并发放行' ($r2.StatusCode -eq 429) "http=$($r2.StatusCode)"
 
+$r3 = Post-Action 'slow2'
+$b3 = $r3.Content | ConvertFrom-Json
+Check 'WJ-5a' '第 1 个结束后第 2 个可受理' ($r3.StatusCode -eq 202 -and $b3.ok -and $b3.job -gt 0) `
+      "job2=$($b3.job)"
 Start-Sleep -Milliseconds 1800
-$j2 = Get-Job ([int]$r2.job)
-Check 'WJ-5' '第 2 个动作随后完成' ([bool]$j2.done -and [bool]$j2.ok -and $j2.output -match 'JOB_2') `
+$j2 = Get-Job ([int]$b3.job)
+Check 'WJ-5b' '第 2 个动作随后完成' ([bool]$j2.done -and [bool]$j2.ok -and $j2.output -match 'JOB_2') `
       "done=$($j2.done) ok=$($j2.ok)"
 
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
@@ -105,7 +114,9 @@ Start-Sleep -Milliseconds 500
 $left = @(Get-Process -Name 'ssh_bridge3' -ErrorAction SilentlyContinue).Count
 Check 'WJ-6' '退出后无残留进程' ($left -eq 0) "left=$left"
 
-if (($j1.done -and $j1.ok) -and (-not $r2.ok -or $j2.done -and $j2.ok) -and $left -eq 0) {
+if (($j1.done -and $j1.ok) -and ($j2.done -and $j2.ok) -and
+    $r1.StatusCode -eq 202 -and $r2.StatusCode -eq 429 -and $r3.StatusCode -eq 202 -and
+    $left -eq 0) {
     'RESULT: ALL PASS'
     exit 0
 }
