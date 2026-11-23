@@ -767,7 +767,8 @@ std::string page_body(const std::string& page) {
 std::string page_script(const std::string& page) {
     if (page == "dashboard") {
         return R"JS(
-let ws=null, LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[], TERM_LOCK=null, TERM_TAKE_SID='web-'+Date.now().toString(36);
+let ws=null, WS_GEN=0, WS_RETRY=0, WS_TIMER=0;
+let LAST=null, LAST_CH='', TERM_TEXT='', TERM_FIND='', TERM_HIT=0, TERM_MARKS=[], TERM_LOCK=null, TERM_TAKE_SID='web-'+Date.now().toString(36);
 const FONT_KEY='sb3_term_font';
 const SVC_DEFS=[['tftp','TFTP','/tftp'],['share','共享','/share'],['nfs','NFS','/nfs'],['inbound','入站 SSH','/tunnel'],['tcp_forward','TCP','/tcp-forward'],['tunnel','隧道','/tunnel'],['discovery','发现','/tcp-forward']];
 function isOnline(c){return c.state==='ready'||c.state==='online'}
@@ -862,22 +863,63 @@ function applyFont(px){
   px=Math.max(10,Math.min(22,px||13));localStorage.setItem(FONT_KEY,String(px));
   const card=$('.terminal-card');if(card)card.style.setProperty('--term-font',px+'px');
 }
+function setWsState(text,cls){const b=$('#wsState');if(b){b.textContent=text;b.className='chip '+cls}}
+async function syncTermLog(ch){
+  const r=await api('/log?'+qs({channel:ch,chars:16000}));
+  if($('#ch').value!==ch)return 'stale';
+  const err=r.j&&(r.j.error||(r.j.error&&r.j.error.code));
+  if(r.status===404||err==='channel not found')return 'missing';
+  if(r.j&&typeof r.j.text==='string'){
+    TERM_TEXT=r.j.text;renderTerm();const p=$('#term');if(p)p.scrollTop=p.scrollHeight;
+  }
+  return 'ok';
+}
+function wsRetryLater(ch){
+  const gen=WS_GEN;
+  WS_RETRY=Math.min(WS_RETRY+1,5);
+  const delay=Math.min(1000*Math.pow(2,WS_RETRY-1),15000);
+  $('#hint').textContent='WS 已断开 · '+ch+' · '+Math.ceil(delay/1000)+'s 后重连';
+  setWsState('等待重连', 'warn');
+  WS_TIMER=setTimeout(async()=>{
+    WS_TIMER=0;
+    if(gen!==WS_GEN||$('#ch').value!==ch)return;
+    const st=await syncTermLog(ch);
+    if(st==='missing'){$('#hint').textContent='通道不存在或已删除：'+ch;setWsState('通道不可用','danger');return}
+    if(st==='stale')return;
+    openWs(ch,gen);
+  },delay);
+}
+function openWs(ch,gen){
+  if(gen!==WS_GEN||$('#ch').value!==ch)return;
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const sock=new WebSocket(proto+'://'+location.host+'/ws/log?channel='+encodeURIComponent(ch));
+  ws=sock;
+  sock.binaryType='arraybuffer';
+  sock.onopen=()=>{
+    if(gen!==WS_GEN){try{sock.close()}catch(e){};return}
+    WS_RETRY=0;$('#hint').textContent='WS 已连接 · '+ch;setWsState('WS 已连接','on');
+  };
+  sock.onmessage=e=>{if(gen===WS_GEN)appendTerm(bytesText(e.data))};
+  sock.onclose=()=>{
+    if(gen!==WS_GEN)return;
+    ws=null;setWsState('WS 已断开','warn');wsRetryLater(ch);
+  };
+  sock.onerror=()=>{if(gen===WS_GEN){$('#hint').textContent='WS 连接失败 · '+ch;setWsState('连接失败','danger')}};
+}
 async function connect(){
+  WS_GEN++;const gen=WS_GEN;
+  if(WS_TIMER){clearTimeout(WS_TIMER);WS_TIMER=0}
+  WS_RETRY=0;
   if(ws){try{ws.close()}catch(e){};ws=null}
   const ch=$('#ch').value; if(!ch){$('#term').textContent='没有通道';return}
   LAST_CH=ch;TERM_TEXT='';TERM_FIND='';TERM_HIT=0;renderTerm();
   lockRefresh(ch);
   $('#activeName').textContent=ch;$('#hint').textContent='正在连接 '+ch+' …';
   const dl=$('#dlTerm');if(dl)dl.href='/log/download?channel='+encodeURIComponent(ch);
-  const seed=await api('/log?'+qs({channel:ch,chars:16000}));
-  if(seed.j&&seed.j.text&&$('#ch').value===ch){TERM_TEXT=seed.j.text;renderTerm();const p=$('#term');if(p)p.scrollTop=p.scrollHeight}
-  const proto=location.protocol==='https:'?'wss':'ws';
-  ws=new WebSocket(proto+'://'+location.host+'/ws/log?channel='+encodeURIComponent(ch));
-  ws.binaryType='arraybuffer';
-  ws.onopen=()=>{$('#hint').textContent='WS 已连接 · '+ch;$('#wsState').textContent='WS 已连接';$('#wsState').className='chip on'};
-  ws.onmessage=e=>appendTerm(bytesText(e.data));
-  ws.onclose=()=>{$('#hint').textContent='WS 已断开';$('#wsState').textContent='WS 已断开';$('#wsState').className='chip warn'};
-  ws.onerror=()=>{$('#hint').textContent='WS 连接失败';$('#wsState').textContent='连接失败';$('#wsState').className='chip danger'};
+  const st=await syncTermLog(ch);
+  if(gen!==WS_GEN)return;
+  if(st==='missing'){$('#hint').textContent='通道不存在或已删除：'+ch;setWsState('通道不可用','danger');return}
+  openWs(ch,gen);
 }
 async function dashLoad(){
   const r=await api('/status'); if(!r.j||!r.j.channels){$('#term').textContent=r.t;toast('状态读取失败','error');return}
@@ -886,7 +928,7 @@ async function dashLoad(){
   if(old&&r.j.channels.some(c=>c.name===old))sel.value=old;else if(!sel.value&&r.j.channels[0])sel.value=r.j.channels[0].name;
   renderChannels(r.j);renderServices(r.j);
   const ro=!tok();$('#ro').textContent=ro?'只读（无 token）':'可写（带 token）';$('#ro').className='pill '+(ro?'off':'');
-  if(sel.value&&(sel.value!==LAST_CH||!ws))connect();
+  if(sel.value&&(sel.value!==LAST_CH||(!ws&&!WS_TIMER)))connect();
   else if(sel.value)lockRefresh(sel.value);
 }
 $('#reload').onclick=dashLoad;
@@ -1505,7 +1547,7 @@ async function svcSet(on){
   const note=$('#svcHint');if(note)note.textContent=on?'正在启动…':'正在停止…';
   const r=await api('/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:SVC,on})});
   if(!r.r.ok){if(note)note.textContent='失败：'+(r.j&&r.j.error||r.t);toast('服务操作失败','error');return}
-  toast(SVC_LABEL[SVC]+(on?' 已启动':' 已停止'));setTimeout(svcLoad,700);
+  toast(SVC_LABEL[SVC]+(on?' 已启动':' 已停止'));svcLoad();setTimeout(svcLoad,700);
 }
 $('#loadSvc').onclick=svcLoad;$('#startSvc').onclick=()=>svcSet(true);$('#stopSvc').onclick=()=>svcSet(false);
 $('#saveSvcCfg').onclick=svcCfgSave;
