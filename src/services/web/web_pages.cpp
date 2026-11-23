@@ -72,7 +72,7 @@ body.pg-dashboard.nav-hidden aside.sidebar{display:none}
 .status-dot.on{background:#32c49a;box-shadow:0 0 0 4px rgba(50,196,154,.14)}
 .status-dot.warn{background:#d39a45}.status-dot.off{background:#718288}
 main{min-width:0;padding:22px 30px 52px}
-.shell{max-width:var(--max);margin:0 auto}
+.shell{max-width:none;width:100%;margin:0}
 header.page-head{display:flex;justify-content:space-between;gap:22px;align-items:flex-start;margin-bottom:20px}
 .title-wrap{min-width:0}
 h1{font-size:27px;line-height:1.2;margin:0 0 5px;letter-spacing:-.3px}
@@ -413,11 +413,11 @@ dialog input{width:100%;margin-top:11px}
   body.pg-dashboard.token-open header.page-head .title-wrap,
   body.pg-dashboard.token-open header.page-head .nav-toggle-global{display:none}
   body.pg-dashboard.token-open header.page-head .header-tools{width:100%;margin:0;justify-content:flex-end}
-  body.pg-dashboard .dash{flex:1 1 auto;height:auto;min-height:0;grid-template-columns:196px minmax(0,1fr);gap:8px}
+  body.pg-dashboard .dash{flex:1 1 auto;height:auto;min-height:0;grid-template-columns:clamp(112px,calc(15vw - 38px),244px) minmax(0,1fr);gap:8px}
   body.pg-dashboard .dash.nav-collapsed{grid-template-columns:0 minmax(0,1fr);gap:0}
   body.pg-dashboard .channel-card{height:auto;min-height:0;margin:0;padding:8px 8px 7px;border-radius:10px}
-  body.pg-dashboard .channel-card .card-head{align-items:center;margin-bottom:5px}
-  body.pg-dashboard .channel-card h2{font-size:14px;line-height:1.2}
+  body.pg-dashboard .channel-card .card-head{align-items:center;gap:6px;margin-bottom:5px}
+  body.pg-dashboard .channel-card h2{font-size:14px;line-height:1.2;white-space:nowrap;flex-shrink:0}
   body.pg-dashboard .channel-card .card-sub{display:none}
   body.pg-dashboard .channel-card #onlineCount{font-size:10px;padding:1px 6px}
   body.pg-dashboard .channel-card .channel-list{flex:1 1 auto;min-height:0;align-content:start;grid-auto-rows:max-content}
@@ -1531,7 +1531,16 @@ if($('#xtermHost'))$('#xtermHost').addEventListener('mousedown',()=>setTimeout((
 $('#takeLock').onclick=takeLock;
 applyFont(parseInt(localStorage.getItem(FONT_KEY)||'13',10));
 initXterm().catch(()=>{XTERM_FAIL=true});
-setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){LAST=r.j;renderChannels(r.j);renderServices(r.j);updateRxBadge($('#ch').value)}const ch=$('#ch').value;if(ch)lockRefresh(ch)},5000);
+let RELOADING=false;
+function configDrift(s){
+  if(!s)return false;
+  if(s.web&&typeof s.web.token_required==='boolean'&&!!s.web.token_required!==AUTH_REQUIRED)return true;
+  const sel=$('#ch');if(!sel)return false;
+  const want=(s.channels||[]).map(c=>c.name).join('\u0001');
+  const have=Array.from(sel.options).map(o=>o.value).join('\u0001');
+  return want!==have;
+}
+setInterval(async()=>{const r=await api('/status');if(r.j&&r.j.channels){if(!RELOADING&&configDrift(r.j)){RELOADING=true;toast('配置已变化，正在刷新页面');setTimeout(()=>location.reload(),300);return}LAST=r.j;renderChannels(r.j);renderServices(r.j);updateRxBadge($('#ch').value)}const ch=$('#ch').value;if(ch)lockRefresh(ch)},5000);
 dashLoad();
 )JS";
     }
