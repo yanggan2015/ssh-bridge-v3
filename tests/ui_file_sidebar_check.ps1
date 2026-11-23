@@ -64,8 +64,10 @@ try {
     $s.username = 'demo'; $s.password = 'CHANGE_ME'
     $c.ssh = @($s)
     $c.tftp.root = ''
-    $c.ui.split = 1; $c.ui.active_pane = 0; $c.ui.pane_channels = @('filechan')
+    $ui = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\dist-ui.json') -Raw | ConvertFrom-Json
+    $ui.ui.split = 1; $ui.ui.active_pane = 0; $ui.ui.pane_channels = @('filechan')
     $c | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $WorkDir 'ssh_bridge_config.json') -Encoding utf8NoBOM
+    $ui | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $WorkDir 'ssh_bridge_ui.json') -Encoding utf8NoBOM
 
     $app = Start-Process -FilePath (Join-Path $WorkDir 'ssh_bridge3.exe') -WorkingDirectory $WorkDir -PassThru
     if (-not (Wait-Until { try { Invoke-RestMethod "$base/ping" -TimeoutSec 2 | Out-Null; $true } catch { $false } } 15000)) {

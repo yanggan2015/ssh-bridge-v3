@@ -75,8 +75,12 @@ def wait_line(base, expected, timeout=3.0, allow_wrapped=False):
         tail = terminal(base).get("tail") or []
         if expected in tail:
             return True
-        if allow_wrapped and any(ln.endswith(expected) for ln in tail):
-            return True
+        if allow_wrapped:
+            # /state.tail 只保留最新两行且“新行在前”；折行时把两行按时间顺序拼回。
+            # 长行可能超过两行，按末尾 40 字符标记断言，避免受终端宽度影响。
+            joined = "".join(reversed([str(ln) for ln in tail]))
+            if expected in joined or expected[-40:] in joined:
+                return True
         time.sleep(0.15)
     return False
 

@@ -146,7 +146,7 @@ void TerminalView::sync_slot(Slot& slot, const RECT& rc) {
     if (slot.channel.empty()) return;
     RECT body{rc.left + 1, rc.top + header_h_, rc.right - 1, rc.bottom - 1};
     int cols = std::max(8, static_cast<int>(body.right - body.left) / std::max(1, cell_w_));
-    int rows = std::max(2, static_cast<int>(body.bottom - body.top) / std::max(1, cell_h_));
+    int rows = std::max(2, static_cast<int>(body.bottom - body.top - 2) / std::max(1, cell_h_));
     int old_cols = slot.pane ? slot.pane->screen().cols() : 0;
     int old_rows = slot.pane ? slot.pane->screen().rows() : 0;
     IBridge* b = core_ ? core_->find(slot.channel) : nullptr;
@@ -289,8 +289,6 @@ bool TerminalView::pull_visible() {
         sync_pty(slot);            // 通道 ready 后补发首次 PTY 尺寸
         IBridge* b = core_ ? core_->find(slot.channel) : nullptr;
         if (b && slot.pane->pull(b)) any = true;
-        slot.pane->resize(std::max(8, static_cast<int>(rc.right - rc.left - 2) / std::max(1, cell_w_)),
-                          std::max(2, static_cast<int>(rc.bottom - rc.top - header_h_ - 2) / std::max(1, cell_h_)));
     }
     if (any) invalidate();
     return any;

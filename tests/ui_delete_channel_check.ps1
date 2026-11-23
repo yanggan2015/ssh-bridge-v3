@@ -78,8 +78,10 @@ try {
     $s.name = 'delme-ssh'; $s.host = '192.0.2.99'; $s.port = 22
     $s.username = 'demo'; $s.password = 'CHANGE_ME'
     $c.ssh = @($s)
-    $c.ui.split = 1; $c.ui.active_pane = 0; $c.ui.pane_channels = @('delme')
+    $ui = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\dist-ui.json') -Raw | ConvertFrom-Json
+    $ui.ui.split = 1; $ui.ui.active_pane = 0; $ui.ui.pane_channels = @('delme')
     $c | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $WorkDir 'ssh_bridge_config.json') -Encoding utf8NoBOM
+    $ui | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $WorkDir 'ssh_bridge_ui.json') -Encoding utf8NoBOM
 
     $app = Start-Process -FilePath (Join-Path $WorkDir 'ssh_bridge3.exe') -WorkingDirectory $WorkDir -PassThru
     if (-not (Wait-Until { try { Invoke-RestMethod "$base/ping" -TimeoutSec 2 | Out-Null; $true } catch { $false } } 15000)) {
@@ -123,7 +125,8 @@ try {
     # 产品语义：终端工作区始终至少保留一个画框；通道删空后该画框为空，
     # 配置只保存一个空槽位，不伪造通道。
     $panes = @($st.terminal.panes)
-    $paneCfg = @($cfg.ui.pane_channels | Where-Object { $_ })
+    $uiCfg = Get-Content -LiteralPath (Join-Path $WorkDir 'ssh_bridge_ui.json') -Raw | ConvertFrom-Json
+    $paneCfg = @($uiCfg.ui.pane_channels | Where-Object { $_ })
     Check 'D7b 删空后保留一个空画框' `
         ($st.terminal.split -eq 1 -and $panes.Count -eq 1 -and
          [string]$panes[0].channel -eq '' -and $paneCfg.Count -eq 0) `

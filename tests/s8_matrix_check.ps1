@@ -39,8 +39,10 @@ if (-not $cfg.PSObject.Properties['web']) {
 $cfg.web.enable = $true
 $cfg.web.port = $web
 $cfg.web.token = $token
-$cfg.ui.split = 2
-$cfg.ui.pane_channels = @('nonech', 'inherit')
+$uiCfg = Get-Content -LiteralPath (Join-Path $root 'scripts\dist-ui.json') -Raw | ConvertFrom-Json
+$uiCfg.ui.split = 2
+$uiCfg.ui.active_pane = 0
+$uiCfg.ui.pane_channels = @('nonech', 'inherit')
 
 $proto = $cfg.boards | Where-Object { $_.name -eq 'loop1' }
 if (-not $proto) { throw '示例配置缺少 loop1' }
@@ -73,6 +75,9 @@ $cfg.ssh = @($sshin)
 
 $cfgPath = Join-Path $run 'ssh_bridge_config.json'
 [IO.File]::WriteAllText($cfgPath, ($cfg | ConvertTo-Json -Depth 20),
+                        (New-Object Text.UTF8Encoding($false)))
+$uiPath = Join-Path $run 'ssh_bridge_ui.json'
+[IO.File]::WriteAllText($uiPath, ($uiCfg | ConvertTo-Json -Depth 10),
                         (New-Object Text.UTF8Encoding($false)))
 $raw = [IO.File]::ReadAllText($cfgPath)
 $reloaded = $raw | ConvertFrom-Json
