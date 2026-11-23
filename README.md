@@ -43,6 +43,7 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 | `docs/功能清单.md` | 141 条功能（本体 68 / 扩展 73），标注来源、所属步骤与已知缺口 |
 | `docs/设计初衷与实现对照.md` | 每个功能组的初衷、源码落点、已修问题与未实现项（2026-11-23 审计基线） |
 | `docs/每步测试闸门.md` | 每步的出口条件（清单全 PASS + 代码整理） |
+| `tests/CHECKLIST_eadk_board_cli.md` | EADK 板卡 CLI 全命令测试清单（90 项契约 + 32 项真实桥） |
 | `docs/编程规范.md` | 提交粒度、提交信息四段、warning 清零 |
 | `docs/执行记录.md` | 时间线、关键决策、踩坑表、接手清单（**换会话先读这个**） |
 | `docs/终端回显与特殊字符测试报告.md` | 真实 SSH/串口回显矩阵、Emoji 与末列换行修复证据、COM5 现状 |
@@ -121,13 +122,13 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 
 ## 当前状态
 
-- **当前基线（2026-11-23）**：分支 `feature/web-console-complete-20261123`；P6 分屏 Web 化已提交（`b467a8e` + 文档 `415a77e`），完整回归连续两轮 17/17 套件、970/970 断言，P6 专项 32/32，期望矩阵 39/39，构建 0 warning / 0 error。
+- **当前基线（2026-11-23）**：分支 `feature/web-console-complete-20261123`；P6 分屏 Web 化已提交（`b467a8e` + 文档 `415a77e`），完整回归 **19/19 套件、1092/1092 断言、bad=0**（含 EADK 90 项契约与 32 项真实桥），并修复 `/help/<channel>` 读取临时快照悬空指针导致的 `c0000005` 崩溃；构建 0 warning / 0 error。
 - **本体**：原生 Win32 单进程终端工作台，串口/SSH 出站、共享 ring、ANSI 终端、1/2/4 分屏、SFTP、板控按钮、Lua/DSL、快捷指令、托盘与单实例均已落地。
 - **网页端**：单端口 18081，HTTP + `/ws/log` BINARY；当前 12 页（仪表盘、通道、动作、按钮脚本、继电器、TFTP/NFS/共享、TCP 转发、隧道、Agent、配置）。仪表盘与桌面 `TerminalView` 采用完全一致的输入方式：**没有独立输入框**，键入直接落在 xterm 输出区当前光标处，字符按键 8ms 有序合批后立即 `/write` 并同区回显；方向键/Tab/退格/Home/End/Ctrl 键按桌面 `input.cpp` 的字节原样下发，Enter 按通道 `kind` + `line_ending` 发送（SSH 默认单 CR，串口按 cr/lf/crlf/none，loop-chars 为 CRLF）。桌面端不显示键条，移动端 390×844 才出现底部 16 键辅助条，它不是输入框。页面加载 120ms 自动聚焦 xterm，切通道 80ms 再聚焦；桌面 1440×960 实测 xterm 底边距会话框底边 **1px**，终端占视口 **66.3%**；移动端终端占 **69.6%**、xterm **41×38**；全站最小字号 **13px**，通道下拉旁常驻 **RX** 计数；CDN 不可用时回退到 ANSI/CR/退格净化后的 `<pre>`。
 - **Agent**：18081 是唯一设备控制面；`/api/help` 当前公布 **74** 项设备操作，Tunnel、`/service` 与完整配置读写已移出 Agent 发现面（M7/Q18 边界）；配置页仍由 token 管理面直接访问；18096 仅本机 UI 调试，不参与板控。
-- **板卡 CLI**：`GET /share/tools/eadk_board.py` 与 `GET /share/tools/eadk_board.md` 直接由 18081 分发（运行期文件在 `work\share\tools`）。CLI 统一按 v3 的 `channel` 键工作，自动把旧版 `board/link`、`/status`、`/actions`、`/log` 形状适配到 `/agent/state`、`/actions?channel=`、`/log?channel=`；写接口读取 `EADK_TOKEN` / `--token`（即配置里的 `web.token`）。`scan/list/health/state/write/send/keys/clear/put/ls/md5/rm/run` 已实测；安装包同时带 `share\tools` 与 `share\skills`。
+- **板卡 CLI**：`GET /share/tools/eadk_board.py` 与 `GET /share/tools/eadk_board.md` 直接由 18081 分发（运行期文件在 `work\share\tools`）。CLI 统一按 v3 的 `channel` 键工作，自动把旧版 `board/link`、`/status`、`/actions`、`/log` 形状适配到 `/agent/state`、`/actions?channel=`、`/log?channel=`；写接口读取 `EADK_TOKEN` / `--token`（即配置里的 `web.token`）。**全部子命令已纳入测试**：`tests/eadk_board_full_check.py` 用假 v3 桥覆盖 90 项契约，`tests/eadk_cli_check.ps1` 在真实桥覆盖 32 项冒烟，逐项清单见 `tests/CHECKLIST_eadk_board_cli.md`；安装包同时带 `share\tools` 与 `share\skills`。
 - **已知缺口**：C6 串口自动发现、C9 自动跟随、D4 XMODEM/YMODEM、D5/D6 上传到板目录/common、F1 主题、F3 快捷键冲突检测、F4 多窗口、G5 崩溃日志、H6 开机自启、L7 双网段、N5 180 天 API 门禁，以及 P7 全部；A10/L6/M8 为部分实现。逐项证据与修复记录见 `docs/设计初衷与实现对照.md`。
-- **仍需硬件复核**：真实 COM5/COM3 电气链路、断网级 WS 重连、NFS/入站 SSH/TCP/隧道跨服务重复启停矩阵。
+- **仍需硬件复核**：真实 COM5/COM3 电气链路、断网级 WS 重连、NFS/入站 SSH/TCP/隧道跨服务重复启停矩阵；EADK `to-board` 的 `scp-pull/scp-push` 阶梯需真实板侧 sshd/密钥。
 
 ```powershell
 # S1 验收（构建 + 8 条自检 + 窗口/进程/整理/git 共 18 项）
@@ -157,6 +158,12 @@ node output\webtest\pw_pages_test.js
 # S12 验收（隔离 output\s12test，TCP 22000+/UDP 18071/公网 18123）
 python output\s12test\s12_accept.py
 node output\s12test\s12_pages.js
+# EADK 板卡 CLI 全命令契约（假桥，90 项）
+python tests\eadk_board_full_check.py
+# EADK 真实桥冒烟（需 18081 + loop-chars + ssh-demo1，32 项）
+pwsh -NoProfile -File tests\eadk_cli_check.ps1
+# 全量一键回归（19 个套件：17 个 Node + EADK 契约 + EADK 真实桥）
+pwsh -NoProfile -File output\webtest\run-full-suite.ps1
 # 只看数据面
 .\output\build\ssh_bridge3.exe --selftest all loop:selftest
 .\output\build\ssh_bridge3.exe --selftest ssh 127.0.0.1 22 root <密码>

@@ -44,12 +44,15 @@ std::vector<std::string> split_csv(const std::string& text) {
     return out;
 }
 
-const AppCore::Entry* find_entry(AppCore* core, const std::string& name) {
-    if (!core) return nullptr;
+bool find_entry(AppCore* core, const std::string& name, AppCore::Entry& out) {
+    if (!core) return false;
     for (const AppCore::Entry& e : core->entries()) {
-        if (e.name == name) return &e;
+        if (e.name == name) {
+            out = e;  // entries() 返回临时快照，必须按值带出
+            return true;
+        }
     }
-    return nullptr;
+    return false;
 }
 
 bool entry_running(const AppCore::Entry& e) {
@@ -310,34 +313,34 @@ std::string help_text(AppCore* core, int web_port, const UiBridgeInfo& ui) {
 }
 
 std::string channel_help(AppCore* core, const std::string& channel, int web_port) {
-    const AppCore::Entry* e = find_entry(core, channel);
-    if (!e) return "channel not found";
+    AppCore::Entry e;
+    if (!find_entry(core, channel, e)) return "channel not found";
     std::string out;
-    out += "通道 " + e->name + "\n";
-    out += "kind: " + e->kind + "  state: " + e->state + "  " +
-           (entry_running(*e) ? "running" : "offline") + "\n";
-    if (!e->detail.empty()) out += "detail: " + e->detail + "\n";
+    out += "通道 " + e.name + "\n";
+    out += "kind: " + e.kind + "  state: " + e.state + "  " +
+           (entry_running(e) ? "running" : "offline") + "\n";
+    if (!e.detail.empty()) out += "detail: " + e.detail + "\n";
     out += "base: http://<host>:" + std::to_string(web_port) + "\n";
     out += "\n读:\n";
-    out += "  GET /log?channel=" + e->name + "&chars=8192\n";
-    out += "  GET /log?channel=" + e->name + "&since=..&epoch=..\n";
+    out += "  GET /log?channel=" + e.name + "&chars=8192\n";
+    out += "  GET /log?channel=" + e.name + "&since=..&epoch=..\n";
     out += "  GET /status\n";
     out += "\n写:\n";
     out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
-    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"data\":\"<text>\"}' \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e.name) + "\",\"data\":\"<text>\"}' \\\n";
     out += "    http://127.0.0.1:" + std::to_string(web_port) + "/write\n";
     out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
-    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"command\":\"uname -a\"}' \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e.name) + "\",\"command\":\"uname -a\"}' \\\n";
     out += "    http://127.0.0.1:" + std::to_string(web_port) + "/command\n";
     out += "\n占板与释放:\n";
     out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
-    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"session_id\":\"$SID\",\"ttl_ms\":3600000}' \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e.name) + "\",\"session_id\":\"$SID\",\"ttl_ms\":3600000}' \\\n";
     out += "    http://127.0.0.1:" + std::to_string(web_port) + "/lock\n";
     out += "  curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
-    out += "    -d '{\"channel\":\"" + json_escape(e->name) + "\",\"session_id\":\"$SID\"}' \\\n";
+    out += "    -d '{\"channel\":\"" + json_escape(e.name) + "\",\"session_id\":\"$SID\"}' \\\n";
     out += "    http://127.0.0.1:" + std::to_string(web_port) + "/unlock\n";
     out += "\n按钮:\n";
-    const std::vector<BoardActionConfig> btns = core ? core->buttons_of(e->name) : std::vector<BoardActionConfig>{};
+    const std::vector<BoardActionConfig> btns = core ? core->buttons_of(e.name) : std::vector<BoardActionConfig>{};
     if (btns.empty()) {
         out += "  (none)\n";
     } else {
@@ -345,7 +348,7 @@ std::string channel_help(AppCore* core, const std::string& channel, int web_port
             out += "  - " + b.id + "  " + b.label + "  backend=" + b.backend +
                    (b.enable ? "" : "  disabled") + "\n";
             out += "    curl -H \"Authorization: Bearer $WEB_TOKEN\" -H \"Content-Type: application/json\" \\\n";
-            out += "      -d '{\"channel\":\"" + json_escape(e->name) + "\",\"id\":\"" +
+            out += "      -d '{\"channel\":\"" + json_escape(e.name) + "\",\"id\":\"" +
                    json_escape(b.id) + "\"}' http://127.0.0.1:" + std::to_string(web_port) + "/action\n";
         }
     }
@@ -378,7 +381,9 @@ ResolveResult resolve_channel(AppCore* core, const std::string& board, const std
     }
     const std::string name = !board.empty() ? board : (!link.empty() ? link : channel);
     const std::string want_kind = !board.empty() ? "serial" : (!link.empty() ? "ssh" : "");
-    const AppCore::Entry* e = find_entry(core, name);
+    const AppCore::Entry* e = nullptr;
+    AppCore::Entry snapshot;
+    if (find_entry(core, name, snapshot)) e = &snapshot;
     if (!e) {
         r.http_status = 404;
         r.error_code = "channel_not_found";

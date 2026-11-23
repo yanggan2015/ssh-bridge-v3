@@ -90,20 +90,11 @@ def lan_local_ips() -> Tuple[str, set]:
     except Exception:
         preferred = ""
     try:
-        if sys.platform == "win32":
-            out = subprocess.check_output(
-                ["powershell", "-NoProfile", "-Command",
-                 "Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue "
-                 "| Select-Object -ExpandProperty IPAddress"],
-                stderr=subprocess.DEVNULL, timeout=5,
-            ).decode("utf-8", "replace")
-        else:
-            out = subprocess.check_output(
-                ["ip", "-4", "-o", "addr", "show"], stderr=subprocess.DEVNULL, timeout=5
-            ).decode("utf-8", "replace")
-        for m in re.finditer(r"\b(\d+\.\d+\.\d+\.\d+)\b", out):
-            ip = m.group(1)
-            if not ip.startswith("127."):
+        # 只用标准库枚举本机 IPv4，避免为 IP 枚举启动外部进程。
+        for info in socket.getaddrinfo(socket.gethostname(), None,
+                                       socket.AF_INET, socket.SOCK_DGRAM):
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
                 ips.add(ip)
     except Exception:
         pass
@@ -141,8 +132,11 @@ def lan_reply_id(obj: dict) -> str:
     )
 
 
-def lan_scan(wait_ms: int = 1500, targets: Optional[List[str]] = None) -> Tuple[List[dict], str, set]:
-    preferred, lips = lan_local_ips()
+def lan_scan(wait_ms: int = 1500, targets: Optional[List[str]] = None,
+             local_ips: Optional[Tuple[str, set]] = None) -> Tuple[List[dict], str, set]:
+    # Windows 上连续调用 lan_local_ips 后，新建 UDP socket 的首个请求包可能丢失；
+    # discover 只解析一次本机 IP，再显式传入，避免重复调用。
+    preferred, lips = local_ips if local_ips is not None else lan_local_ips()
     if not targets:
         targets = ["255.255.255.255"]
         for ip in lips:
@@ -163,14 +157,18 @@ def lan_scan(wait_ms: int = 1500, targets: Optional[List[str]] = None) -> Tuple[
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.bind(("", 0))
     sock.settimeout(0.2)
-    for ip in targets:
-        if ip.startswith("127."):
-            continue
-        for port, magic in LAN_PORTS:
-            try:
-                sock.sendto(("%s\nq" % magic).encode(), (ip, port))
-            except OSError:
-                pass
+    # Windows 上新建 UDP socket 后的首个包偶发丢失；发现请求发两轮，
+    # 第二轮在 30ms 后补发，服务端/客户端都无需特殊处理。
+    for _round in range(2):
+        for ip in targets:
+            if ip.startswith("127."):
+                continue
+            for port, magic in LAN_PORTS:
+                try:
+                    sock.sendto(("%s\nq" % magic).encode(), (ip, port))
+                except OSError:
+                    pass
+        time.sleep(0.03)
 
     best: Dict[str, dict] = {}
     end = time.time() + wait_ms / 1000.0
@@ -220,7 +218,8 @@ def cmd_discover(argv: Sequence[str], as_json: bool = False) -> int:
         targets = list(args.host)
     else:
         targets = None
-    hosts, _preferred, _lips = lan_scan(max(200, min(args.w, 10000)), targets)
+    hosts, _preferred, _lips = lan_scan(max(200, min(args.w, 10000)), targets,
+                                        local_ips=(preferred, lips))
     out = []
     for h in hosts:
         port = h.get("http_port") or 18071
