@@ -16,11 +16,28 @@ foreach ($f in $targets) {
     $rel = $f.FullName.Substring($root.Length + 1)
     $lines = [System.IO.File]::ReadAllLines($f.FullName)
     $n = 0
+    # 嵌入的 HTML/JS/CSS 原始字符串是资源内容，不是 C++ 排版；只豁免“超长行”，
+    # TAB、行尾空白、文件末尾换行仍照常检查。C++ 拼接生成的 HTML 不豁免。
+    $rawEnd = $null
     foreach ($line in $lines) {
         $n++
+        $inRaw = $false
+        if ($null -ne $rawEnd) {
+            $inRaw = $true
+            if ($line.Contains($rawEnd)) { $rawEnd = $null }
+        } else {
+            $m = [regex]::Match($line, 'R"([A-Za-z0-9_]*)\(')
+            if ($m.Success) {
+                $end = ')' + $m.Groups[1].Value + '"'
+                if (-not $line.Contains($end)) { $rawEnd = $end }
+                $inRaw = $true
+            }
+        }
         if ($line.Contains("`t")) { $issues += "$rel`:$n TAB" }
         if ($line -match '\s+$') { $issues += "$rel`:$n 行尾空白" }
-        if ($line.Length -gt 200) { $issues += "$rel`:$n 超长行（$($line.Length)）" }
+        if (-not $inRaw -and $line.Length -gt 200) {
+            $issues += "$rel`:$n 超长行（$($line.Length)）"
+        }
     }
     $raw = [System.IO.File]::ReadAllText($f.FullName)
     if ($raw.Length -gt 0 -and -not $raw.EndsWith("`n")) { $issues += "$rel 文件末尾缺换行" }
