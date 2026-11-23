@@ -68,6 +68,8 @@ void fill_port_combo(HWND combo) {
     wchar_t cur[256] = L"";
     GetWindowTextW(combo, cur, 256);
     std::vector<std::wstring> items = serial_port_items();
+    if (cur[0] && std::find(items.begin(), items.end(), std::wstring(cur)) == items.end())
+        items.insert(items.begin(), cur);
     SendMessageW(combo, CB_RESETCONTENT, 0, 0);
     add_wide_items(combo, items);
     SetWindowTextW(combo, cur);
@@ -307,6 +309,7 @@ void ChannelDialog::build(ChannelKind initial_kind) {
     ShowWindow(ps_cap, SW_HIDE);
 
     if (editing_) load_from_config();
+    fill_port_combo(GetDlgItem(hwnd_, chan_dlg::kIdDevice));
 
     apply_kind_visibility();
     layout();

@@ -684,28 +684,28 @@ std::string page_body(const std::string& page) {
   <div class="form-grid">
     <label class="field"><span>通道名</span><input id="cName" maxlength="40" placeholder="例如 ok3568-com5"><span class="help">≤40 字符，不能含 |，不能与现有通道重名。</span></label>
     <label class="field"><span>类型</span><input id="cKind" readonly></label>
-    <label class="field"><span>串口设备</span><input id="cDevice" placeholder="COM5 或 loop:ai"></label>
-    <label class="field"><span>波特率</span><input id="cBaud" type="number" min="50" max="4000000" step="1" value="115200"></label>
+    <label class="field"><span>串口设备</span><input id="cDevice" list="dlDevice" placeholder="COM5 或 loop:ai"></label>
+    <label class="field"><span>波特率</span><input id="cBaud" list="dlBaud" type="text" inputmode="numeric" value="115200"></label>
     <label class="field"><span>数据位</span><select id="cDataBits"><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
     <label class="field"><span>校验</span><select id="cParity"><option value="N">N · 无</option><option value="E">E · 偶</option><option value="O">O · 奇</option><option value="M">M · Mark</option><option value="S">S · Space</option></select></label>
     <label class="field"><span>停止位</span><select id="cStopBits"><option value="10">1</option><option value="15">1.5</option><option value="20">2</option></select></label>
     <label class="field"><span>流控</span><select id="cFlow"><option value="none">none</option><option value="rtscts">rtscts</option><option value="xonxoff">xonxoff</option></select></label>
     <label class="field"><span>行尾</span><select id="cLineEnding"><option value="none">none</option><option value="lf">LF</option><option value="crlf">CRLF</option><option value="cr">CR</option></select></label>
-    <label class="field"><span>编码</span><input id="cEncoding" placeholder="utf-8"></label>
+    <label class="field"><span>编码</span><input id="cEncoding" list="dlEncoding" placeholder="utf-8"></label>
     <label class="field"><span>用户名（可选）</span><input id="cUsername" placeholder="串口登录用户"></label>
     <label class="field"><span>密码（可选）</span><input id="cPassword" type="password" autocomplete="off"></label>
     <label class="field"><span>主机</span><input id="cHost" placeholder="192.168.1.10"></label>
-    <label class="field"><span>SSH 端口</span><input id="cPort" type="number" min="1" max="65535" value="22"></label>
+    <label class="field"><span>SSH 端口</span><input id="cPort" list="dlSshPort" type="text" inputmode="numeric" value="22"></label>
     <label class="field"><span>SSH 用户名</span><input id="cSshUser" placeholder="root"></label>
     <label class="field"><span>SSH 密码</span><input id="cSshPassword" type="password" autocomplete="off"></label>
-    <label class="field"><span>PowerShell 程序</span><input id="cShell" placeholder="powershell.exe"></label>
+    <label class="field"><span>PowerShell 程序</span><input id="cShell" list="dlShell" placeholder="powershell.exe"></label>
     <label class="field"><span>PowerShell 参数</span><input id="cArgs" placeholder="-NoLogo -NoProfile -ExecutionPolicy Bypass"></label>
     <label class="field"><span>工作目录（可选）</span><input id="cCwd" placeholder="留空用进程当前目录"></label>
-    <label class="field"><span>TERM</span><input id="cTerm" placeholder="xterm-256color"></label>
-    <label class="field"><span>Keepalive 秒</span><input id="cKeepalive" type="number" min="0" max="3600" value="3"></label>
-    <label class="field"><span>终端列</span><input id="cWidth" type="number" min="40" max="500" value="120"></label>
-    <label class="field"><span>终端行</span><input id="cHeight" type="number" min="10" max="200" value="32"></label>
-    <label class="field"><span>连接超时 ms</span><input id="cTimeout" type="number" min="100" max="120000" step="100" value="5000"></label>
+    <label class="field"><span>TERM</span><input id="cTerm" list="dlTerm" placeholder="xterm-256color"></label>
+    <label class="field"><span>Keepalive 秒</span><input id="cKeepalive" list="dlKeepalive" type="text" inputmode="numeric" value="3"></label>
+    <label class="field"><span>终端列</span><input id="cWidth" list="dlCols" type="text" inputmode="numeric" value="120"></label>
+    <label class="field"><span>终端行</span><input id="cHeight" list="dlRows" type="text" inputmode="numeric" value="32"></label>
+    <label class="field"><span>连接超时 ms</span><input id="cTimeout" list="dlTimeout" type="text" inputmode="numeric" value="5000"></label>
     <label class="check-row"><input id="cAutoOpen" type="checkbox"> 自动打开</label>
     <label class="check-row"><input id="cTimestamp" type="checkbox"> 回显时间戳</label>
     <label class="check-row"><input id="cDtr" type="checkbox" checked> DTR</label>
@@ -713,6 +713,16 @@ std::string page_body(const std::string& page) {
     <label class="check-row"><input id="cDiscoverable" type="checkbox"> 允许局域网发现</label>
     <label class="check-row"><input id="cLogEnabled" type="checkbox" checked> 写入日志</label>
   </div>
+  <datalist id="dlDevice"><option>COM1</option><option>COM2</option><option>COM3</option><option>COM4</option><option>COM5</option><option>COM6</option><option>COM7</option><option>COM8</option><option>COM9</option><option>COM10</option><option>loop:ai</option><option>loop:demo</option><option>loop:chars</option></datalist>
+  <datalist id="dlBaud"><option>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option><option>230400</option><option>460800</option><option>921600</option><option>1500000</option><option>3000000</option></datalist>
+  <datalist id="dlEncoding"><option>utf-8</option><option>gbk</option></datalist>
+  <datalist id="dlSshPort"><option>22</option><option>2222</option><option>52222</option><option>52223</option><option>8022</option></datalist>
+  <datalist id="dlTerm"><option>xterm-256color</option><option>xterm</option><option>screen-256color</option><option>vt100</option><option>linux</option></datalist>
+  <datalist id="dlKeepalive"><option>0</option><option>3</option><option>5</option><option>10</option><option>30</option></datalist>
+  <datalist id="dlCols"><option>80</option><option>100</option><option>120</option><option>160</option><option>200</option></datalist>
+  <datalist id="dlRows"><option>24</option><option>30</option><option>32</option><option>40</option><option>48</option></datalist>
+  <datalist id="dlTimeout"><option>1000</option><option>3000</option><option>5000</option><option>8000</option><option>30000</option></datalist>
+  <datalist id="dlShell"><option>powershell.exe</option><option>pwsh.exe</option><option>cmd.exe</option></datalist>
   <div class="editor-actions">
     <button class="btn" id="saveChannel" type="button">保存通道</button>
     <button class="btn ghost" id="cancelChannel" type="button">取消</button>
@@ -804,13 +814,16 @@ std::string page_body(const std::string& page) {
       <label class="field"><span>执行位置</span><select id="aRun"><option value="channel">channel · 当前通道</option><option value="host">host · 本机执行</option></select></label>
       <label class="field"><span>启用</span><select id="aEnable"><option value="true">启用</option><option value="false">停用</option></select></label>
       <label class="field full only-commands"><span>命令（一行一条）</span><textarea id="aCommands" placeholder="help&#10;status"></textarea><span class="help">按顺序发送到通道，每条之间等待下面间隔。</span></label>
-      <label class="field only-commands"><span>每条间隔 ms</span><input id="aDelay" type="number" min="0" step="50" value="200"></label>
+      <label class="field only-commands"><span>每条间隔 ms</span><input id="aDelay" list="dlActionDelay" type="text" inputmode="numeric" value="200"></label>
       <label class="field only-relay"><span>继电器设备</span><select id="aRelay"></select></label>
-      <label class="field only-relay"><span>继电器通道</span><input id="aRelayCh" type="number" min="1" max="16" value="1"></label>
+      <label class="field only-relay"><span>继电器通道</span><input id="aRelayCh" list="dlActionRelayCh" type="text" inputmode="numeric" value="1"></label>
       <label class="field only-relay"><span>模式</span><select id="aMode"><option value="pulse">pulse · 脉冲</option><option value="hold_on">hold_on · 保持吸合</option><option value="hold_off">hold_off · 保持断开</option></select></label>
-      <label class="field only-relay"><span>脉冲/保持秒</span><input id="aHold" type="number" min="0" step="0.1" value="1"></label>
+      <label class="field only-relay"><span>脉冲/保持秒</span><input id="aHold" list="dlActionHold" type="text" inputmode="decimal" value="1"></label>
       <label class="field full only-script"><span>脚本正文</span><textarea id="aScript" style="min-height:160px" placeholder="-- Lua 或旧 DSL"></textarea><span class="help">script 模式的测试会走真实执行器。</span></label>
     </div>
+    <datalist id="dlActionDelay"><option>20</option><option>50</option><option>100</option><option>200</option><option>500</option></datalist>
+    <datalist id="dlActionRelayCh"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></datalist>
+    <datalist id="dlActionHold"><option>0.5</option><option>1</option><option>2</option><option>5</option></datalist>
     <div class="editor-actions"><button class="btn" id="saveAction" type="button">保存按钮</button><button class="btn ghost" id="cancelAction" type="button">取消</button><span class="form-status" id="actionNote"></span></div>
   </div>
   <div id="actList" class="list"></div>
@@ -859,14 +872,18 @@ std::string page_body(const std::string& page) {
   <div class="editor" id="relayEditor" hidden>
     <div class="form-grid">
       <label class="field"><span>设备名称</span><input id="rName" placeholder="例如 relay1"></label>
-      <label class="field"><span>Windows 端口</span><input id="rPort" placeholder="例如 COM3"></label>
-      <label class="field"><span>通道数</span><input id="rChannels" type="number" min="1" max="16" value="2"></label>
-      <label class="field"><span>波特率</span><input id="rBaud" type="number" min="1200" step="1" value="9600"></label>
+      <label class="field"><span>Windows 端口</span><input id="rPort" list="dlRelayPort" placeholder="例如 COM3"></label>
+      <label class="field"><span>通道数</span><input id="rChannels" list="dlRelayChannels" type="text" inputmode="numeric" value="2"></label>
+      <label class="field"><span>波特率</span><input id="rBaud" list="dlRelayBaud" type="text" inputmode="numeric" value="9600"></label>
       <label class="field"><span>使能</span><select id="rEnable"><option value="true">启用</option><option value="false">停用</option></select></label>
       <label class="field"><span>IO 反相</span><select id="rIoInv"><option value="false">正常</option><option value="true">反相</option></select></label>
       <label class="field"><span>极性强反</span><select id="rPolInv"><option value="false">正常</option><option value="true">反相</option></select></label>
-      <label class="field"><span>写后延时 ms</span><input id="rDelay" type="number" min="0" step="10" value="100"></label>
+      <label class="field"><span>写后延时 ms</span><input id="rDelay" list="dlRelayDelay" type="text" inputmode="numeric" value="100"></label>
     </div>
+    <datalist id="dlRelayPort"><option>COM1</option><option>COM2</option><option>COM3</option><option>COM4</option><option>COM5</option><option>COM6</option><option>COM7</option><option>COM8</option><option>COM9</option><option>COM10</option></datalist>
+    <datalist id="dlRelayChannels"><option>1</option><option>2</option><option>4</option><option>8</option></datalist>
+    <datalist id="dlRelayBaud"><option>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></datalist>
+    <datalist id="dlRelayDelay"><option>20</option><option>50</option><option>100</option><option>200</option><option>500</option></datalist>
     <div class="editor-actions"><button class="btn" id="saveRelay" type="button">保存设备</button><button class="btn ghost" id="cancelRelay" type="button">取消</button><span class="form-status" id="relayNote"></span></div>
   </div>
   <div id="relayList" class="grid"></div>
@@ -884,17 +901,24 @@ std::string page_body(const std::string& page) {
     <label class="field"><span>根目录</span><input id="svcRoot" placeholder="留空使用默认共享根"><span class="help">相对路径按应用工作目录解析；保存后由服务重载。</span></label>
 )HTML";
         if (svc == "tftp") fields += R"HTML(
-    <label class="field"><span>端口</span><input id="svcPort" type="number" min="1" max="65535" value="69"></label>
-    <label class="field"><span>绑定 IP</span><input id="svcBind" placeholder="留空监听全部网卡"></label>
+    <label class="field"><span>端口</span><input id="svcPort" list="dlTftpPort" type="text" inputmode="numeric" value="69"></label>
+    <label class="field"><span>绑定 IP</span><input id="svcBind" list="dlTftpBind" placeholder="留空监听全部网卡"></label>
     <label class="check-row"><input id="svcWrite" type="checkbox" checked> 允许客户端写入</label>
 )HTML";
         else if (svc == "nfs") fields += R"HTML(
-    <label class="field"><span>导出别名</span><input id="svcAlias" placeholder="/share"><span class="help">必须以 / 开头。</span></label>
-    <label class="field"><span>UID</span><input id="svcUid" type="number" min="0" max="65535" value="0"></label>
-    <label class="field"><span>GID</span><input id="svcGid" type="number" min="0" max="65535" value="0"></label>
+    <label class="field"><span>导出别名</span><input id="svcAlias" list="dlNfsAlias" placeholder="/share"><span class="help">必须以 / 开头。</span></label>
+    <label class="field"><span>UID</span><input id="svcUid" list="dlNfsId" type="text" inputmode="numeric" value="0"></label>
+    <label class="field"><span>GID</span><input id="svcGid" list="dlNfsId" type="text" inputmode="numeric" value="0"></label>
 )HTML";
         else fields += R"HTML(
-    <label class="field"><span>HTTP 端口</span><input id="svcPort" type="number" min="1" max="65535" value="18082"></label>
+    <label class="field"><span>HTTP 端口</span><input id="svcPort" list="dlSharePort" type="text" inputmode="numeric" value="18082"></label>
+)HTML";
+        fields += R"HTML(
+    <datalist id="dlTftpPort"><option>69</option><option>6969</option><option>1069</option></datalist>
+    <datalist id="dlTftpBind"><option>0.0.0.0</option><option>127.0.0.1</option></datalist>
+    <datalist id="dlNfsAlias"><option>/share</option><option>/mnt/share</option></datalist>
+    <datalist id="dlNfsId"><option>0</option><option>1000</option><option>1001</option></datalist>
+    <datalist id="dlSharePort"><option>18082</option><option>18083</option><option>8080</option></datalist>
 )HTML";
         std::string html = R"HTML(
 <section class="card" id="svcConfigCard">

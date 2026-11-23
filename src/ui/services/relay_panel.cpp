@@ -526,7 +526,7 @@ void RelayPanel::build() {
     label(L"模式", 460, 276, 36, 24, relay_ui::kIdLabelBindMode, 1);
     combo(L"", 500, 272, 130, 200, relay_ui::kIdBindMode, 1, true);
     label(L"保持/脉冲秒", 644, 276, 84, 24, relay_ui::kIdLabelBindHold, 1);
-    combo(L"1.0", 732, 272, 80, 200, relay_ui::kIdBindHold, 1);
+    combo(L"1", 732, 272, 80, 200, relay_ui::kIdBindHold, 1);
 
     button(L"预设：上电", 32, 312, 100, 28, relay_ui::kIdBindPresetOn, 1);
     button(L"预设：下电", 140, 312, 100, 28, relay_ui::kIdBindPresetOff, 1);
@@ -587,6 +587,7 @@ void RelayPanel::build() {
     fill_number_combo(relay_ui::kIdDevPulseHold, {L"0.5 秒", L"1 秒", L"2 秒", L"5 秒"});
     add_combo_strings(GetDlgItem(hwnd_, relay_ui::kIdBindMode), {L"hold_on", L"hold_off", L"pulse"});
     SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdBindMode), CB_SETCURSEL, 0, 0);
+    fill_number_combo(relay_ui::kIdBindHold, {L"0.5", L"1", L"2", L"5"});
     add_combo_strings(GetDlgItem(hwnd_, relay_ui::kIdScriptKind),
                       {L"Lua 脚本", L"板端命令", L"本机命令", L"简单脚本"});
     SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdScriptKind), CB_SETCURSEL, 0, 0);
@@ -969,6 +970,13 @@ void RelayPanel::load_bind(int action_index) {
     else if (a.mode == "pulse") mode_idx = 2;
     SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdBindMode), CB_SETCURSEL, mode_idx, 0);
     set_text(relay_ui::kIdBindHold, format_seconds(a.hold_seconds));
+    {
+        int hold_idx = static_cast<int>(SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdBindHold),
+                                                     CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
+                                                     reinterpret_cast<LPARAM>(format_seconds(a.hold_seconds).c_str())));
+        if (hold_idx >= 0)
+            SendMessageW(GetDlgItem(hwnd_, relay_ui::kIdBindHold), CB_SETCURSEL, hold_idx, 0);
+    }
     set_text(relay_ui::kIdBindInfo, utf8_to_wide(action_index >= 0 ? "已加载绑定：" + a.id
                                                                   : "新绑定草稿"));
     updating_ = false;

@@ -1662,7 +1662,7 @@ void SftpWindow::update_settings_note() {
     } else {
         note = "当前：" + speed_label(g_speed_limit_bps.load()) + "（保存后生效）。";
     }
-    note += "限速只作用于 SFTP 传输，不影响串口/SSH 回显与终端操作。";
+    note += "\n限速只作用于 SFTP 传输，不影响串口/SSH 回显与终端操作。";
     SetWindowTextW(GetDlgItem(settings_, sftp_ui::kIdSetNote), widen(note).c_str());
 }
 
