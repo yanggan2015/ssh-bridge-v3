@@ -247,7 +247,7 @@ void add_features(cJSON* o, const AppCore::Entry& e, AppCore* core) {
     cJSON_AddBoolToObject(f, "log_disk", true);
     cJSON_AddBoolToObject(f, "command", true);
     cJSON_AddBoolToObject(f, "lock", true);
-    cJSON_AddBoolToObject(f, "jobs", false);
+    cJSON_AddBoolToObject(f, "jobs", true);
     cJSON_AddBoolToObject(f, "tftp_artifacts", false);
 }
 
@@ -359,7 +359,7 @@ void add_global_features(cJSON* root) {
     cJSON_AddBoolToObject(f, "log_disk", true);
     cJSON_AddBoolToObject(f, "command", true);
     cJSON_AddBoolToObject(f, "lock", true);
-    cJSON_AddBoolToObject(f, "jobs", false);
+    cJSON_AddBoolToObject(f, "jobs", true);
     cJSON_AddBoolToObject(f, "serial_control", false);
     cJSON_AddBoolToObject(f, "tftp_artifacts", false);
 }

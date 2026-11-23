@@ -138,6 +138,9 @@ const OperationSpec kOperations[] = {
     {"lock.post", "POST", "/lock", "按通道获取/续租租约锁，默认 1000ms 最大 86400000ms", "token", "channel,session_id,ttl_ms", "ok,channel,owner,ttl_ms,expires_in_ms,renewed"},
     {"unlock.post", "POST", "/unlock", "只释放自己的通道锁；错误 session 不释放", "token", "channel,session_id", "ok,channel,released,owner"},
     {"lock.takeover.post", "POST", "/lock/takeover", "人工显式接管：清旧锁并记录 last_takeover 审计", "token", "channel,reason,session_id", "ok,channel,previous_owner,reason,at_ms"},
+    {"jobs.list.get", "GET", "/jobs", "作业摘要列表；支持 state/channel/limit/before_id 过滤与分页", "public", "state,channel,limit,before_id", "ok,jobs,count,limit,total"},
+    {"jobs.get", "GET", "/jobs/{id}", "单个作业详情；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,ok,output,progress,audit"},
+    {"jobs.cancel.post", "POST", "/jobs/{id}/cancel", "请求取消排队/运行中的作业；已结束 409", "token", "id", "ok,id,state,cancel_requested"},
     {"job.get", "GET", "/job", "查询 job 状态、输出与审计摘要；不存原始命令全文", "public", "id", "id,job_id,kind,channel,state,done,ok,timed_out,output,audit"},
 };
 

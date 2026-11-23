@@ -472,6 +472,9 @@ struct Job {
     std::int64_t ended_ms = 0;
     int timeout_ms = 0;
     std::uint64_t bytes = 0;
+    std::atomic<bool> cancel_requested{false};
+    std::atomic<int> progress_sent{0};
+    std::atomic<int> progress_total{0};
 };
 
 enum class TaskKind { Action, Command, CommandBlock, Exec, SendKeys };
@@ -546,6 +549,13 @@ cJSON* job_object(const Job& j) {
     std::int64_t dur = j.started_ms ? std::max<std::int64_t>(0, end - j.started_ms) : 0;
     cJSON_AddNumberToObject(o, "duration_ms", static_cast<double>(dur));
     cJSON_AddNumberToObject(o, "bytes", static_cast<double>(j.bytes));
+    cJSON_AddBoolToObject(o, "cancel_requested", j.cancel_requested.load());
+    cJSON* progress = cJSON_AddObjectToObject(o, "progress");
+    int sent = j.progress_sent.load();
+    int total = j.progress_total.load();
+    cJSON_AddNumberToObject(progress, "sent", sent);
+    cJSON_AddNumberToObject(progress, "total", total);
+    cJSON_AddNumberToObject(progress, "percent", total > 0 ? (100.0 * sent / total) : 0);
     cJSON* audit = cJSON_AddObjectToObject(o, "audit");
     cJSON_AddStringToObject(audit, "request_id", j.request_id.c_str());
     cJSON_AddStringToObject(audit, "session", j.session.c_str());
@@ -557,15 +567,38 @@ cJSON* job_object(const Job& j) {
     return o;
 }
 
+// 列表摘要：不携带 output/error 全文，避免 /jobs 变成日志搬运接口。
+cJSON* job_summary_object(const Job& j) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", j.id);
+    cJSON_AddNumberToObject(o, "job_id", j.id);
+    cJSON_AddStringToObject(o, "kind", j.kind.c_str());
+    cJSON_AddStringToObject(o, "channel", j.channel.c_str());
+    cJSON_AddStringToObject(o, "state", j.state.c_str());
+    cJSON_AddBoolToObject(o, "ok", j.ok);
+    cJSON_AddBoolToObject(o, "timed_out", j.timed_out);
+    cJSON_AddBoolToObject(o, "cancel_requested", j.cancel_requested.load());
+    cJSON_AddStringToObject(o, "request_id", j.request_id.c_str());
+    cJSON_AddNumberToObject(o, "created_ms", static_cast<double>(j.created_ms));
+    cJSON_AddNumberToObject(o, "started_ms", static_cast<double>(j.started_ms));
+    cJSON_AddNumberToObject(o, "ended_ms", static_cast<double>(j.ended_ms));
+    cJSON_AddNumberToObject(o, "bytes", static_cast<double>(j.bytes));
+    cJSON_AddNumberToObject(o, "progress_sent", j.progress_sent.load());
+    cJSON_AddNumberToObject(o, "progress_total", j.progress_total.load());
+    return o;
+}
+
 struct CaptureResult {
     std::string output;
     bool timed_out = false;
     bool marker = false;
+    bool cancelled = false;
     std::uint64_t bytes = 0;
 };
 
 CaptureResult capture_after_write(IBridge* bridge, const std::string& payload,
-                                 const std::string& marker, int timeout_ms, bool need_marker) {
+                                 const std::string& marker, int timeout_ms, bool need_marker,
+                                 const std::atomic<bool>* cancel = nullptr) {
     CaptureResult r;
     if (!bridge) {
         r.timed_out = true;
@@ -579,6 +612,10 @@ CaptureResult capture_after_write(IBridge* bridge, const std::string& payload,
     bool got = false;
     constexpr std::size_t kMaxCapture = 1u << 20;
     while (true) {
+        if (cancel && cancel->load()) {
+            r.cancelled = true;
+            break;
+        }
         std::uint64_t e = epoch, s = seen;
         std::string d = bridge->read_since(&e, &s);
         epoch = e;
@@ -612,12 +649,18 @@ CaptureResult capture_after_write(IBridge* bridge, const std::string& payload,
 }
 
 std::uint64_t send_key_tokens(IBridge* bridge, const std::vector<std::string>& keys,
-                              int interval_ms) {
+                              int interval_ms, Job* job = nullptr, bool* cancelled = nullptr) {
     std::uint64_t sent = 0;
     if (!bridge) return sent;
+    if (job) job->progress_total.store(static_cast<int>(keys.size()));
     for (const std::string& k : keys) {
+        if (job && job->cancel_requested.load()) {
+            if (cancelled) *cancelled = true;
+            break;
+        }
         if (k.empty()) continue;
         sent += static_cast<std::uint64_t>(bridge->write(k.data(), k.size()));
+        if (job) job->progress_sent.fetch_add(1);
         if (interval_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
     }
     return sent;
@@ -676,13 +719,17 @@ struct WebConsole::Impl {
     std::string relay_devices() const;
     bool patch_config(const std::function<bool(cJSON*)>& apply, std::string* err);
     std::string jobs_json(int id) const;
+    std::string jobs_list_json(const std::string& state, const std::string& channel,
+                               int before_id, int limit) const;
+    bool channel_busy(const std::string& channel, int* job_id, std::string* state) const;
     std::string page(const std::string& name) const;
     void handle_http(mg_connection* c, mg_http_message* hm);
     void handle_ws(mg_connection* c, int ev, void* ev_data);
     void push_ws(mg_connection* c, WsState& s);
     void cleanup_job();
     std::shared_ptr<Job> make_job(const std::string& kind, const std::string& channel,
-                                  const std::string& request_id, const std::string& session);
+                                  const std::string& request_id, const std::string& session,
+                                  int* busy_id = nullptr, std::string* busy_state = nullptr);
     int enqueue_task(Task&& task);
     void on_wakeup(mg_str* data);
     void flush_job_reply(int id);
@@ -690,6 +737,8 @@ struct WebConsole::Impl {
     bool hold_job(mg_connection* c, const std::shared_ptr<Job>& job, std::string* done_body);
     bool allow_channel_write(mg_connection* c, const std::string& channel,
                              const std::string& session, const std::string& rid);
+    void reply_channel_busy(mg_connection* c, const std::string& channel, int busy_id,
+                            const std::string& busy_state, const std::string& rid);
     std::string job_reply_json(const Job& j) const;
     int spawn_action(const std::string& channel, const std::string& id,
                      const std::string& request_id, const std::string& session);
@@ -832,8 +881,46 @@ std::string WebConsole::Impl::job_reply_json(const Job& j) const {
     return json_text(root);
 }
 
+std::string WebConsole::Impl::jobs_list_json(const std::string& state, const std::string& channel,
+                                             int before_id, int limit) const {
+    std::lock_guard<std::mutex> g(mu);
+    cJSON* root = cJSON_CreateObject();
+    cJSON* arr = cJSON_AddArrayToObject(root, "jobs");
+    int count = 0;
+    for (auto it = jobs.rbegin(); it != jobs.rend(); ++it) {
+        const Job& j = *it->second;
+        if (before_id > 0 && j.id >= before_id) continue;
+        if (!state.empty() && j.state != state) continue;
+        if (!channel.empty() && j.channel != channel) continue;
+        if (count >= limit) break;
+        cJSON_AddItemToArray(arr, job_summary_object(j));
+        ++count;
+    }
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddNumberToObject(root, "count", count);
+    cJSON_AddNumberToObject(root, "limit", limit);
+    cJSON_AddStringToObject(root, "state", state.c_str());
+    cJSON_AddStringToObject(root, "channel", channel.c_str());
+    cJSON_AddNumberToObject(root, "total", static_cast<double>(jobs.size()));
+    return json_text(root);
+}
+
+bool WebConsole::Impl::channel_busy(const std::string& channel, int* job_id, std::string* state) const {
+    std::lock_guard<std::mutex> g(mu);
+    for (const auto& kv : jobs) {
+        const Job& j = *kv.second;
+        if (j.channel != channel) continue;
+        if (j.state != "queued" && j.state != "running") continue;
+        if (job_id) *job_id = j.id;
+        if (state) *state = j.state;
+        return true;
+    }
+    return false;
+}
+
 std::shared_ptr<Job> WebConsole::Impl::make_job(const std::string& kind, const std::string& channel,
-                                                const std::string& request_id, const std::string& session) {
+                                                const std::string& request_id, const std::string& session,
+                                                int* busy_id, std::string* busy_state) {
     auto job = std::make_shared<Job>();
     job->kind = kind;
     job->channel = channel;
@@ -842,6 +929,14 @@ std::shared_ptr<Job> WebConsole::Impl::make_job(const std::string& kind, const s
     job->action_id = kind;
     job->created_ms = now_ms();
     std::lock_guard<std::mutex> g(mu);
+    for (const auto& kv : jobs) {
+        const Job& j = *kv.second;
+        if (j.channel != channel) continue;
+        if (j.state != "queued" && j.state != "running") continue;
+        if (busy_id) *busy_id = j.id;
+        if (busy_state) *busy_state = j.state;
+        return nullptr;
+    }
     job->id = next_job++;
     jobs[job->id] = job;
     return job;
@@ -920,6 +1015,20 @@ bool WebConsole::Impl::allow_channel_write(mg_connection* c, const std::string& 
     return false;
 }
 
+void WebConsole::Impl::reply_channel_busy(mg_connection* c, const std::string& channel, int busy_id,
+                                         const std::string& busy_state, const std::string& rid) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", false);
+    cJSON* err = cJSON_AddObjectToObject(root, "error");
+    cJSON_AddStringToObject(err, "code", "channel_busy");
+    cJSON_AddStringToObject(err, "message", "channel already has an active job");
+    cJSON_AddStringToObject(err, "channel", channel.c_str());
+    cJSON_AddNumberToObject(err, "job_id", busy_id);
+    cJSON_AddStringToObject(err, "state", busy_state.c_str());
+    cJSON_AddStringToObject(root, "request_id", rid.c_str());
+    reply_json(c, 429, root);
+}
+
 std::string WebConsole::Impl::page(const std::string& name) const {
     return page_shell(name, web_pages::page_body(name), web_pages::page_script(name));
 }
@@ -953,6 +1062,7 @@ int WebConsole::Impl::spawn_action(const std::string& channel, const std::string
 
     Task task;
     task.job = make_job("action", channel, request_id, session);
+    if (!task.job) return -2;
     task.job->action_id = id;
     task.kind = TaskKind::Action;
     task.cfg = core->config();
@@ -974,6 +1084,24 @@ void WebConsole::Impl::worker_loop() {
             queue.pop_front();
         }
         auto job = task.job;
+        if (job->done || job->cancel_requested.load()) {
+            {
+                std::lock_guard<std::mutex> g(mu);
+                if (!job->done) {
+                    job->done = true;
+                    job->ok = false;
+                    job->state = "cancelled";
+                    job->message = "cancelled";
+                    job->error = "cancelled";
+                    job->ended_ms = now_ms();
+                }
+            }
+            if (mgr && wake_id) {
+                int id = job->id;
+                mg_wakeup(mgr, wake_id, &id, sizeof(id));
+            }
+            continue;
+        }
         {
             std::lock_guard<std::mutex> g(mu);
             job->state = "running";
@@ -984,6 +1112,7 @@ void WebConsole::Impl::worker_loop() {
         std::string output;
         bool timed_out = false;
         bool marker = false;
+        bool cancelled = false;
         std::uint64_t bytes = 0;
 
         if (task.kind == TaskKind::Action) {
@@ -1006,6 +1135,8 @@ void WebConsole::Impl::worker_loop() {
                 ok = r.ok;
                 message = r.message;
                 output = r.output;
+                job->progress_total.store(1);
+                job->progress_sent.store(1);
             }
         } else if (task.kind == TaskKind::Command) {
             if (!task.bridge) {
@@ -1019,9 +1150,9 @@ void WebConsole::Impl::worker_loop() {
             if (!task.bridge) {
                 message = "channel_down";
             } else {
-                bytes = send_key_tokens(task.bridge.get(), task.keys, task.interval_ms);
-                ok = true;
-                message = "sent";
+                bytes = send_key_tokens(task.bridge.get(), task.keys, task.interval_ms, job.get(), &cancelled);
+                ok = !cancelled;
+                message = cancelled ? "cancelled" : "sent";
             }
         } else if (task.kind == TaskKind::CommandBlock || task.kind == TaskKind::Exec) {
             if (!task.bridge) {
@@ -1031,10 +1162,12 @@ void WebConsole::Impl::worker_loop() {
                 payload += task.line_ending;
                 if (task.kind == TaskKind::Exec) payload += "echo " + task.marker + task.line_ending;
                 CaptureResult cr = capture_after_write(task.bridge.get(), payload, task.marker,
-                                                       task.timeout_ms, task.kind == TaskKind::Exec);
+                                                       task.timeout_ms, task.kind == TaskKind::Exec,
+                                                       &job->cancel_requested);
                 output = std::move(cr.output);
                 timed_out = cr.timed_out;
                 marker = cr.marker;
+                cancelled = cr.cancelled;
                 bytes = cr.bytes;
                 if (task.kind == TaskKind::Exec && !task.marker.empty()) {
                     std::size_t p = output.rfind(task.marker);
@@ -1057,9 +1190,14 @@ void WebConsole::Impl::worker_loop() {
             job->message = message;
             job->output = output;
             job->bytes = bytes;
-            job->state = timed_out ? "timeout" : (ok ? "done" : "failed");
+            job->state = cancelled ? "cancelled"
+                                   : (timed_out ? "timeout" : (ok ? "done" : "failed"));
+            if (cancelled) {
+                job->message = "cancelled";
+                job->error = "cancelled";
+            }
             job->ended_ms = now_ms();
-            if (!ok && job->error.empty() && !timed_out) job->error = message;
+            if (!ok && job->error.empty() && timed_out) job->error = job->message;
         }
         // 结果写完后叫醒 poll 线程：由它回写挂起 HTTP，并清理旧 job。
         if (mgr && wake_id) {
@@ -1071,9 +1209,29 @@ void WebConsole::Impl::worker_loop() {
 
 void WebConsole::Impl::cleanup_job() {
     std::lock_guard<std::mutex> g(mu);
+    constexpr std::size_t kKeep = 100;
+    constexpr std::int64_t kMaxAgeMs = 10ll * 60 * 1000;
+    std::int64_t now = now_ms();
+    // 先删超过 10 分钟的终态 job；保留 last_action 由 C9 状态面单独维护。
     for (auto it = jobs.begin(); it != jobs.end();) {
-        if (it->second->done && it->first + 50 < next_job) it = jobs.erase(it);
+        const Job& j = *it->second;
+        const bool terminal = j.state == "done" || j.state == "failed" ||
+                              j.state == "timeout" || j.state == "cancelled";
+        if (terminal && now - (j.ended_ms ? j.ended_ms : j.created_ms) > kMaxAgeMs) it = jobs.erase(it);
         else ++it;
+    }
+    // 再按 id 从旧到新裁到 100 条，只裁终态，运行中的 job 不丢。
+    while (jobs.size() > kKeep) {
+        bool erased = false;
+        for (auto it = jobs.begin(); it != jobs.end(); ++it) {
+            const Job& j = *it->second;
+            if (j.state == "done" || j.state == "failed" || j.state == "timeout" || j.state == "cancelled") {
+                jobs.erase(it);
+                erased = true;
+                break;
+            }
+        }
+        if (!erased) break;
     }
 }
 
@@ -1629,7 +1787,13 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         Task task;
-        task.job = make_job(block ? "command_block" : "command", ch, rid, session);
+        int busy_id = 0;
+        std::string busy_state;
+        task.job = make_job(block ? "command_block" : "command", ch, rid, session, &busy_id, &busy_state);
+        if (!task.job) {
+            reply_channel_busy(c, ch, busy_id, busy_state, rid);
+            return;
+        }
         auto job = task.job;
         task.kind = block ? TaskKind::CommandBlock : TaskKind::Command;
         task.cfg = core ? core->config() : AppConfig{};
@@ -1700,6 +1864,12 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             reply_json_text(c, 409, agent::error_json("channel_down", "channel is not running", rid));
             return;
         }
+        int busy_id = 0;
+        std::string busy_state;
+        if (channel_busy(ch, &busy_id, &busy_state)) {
+            reply_channel_busy(c, ch, busy_id, busy_state, rid);
+            return;
+        }
         std::string probe = agent::probe_json(core, ch, 4096);
         std::string term;
         cJSON* pj = cJSON_Parse(probe.c_str());
@@ -1719,7 +1889,11 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         Task task;
-        task.job = make_job("exec", ch, rid, session);
+        task.job = make_job("exec", ch, rid, session, &busy_id, &busy_state);
+        if (!task.job) {
+            reply_channel_busy(c, ch, busy_id, busy_state, rid);
+            return;
+        }
         auto job = task.job;
         task.kind = TaskKind::Exec;
         task.cfg = core ? core->config() : AppConfig{};
@@ -1803,7 +1977,13 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         Task task;
-        task.job = make_job("send_keys", ch, rid, session);
+        int busy_id = 0;
+        std::string busy_state;
+        task.job = make_job("send_keys", ch, rid, session, &busy_id, &busy_state);
+        if (!task.job) {
+            reply_channel_busy(c, ch, busy_id, busy_state, rid);
+            return;
+        }
         auto job = task.job;
         task.kind = TaskKind::SendKeys;
         task.cfg = core ? core->config() : AppConfig{};
@@ -2369,7 +2549,17 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
             return;
         }
         if (session.empty()) session = header_text(hm, "X-Agent-Session");
+        int busy_id = 0;
+        std::string busy_state;
+        if (channel_busy(ch, &busy_id, &busy_state)) {
+            reply_channel_busy(c, ch, busy_id, busy_state, rid);
+            return;
+        }
         int job = spawn_action(ch, id, rid, session);
+        if (job == -2) {
+            reply_channel_busy(c, ch, 0, "queued", rid);
+            return;
+        }
         if (job < 0) {
             reply_json_text(c, 429, agent::error_json("queue_full", "action queue full", rid));
             return;
@@ -2390,6 +2580,85 @@ void WebConsole::Impl::handle_http(mg_connection* c, mg_http_message* hm) {
     if (path == "/job") {
         int id = std::atoi(query_var(hm, "id", "0").c_str());
         reply_json_text(c, 200, jobs_json(id));
+        return;
+    }
+    if (path == "/jobs" || (path.size() >= 7 && path.compare(0, 6, "/jobs/") == 0)) {
+        cleanup_job();
+        if (path == "/jobs") {
+            if (!method_is(hm, "GET")) {
+                reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", request_id_of(hm)));
+                return;
+            }
+            std::string state = query_var(hm, "state");
+            if (!state.empty() && state != "queued" && state != "running" && state != "done" &&
+                state != "failed" && state != "timeout" && state != "cancelled") {
+                reply_json_text(c, 400, agent::error_json("invalid_argument", "unknown state filter", request_id_of(hm)));
+                return;
+            }
+            int limit = std::atoi(query_var(hm, "limit", "20").c_str());
+            if (limit <= 0) limit = 20;
+            if (limit > 100) limit = 100;
+            int before_id = std::atoi(query_var(hm, "before_id", "0").c_str());
+            reply_json_text(c, 200, jobs_list_json(state, query_var(hm, "channel"), before_id, limit));
+            return;
+        }
+        std::string tail = path.substr(6);
+        bool cancel = false;
+        if (tail.size() > 7 && tail.compare(tail.size() - 7, 7, "/cancel") == 0) {
+            tail.resize(tail.size() - 7);
+            cancel = true;
+        }
+        while (!tail.empty() && tail.back() == '/') tail.pop_back();
+        int id = std::atoi(tail.c_str());
+        if (id <= 0 || std::to_string(id) != tail) {
+            reply_json_text(c, 404, agent::error_json("job_not_found", "invalid job id", request_id_of(hm)));
+            return;
+        }
+        if (!cancel) {
+            if (!method_is(hm, "GET")) {
+                reply_json_text(c, 405, agent::error_json("method_not_allowed", "GET required", request_id_of(hm)));
+                return;
+            }
+            reply_json_text(c, 200, jobs_json(id));
+            return;
+        }
+        if (!method_is(hm, "POST")) {
+            reply_json_text(c, 405, agent::error_json("method_not_allowed", "POST required", request_id_of(hm)));
+            return;
+        }
+        if (!write_ok(hm)) {
+            reply_json_text(c, 401, agent::error_json("unauthorized", "write requires Bearer token", request_id_of(hm)));
+            return;
+        }
+        std::string rid = request_id_of(hm);
+        std::lock_guard<std::mutex> g(mu);
+        auto it = jobs.find(id);
+        if (it == jobs.end()) {
+            reply_json_text(c, 404, agent::error_json("job_not_found", "job not found", rid));
+            return;
+        }
+        Job& j = *it->second;
+        if (j.state == "done" || j.state == "failed" || j.state == "timeout" || j.state == "cancelled") {
+            reply_json_text(c, 409, agent::error_json("job_finished", "job already finished", rid));
+            return;
+        }
+        j.cancel_requested.store(true);
+        if (j.state == "queued") {
+            j.done = true;
+            j.ok = false;
+            j.state = "cancelled";
+            j.message = "cancelled";
+            j.error = "cancelled";
+            j.ended_ms = now_ms();
+        }
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddNumberToObject(root, "id", id);
+        cJSON_AddNumberToObject(root, "job_id", id);
+        cJSON_AddStringToObject(root, "state", j.state.c_str());
+        cJSON_AddBoolToObject(root, "cancel_requested", true);
+        cJSON_AddStringToObject(root, "request_id", rid.c_str());
+        reply_json(c, 202, root);
         return;
     }
     if (path == "/api/relay") {

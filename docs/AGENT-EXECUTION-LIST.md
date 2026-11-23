@@ -94,11 +94,23 @@
 
 | ID | 事项 | 实现要点 | 文件 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| A6-1 | Job 注册表 | id/kind/channel/state/created/started/ended/timeout/result/error | `agent_jobs.cpp` | 5 种状态可查 | 计划 |
-| A6-2 | `/jobs` `/jobs/{id}` | 过滤/分页/摘要；`/job?id=` 兼容 | `agent_jobs.cpp` | 列表与详情一致 | 计划 |
-| A6-3 | 取消与超时 | cancel 请求、协作取消点、timeout 状态 | `agent_jobs.cpp` | 长任务可取消；超时可读 | 计划 |
-| A6-4 | 并发与保留 | 每通道 1 running，超限 429；保留 100 条/10 分钟 | `agent_jobs.cpp` | 双任务 429；旧 job 清理 | 计划 |
-| A6-5 | 进度 | 文件/长任务 `progress` 字段 | `agent_jobs.cpp`、artifacts | `sent/total/state` 正确 | 计划 |
+| A6-1 | Job 注册表 | id/kind/channel/state/created/started/ended/timeout/result/error | `web_console.cpp` | 5 种状态可查 | 已完成 |
+| A6-2 | `/jobs` `/jobs/{id}` | 过滤/分页/摘要；`/job?id=` 兼容 | `web_console.cpp` | 列表与详情一致 | 已完成 |
+| A6-3 | 取消与超时 | cancel 请求、协作取消点、timeout 状态 | `web_console.cpp` | 长任务可取消；超时可读 | 已完成 |
+| A6-4 | 并发与保留 | 每通道 1 running，超限 429；保留 100 条/10 分钟 | `web_console.cpp` | 双任务 429；旧 job 清理 | 已完成 |
+| A6-5 | 进度 | 文件/长任务 `progress` 字段 | `web_console.cpp`、artifacts | `sent/total/state` 正确 | 已完成 |
+
+**C6 完成记录（2026-11-23）**
+
+- Job 注册表在 `web_console.cpp` 内集中维护，状态 `queued/running/done/failed/timeout/cancelled`；每 job 增加 `cancel_requested` 与 `progress_sent/progress_total`，取消标志与进度用原子量，HTTP/列表/worker 并发读取安全。
+- `GET /jobs`：`state/channel/limit/before_id` 过滤分页，默认 20、上限 100，摘要不含 `output/error` 全文；`GET /jobs/{id}` 详情含进度与 audit；`/job?id=` 保持兼容。列表前先做保留清理。
+- `POST /jobs/{id}/cancel`：token；queued 立即置 cancelled，running 置协作取消标志；`/command_block`、`/agent/exec` 的增量读取与 `/send_keys` 按键循环均检查取消点；终态 409 `job_finished`，不存在 404 `job_not_found`。
+- 并发：所有 Agent job（`/command`、`/command_block`、`/agent/exec`、`/send_keys`、`/action`）建 job 时检查同通道是否已有 `queued/running`；有则 429 `channel_busy`，带占用 `job_id/state`。不同通道互不影响。
+- 保留：终态 job 超过 10 分钟清理，并裁剪到最近 100 条；运行中的 job 不丢。`features.jobs` 完整/全局均为 true；operations 57→60，新增 `jobs.list.get`、`jobs.get`、`jobs.cancel.post`。
+- 超时沿用 C4：`/command_block`、`/agent/exec` 到 `timeout_ms` 置 `state=timeout`、`timed_out=true`，`/jobs` 可按 `state=timeout` 过滤。
+- 测试：`output/webtest/agent-jobs-smoke.js` 39/39，结果 `output/ux-audit/agent-jobs-result.json`；覆盖列表/详情/兼容、并发 429、跨通道、运行中取消、进度、终态取消 409、保留 100 条。
+- 回归：C5 51/51、C4 84/84、C2 73/73、C1 82/82、C3 59/59。
+- 提交：`feat(agent): add job registry list cancel and retention`。
 
 ## 7. P1-G：通道生命周期
 
