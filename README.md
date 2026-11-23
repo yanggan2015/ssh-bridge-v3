@@ -37,10 +37,14 @@ https://raw.githubusercontent.com/yanggan2015/ssh-bridge-v3-releases/windows_x86
 
 | 文档 | 看什么 |
 |---|---|
+| `docs/README.md` | 文档总索引：当前有效 / 专项设计 / 验收标准 / 历史验收 |
 | `docs/架构总览.md` | 三层结构、RX 单写多读数据面、进程边界、端口、文档地图 |
 | `docs/详细设计.md` | 每一步的模块、接口签名、行为细则、验收编号 |
 | `docs/阶梯架构图.md` | 14 张阶梯图，相邻两张只差颜色（橙=本步新增） |
 | `docs/功能清单.md` | 141 条功能（本体 68 / 扩展 73），标注来源、所属步骤与已知缺口 |
+| `docs/全功能清单与完整测试报告-20261124.md` | 桌面 69 控件、Web 12 页、Agent 74 项操作的逐项盘点与测试证据 |
+| `docs/代码审计与整理报告-20261124.md` | 全量代码审计、输入校验加固、告警归零、工程整理与回归结论 |
+| `docs/工程目录与产物说明.md` | 源码分层、tests/scripts/share/work 职责、output 保留与重建规则 |
 | `docs/设计初衷与实现对照.md` | 每个功能组的初衷、源码落点、已修问题与未实现项（2026-11-23 审计基线） |
 | `docs/每步测试闸门.md` | 每步的出口条件（清单全 PASS + 代码整理） |
 | `tests/CHECKLIST_eadk_board_cli.md` | EADK 板卡 CLI 全命令测试清单（90 项契约 + 32 项真实桥） |
@@ -122,7 +126,9 @@ foreach ($n in '架构总览','详细设计','阶梯架构图','功能清单','�
 
 ## 当前状态
 
-- **当前基线（2026-11-23）**：分支 `feature/web-console-complete-20261123`；P6 分屏 Web 化已提交（`b467a8e` + 文档 `415a77e`），完整回归 **19/19 套件、1092/1092 断言、bad=0**（含 EADK 90 项契约与 32 项真实桥），并修复 `/help/<channel>` 读取临时快照悬空指针导致的 `c0000005` 崩溃；构建 0 warning / 0 error。
+- **当前基线（2026-11-24）**：分支 `feature/powershell-telnet-20261124`；本轮完成全量代码审计与输入加固，业务代码加严告警 **70 → 0**，`make clean` 后干净重建 **0 warning / 0 error**，质量闸门 **145 文件 ALL PASS**；19 套件 **19/19、1093/1093、bad=0**，Web 12 页逐页功能 **162/162**，新增 HTTP 输入加固 **8/8**。当前二进制 `13,549,928 B`，SHA-256 `5D95119BA1BF28AE839ADAF56DDC48B7C932FBEC32606F1A75CB24E027628D8A`。详见 `docs/代码审计与整理报告-20261124.md`。
+- **审计修复**：`POST /service` 对非法 JSON、缺失/非布尔 `on`、空 `name` 返回 400，不再静默停服务；NFS 别名增加绝对路径与字符白名单，Linux `mount --bind`/`umount` 改用安全单引号转义；Web NFS 配置保存阶段拒绝非法别名；修复 16 处 shadow 与 1 处 cast-qual 告警。
+- **完整盘点（2026-11-24）**：桌面 69 个可见控件、Web 12 页、Agent `/api/help` 74 项操作均已逐项盘点，141 条功能台账为“完整 126 / 部分 3 / 未实现 12”；证据与明细见 `docs/全功能清单与完整测试报告-20261124.md`。
 - **本体**：原生 Win32 单进程终端工作台，串口/SSH 出站、共享 ring、ANSI 终端、1/2/4 分屏、SFTP、板控按钮、Lua/DSL、快捷指令、托盘与单实例均已落地。
 - **网页端**：单端口 18081，HTTP + `/ws/log` BINARY；当前 12 页（仪表盘、通道、动作、按钮脚本、继电器、TFTP/NFS/共享、TCP 转发、隧道、Agent、配置）。仪表盘与桌面 `TerminalView` 采用完全一致的输入方式：**没有独立输入框**，键入直接落在 xterm 输出区当前光标处，字符按键 8ms 有序合批后立即 `/write` 并同区回显；方向键/Tab/退格/Home/End/Ctrl 键按桌面 `input.cpp` 的字节原样下发，Enter 按通道 `kind` + `line_ending` 发送（SSH 默认单 CR，串口按 cr/lf/crlf/none，loop-chars 为 CRLF）。桌面端不显示键条，移动端 390×844 才出现底部 16 键辅助条，它不是输入框。页面加载 120ms 自动聚焦 xterm，切通道 80ms 再聚焦；桌面 1440×960 实测 xterm 底边距会话框底边 **1px**，终端占视口 **66.3%**；移动端终端占 **69.6%**、xterm **41×38**；全站最小字号 **13px**，通道下拉旁常驻 **RX** 计数；CDN 不可用时回退到 ANSI/CR/退格净化后的 `<pre>`。
 - **Agent**：18081 是唯一设备控制面；`/api/help` 当前公布 **74** 项设备操作，Tunnel、`/service` 与完整配置读写已移出 Agent 发现面（M7/Q18 边界）；配置页仍由 token 管理面直接访问；18096 仅本机 UI 调试，不参与板控。
@@ -164,6 +170,12 @@ python tests\eadk_board_full_check.py
 pwsh -NoProfile -File tests\eadk_cli_check.ps1
 # 全量一键回归（19 个套件：17 个 Node + EADK 契约 + EADK 真实桥）
 pwsh -NoProfile -File output\webtest\run-full-suite.ps1
+# Web 输入加固（独立端口，8 项：非法 JSON / 缺 on / 非布尔 on / NFS 别名）
+pwsh -NoProfile -File tests\http_hardening_check.ps1
+# Web 12 页逐页功能（162 项；需 5 通道夹具 + token web-audit-2026）
+node output\webtest\web_functional_step15.js
+# 质量闸门（145 个源文件）
+pwsh -NoProfile -File scripts\quality_gate.ps1
 # 只看数据面
 .\output\build\ssh_bridge3.exe --selftest all loop:selftest
 .\output\build\ssh_bridge3.exe --selftest ssh 127.0.0.1 22 root <密码>
