@@ -121,6 +121,9 @@ public:
     bool update_config(const std::function<bool(AppConfig&, std::string*)>& apply, std::string* err);
     // UI 分屏布局（窗格数/各画框通道/激活画框）落盘，不改服务配置、不重建通道
     bool save_ui_layout(int split, const std::vector<std::string>& pane_channels, int active_pane);
+    // 窗口矩形 / 状态栏显示只写 ssh_bridge_ui.json，不触碰功能配置
+    bool save_window_rect(const std::string& rect);
+    bool save_statusbar_visible(bool visible);
     // Web 分屏只读快照（锁内复制，避免与 UI 自动保存竞态）
     struct PaneSnapshot {
         int split = 1;

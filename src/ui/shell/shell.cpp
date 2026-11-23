@@ -112,6 +112,7 @@ constexpr int kIdmRelayConfig   = 40050;
 constexpr int kIdmFileService   = 40051;
 constexpr int kIdmBoardButtons  = 40052;
 constexpr int kIdmDisconnect    = 40047;
+constexpr int kIdmStatusBar     = 40053;
 
 // 关于窗口（S5）：改成非模态。模态 MessageBox 会让 UI 线程阻塞，
 // 桥接 /action 在 8s 后 504，等于 AI 永远点不动这个控件。
@@ -163,17 +164,17 @@ std::wstring widen(const std::string& s) {
 
 }  // namespace
 
-void save_window_rect(HWND hwnd) {
+void save_window_rect(HWND hwnd, AppCore* core) {
     RECT rc{};
     if (!GetWindowRect(hwnd, &rc)) return;
     if (IsIconic(hwnd) || IsZoomed(hwnd)) return;
-    util::ensure_dir("output");
+    if (!core) return;
     char value[64];
     std::snprintf(value, sizeof(value), "%ld,%ld,%ld,%ld", rc.left, rc.top, rc.right, rc.bottom);
-    WritePrivateProfileStringW(L"window", L"rect", widen(value).c_str(), kPrefs);
+    core->save_window_rect(value);
 }
 
-RECT load_window_rect() {
+RECT legacy_window_rect() {
     wchar_t buf[64] = L"";
     GetPrivateProfileStringW(L"window", L"rect", L"", buf, 64, kPrefs);
     RECT rc{};
@@ -186,6 +187,17 @@ RECT load_window_rect() {
     rc.right = rc.left + 1100;
     rc.bottom = rc.top + 720;
     return rc;
+}
+
+RECT load_window_rect(const UiConfig& ui) {
+    RECT rc{};
+    if (std::sscanf(ui.window_rect.c_str(), "%ld,%ld,%ld,%ld",
+                    &rc.left, &rc.top, &rc.right, &rc.bottom) == 4 &&
+        rc.right - rc.left > 400 && rc.bottom - rc.top > 300) {
+        return rc;
+    }
+    // 兼容旧 ui_prefs.ini；新数据只写 ssh_bridge_ui.json。
+    return legacy_window_rect();
 }
 
 Shell::~Shell() {
@@ -251,7 +263,7 @@ bool Shell::create(HINSTANCE inst, int nShow, AppCore* core) {
         if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
     }
 
-    RECT rc = load_window_rect();
+    RECT rc = load_window_rect(core_->config().ui);
     RECT wa{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     int avail_w = wa.right - wa.left;
@@ -391,6 +403,9 @@ void Shell::build_menu() {
     AppendMenuW(view, MF_STRING, kIdmRefresh, L"刷新状态(&R)\tF5");
     AppendMenuW(view, MF_STRING, kIdmReconnect, L"重连当前通道(&C)");
     AppendMenuW(view, MF_STRING, kIdmDisconnect, L"断开当前通道(&D)");
+    AppendMenuW(view, MF_STRING, kIdmStatusBar, L"显示状态栏(&S)");
+    if (core_ && core_->config().ui.show_statusbar)
+        CheckMenuItem(view, kIdmStatusBar, MF_BYCOMMAND | MF_CHECKED);
     AppendMenuW(view, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(view, MF_STRING, kIdmSplit1, L"单窗格(&1)");
     AppendMenuW(view, MF_STRING, kIdmSplit2, L"左右两窗格(&2)");
@@ -425,6 +440,7 @@ void Shell::build_children() {
     dpi_ = GetDeviceCaps(dc, LOGPIXELSY);
     ReleaseDC(hwnd_, dc);
     if (dpi_ <= 0) dpi_ = 96;
+    statusbar_visible_ = core_->config().ui.show_statusbar;
     font_ = CreateFontW(-MulDiv(9, dpi_, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                         DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                         DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
@@ -805,12 +821,18 @@ void Shell::layout() {
     }
     if (buttons_[5]) SetWindowTextW(buttons_[5], left_collapsed_ ? L"展开" : L"收起");
 
-    SendMessageW(status_, WM_SIZE, 0, 0);
-    RECT sr{};
-    GetWindowRect(status_, &sr);
-    int sb_h = sr.bottom - sr.top;
-    if (sb_h <= 0) sb_h = MulDiv(22, dpi_, 96);
-    MoveWindow(status_, 0, rc.bottom - sb_h, rc.right, sb_h, TRUE);
+    int sb_h = 0;
+    if (statusbar_visible_) {
+        ShowWindow(status_, SW_SHOWNA);
+        SendMessageW(status_, WM_SIZE, 0, 0);
+        RECT sr{};
+        GetWindowRect(status_, &sr);
+        sb_h = sr.bottom - sr.top;
+        if (sb_h <= 0) sb_h = MulDiv(22, dpi_, 96);
+        MoveWindow(status_, 0, rc.bottom - sb_h, rc.right, sb_h, TRUE);
+    } else {
+        ShowWindow(status_, SW_HIDE);
+    }
     int top = btn_h + gap * 2;
     int body_h = rc.bottom - sb_h - top;
     if (body_h < MulDiv(120, dpi_, 96)) body_h = MulDiv(120, dpi_, 96);
@@ -1738,6 +1760,19 @@ void Shell::on_command(int id) {
         }
         break;
     }
+    case kIdmStatusBar: {
+        statusbar_visible_ = !statusbar_visible_;
+        core_->save_statusbar_visible(statusbar_visible_);
+        HMENU menu = GetMenu(hwnd_);
+        if (menu) {
+            HMENU view = GetSubMenu(menu, 1);
+            if (view) CheckMenuItem(view, kIdmStatusBar, MF_BYCOMMAND |
+                                    (statusbar_visible_ ? MF_CHECKED : MF_UNCHECKED));
+        }
+        layout();
+        note_status(statusbar_visible_ ? L"已显示状态栏" : L"已隐藏状态栏");
+        break;
+    }
     case kIdcBtnClear:
     case kIdmClearView:
         view_.clear_active();
@@ -2167,7 +2202,7 @@ LRESULT Shell::handle(UINT msg, WPARAM wp, LPARAM lp) {
         if (relay_panel_) relay_panel_->close();
         if (file_panel_) file_panel_->close();
         aibridge::stop();
-        save_window_rect(hwnd_);
+        save_window_rect(hwnd_, core_);
         tray_.destroy();
         if (core_) core_->stop_all();
         util::ensure_dir("output");

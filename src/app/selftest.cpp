@@ -395,6 +395,8 @@ bool run_config_split() {
     ui_cfg.ui.split = 4;
     ui_cfg.ui.pane_channels = {"b1", "", "", ""};
     ui_cfg.ui.active_pane = 3;
+    ui_cfg.ui.window_rect = "120,80,1300,820";
+    ui_cfg.ui.show_statusbar = false;
     bool ui_save = config_save_ui(ui_cfg);
     std::string func_after_ui = read_all(path);
     std::string ui_after = read_all(ui_path);
@@ -402,7 +404,9 @@ bool run_config_split() {
 
     AppConfig reload_ui;
     bool reload_ok = config_load(reload_ui, path) && reload_ui.ui.split == 4 &&
-                     reload_ui.ui.active_pane == 3;
+                     reload_ui.ui.active_pane == 3 &&
+                     reload_ui.ui.window_rect == "120,80,1300,820" &&
+                     !reload_ui.ui.show_statusbar;
 
     std::string ui_before_func = ui_after;
     AppConfig func_cfg = reload_ui;

@@ -336,23 +336,27 @@ void load_ssh(const cJSON* o, SSHLinkConfig* s) {
 
 void load_ui_root(const cJSON* root, UiConfig* ui) {
     const cJSON* u = cJSON_GetObjectItemCaseSensitive(root, "ui");
-    if (!cJSON_IsObject(u)) return;
-    ui->close_to_tray = jbool(u, "close_to_tray", true);
-    ui->start_minimized = jbool(u, "start_minimized", false);
-    ui->scrollback_lines = jint(u, "scrollback_lines", 5000);
-    ui->font_size = jint(u, "font_size", 0);
-    ui->split = jint(u, "split", 1);
-    ui->active_pane = jint(u, "active_pane", 0);
-    ui->pane_channels.clear();
-    const cJSON* panes = cJSON_GetObjectItemCaseSensitive(u, "pane_channels");
-    if (cJSON_IsArray(panes)) {
-        for (const cJSON* it = panes->child; it; it = it->next) {
-            if (cJSON_IsString(it) && it->valuestring)
-                ui->pane_channels.emplace_back(it->valuestring);
-            else
-                ui->pane_channels.emplace_back();
+    if (cJSON_IsObject(u)) {
+        ui->close_to_tray = jbool(u, "close_to_tray", true);
+        ui->start_minimized = jbool(u, "start_minimized", false);
+        ui->scrollback_lines = jint(u, "scrollback_lines", 5000);
+        ui->font_size = jint(u, "font_size", 0);
+        ui->split = jint(u, "split", 1);
+        ui->active_pane = jint(u, "active_pane", 0);
+        ui->show_statusbar = jbool(u, "show_statusbar", true);
+        ui->pane_channels.clear();
+        const cJSON* panes = cJSON_GetObjectItemCaseSensitive(u, "pane_channels");
+        if (cJSON_IsArray(panes)) {
+            for (const cJSON* it = panes->child; it; it = it->next) {
+                if (cJSON_IsString(it) && it->valuestring)
+                    ui->pane_channels.emplace_back(it->valuestring);
+                else
+                    ui->pane_channels.emplace_back();
+            }
         }
     }
+    const cJSON* w = cJSON_GetObjectItemCaseSensitive(root, "window");
+    if (cJSON_IsObject(w)) ui->window_rect = jstr(w, "rect", "");
 }
 
 void load_root(const cJSON* root, AppConfig* out) {
@@ -564,9 +568,13 @@ void save_ui_root(cJSON* root, const AppConfig& cfg) {
     cJSON_AddNumberToObject(ui, "font_size", cfg.ui.font_size);
     cJSON_AddNumberToObject(ui, "split", cfg.ui.split);
     cJSON_AddNumberToObject(ui, "active_pane", cfg.ui.active_pane);
+    cJSON_AddBoolToObject(ui, "show_statusbar", cfg.ui.show_statusbar);
     cJSON* panes = cJSON_AddArrayToObject(ui, "pane_channels");
     for (const std::string& name : cfg.ui.pane_channels)
         cJSON_AddItemToArray(panes, cJSON_CreateString(name.c_str()));
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "window");
+    cJSON* window = cJSON_AddObjectToObject(root, "window");
+    if (window) cJSON_AddStringToObject(window, "rect", cfg.ui.window_rect.c_str());
 }
 
 // 把已知字段写进 root（保留 root 里的其它未知键）
@@ -776,7 +784,31 @@ bool config_save_ui(const AppConfig& cfg) {
     cJSON_Delete(root);
     if (data.empty()) return false;
     data.push_back('\n');
-    return write_text(path, data, nullptr);
+    if (!write_text(path, data, nullptr)) return false;
+
+    // 旧统一配置的首次 UI 保存：顺手把 ui/window 从功能文件剥离，完成一次性迁移。
+    // 已经是拆分状态时不再触碰功能文件，避免每次切分屏都重写通道/服务配置。
+    std::string ftext;
+    if (read_text(cfg.abs_path, &ftext) && !ftext.empty()) {
+        cJSON* froot = cJSON_Parse(ftext.c_str());
+        if (cJSON_IsObject(froot)) {
+            bool changed = cJSON_GetObjectItemCaseSensitive(froot, "ui") != nullptr ||
+                           cJSON_GetObjectItemCaseSensitive(froot, "window") != nullptr;
+            if (changed) {
+                cJSON_DeleteItemFromObjectCaseSensitive(froot, "ui");
+                cJSON_DeleteItemFromObjectCaseSensitive(froot, "window");
+                char* fdumped = cJSON_Print(froot);
+                std::string fdata = fdumped ? fdumped : "";
+                if (fdumped) cJSON_free(fdumped);
+                if (!fdata.empty()) {
+                    fdata.push_back('\n');
+                    write_text(cfg.abs_path, fdata, nullptr);
+                }
+            }
+        }
+        cJSON_Delete(froot);
+    }
+    return true;
 }
 
 bool config_save_functional(const AppConfig& cfg) {

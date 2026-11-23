@@ -116,6 +116,7 @@ private:
     bool      sync_tree_binding_ = false;    // 正在把左树选中同步到激活画框，避免回写通道
     bool      layout_ready_ = false;         // 启动恢复完成前不写分屏布局，避免临时状态覆盖配置
     bool      layout_user_input_ = false;    // 只有用户操作过界面才允许持久化布局
+    bool      statusbar_visible_ = true;     // 窗口类配置：状态栏显示/隐藏
     std::wstring last_note_;
     std::wstring update_log_path_;
     std::uint64_t update_deadline_ms_ = 0;

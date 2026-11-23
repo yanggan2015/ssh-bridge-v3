@@ -165,14 +165,16 @@ struct DiscoveryConfig {        // S12：UDP 18071 应答 EADK1
     int         port = 18071;
 };
 
-struct UiConfig {               // S3 / S4 / S12
+struct UiConfig {               // S3 / S4 / S12（只写入 ssh_bridge_ui.json）
     bool close_to_tray   = true;
     bool start_minimized = false;
     int  scrollback_lines = 5000;  // 终端回看行数
-    int  font_size        = 0;     // 0 = 用 ui_prefs.ini 或默认 15px
+    int  font_size        = 0;     // 0 = 默认 15px
     int  split            = 1;     // 1 / 2 / 4
     std::vector<std::string> pane_channels;  // 每个画框绑定的通道；空串=空画框
     int  active_pane      = 0;     // 重启后激活的画框序号（0 起）
+    bool show_statusbar   = true;  // 状态栏显示/隐藏
+    std::string window_rect;       // "left,top,right,bottom"；空 = 默认/旧 ini
 };
 
 struct AppConfig {

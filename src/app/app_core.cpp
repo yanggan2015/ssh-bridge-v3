@@ -532,6 +532,28 @@ bool AppCore::save_ui_layout(int split, const std::vector<std::string>& pane_cha
     return true;
 }
 
+bool AppCore::save_window_rect(const std::string& rect) {
+    std::lock_guard<std::mutex> g(config_mu_);
+    AppConfig next;
+    config_load(next, cfg_.abs_path);
+    if (next.abs_path.empty()) next = cfg_;
+    next.ui.window_rect = rect;
+    if (!config_save_ui(next)) return false;
+    cfg_.ui.window_rect = rect;
+    return true;
+}
+
+bool AppCore::save_statusbar_visible(bool visible) {
+    std::lock_guard<std::mutex> g(config_mu_);
+    AppConfig next;
+    config_load(next, cfg_.abs_path);
+    if (next.abs_path.empty()) next = cfg_;
+    next.ui.show_statusbar = visible;
+    if (!config_save_ui(next)) return false;
+    cfg_.ui.show_statusbar = visible;
+    return true;
+}
+
 AppCore::PaneSnapshot AppCore::pane_snapshot() const {
     std::lock_guard<std::mutex> g(config_mu_);
     PaneSnapshot out;
