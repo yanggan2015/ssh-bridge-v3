@@ -191,16 +191,26 @@ struct AppConfig {
     TunnelConfig               tunnel;
     DiscoveryConfig            discovery;
 
-    std::string abs_path;        // 实际加载到的文件绝对路径
+    std::string abs_path;        // 实际加载到的功能配置文件绝对路径
+    std::string ui_abs_path;     // 同目录的窗口/界面配置文件绝对路径
     std::string project_root;    // 运行目录（work/keys/logs 的父目录）
 };
 
-// 加载：按 cwd → %USERPROFILE%\.ssh-bridge\ → 遗留 config.json 顺序查找。
-// out.abs_path 记录实际命中文件；全都没有时返回 false，但 out 仍是默认值。
+// 加载：按 显式路径 → cwd → exe 同目录 → %USERPROFILE%\.ssh-bridge\ → 遗留 config.json。
+// 功能配置同目录的 ssh_bridge_ui.json 会覆盖旧功能文件里的 ui 段；加载阶段不写盘。
 bool config_load(AppConfig& out, const std::string& explicit_path = std::string());
 
-// 写回 out.abs_path（为空则报错）
+// 返回按上述顺序实际命中的路径；无命中返回空。供诊断与自动化验证使用。
+std::string config_find_path(const std::string& explicit_path = std::string());
+
+// 写回功能配置（abs_path）与窗口配置（ui_abs_path），两份文件互不包含对方字段
 bool config_save(const AppConfig& cfg);
+// 只写功能配置：通道/服务/端口等；不触碰窗口配置
+bool config_save_functional(const AppConfig& cfg);
+// 只写窗口配置：分屏、字体、状态栏、窗口矩形等；不触碰功能配置
+bool config_save_ui(const AppConfig& cfg);
+// 与功能配置同目录的 ssh_bridge_ui.json 路径（用于诊断/Web 展示）
+std::string config_ui_path(const AppConfig& cfg);
 
 // 把当前已知配置导出为 JSON 文本（网页只读预览/备份用；保留已知字段全集）
 std::string config_export_json(const AppConfig& cfg);

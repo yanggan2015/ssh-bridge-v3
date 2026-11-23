@@ -347,6 +347,121 @@ bool run_config_migration() {
 }
 
 // 编辑串口参数时，对话框没暴露的密码/用户名/缓冲/日志/按钮/快捷指令必须保留
+bool run_config_split() {
+    std::string dir = temp_root("config_split");
+    std::string path = util::join_path(dir, "ssh_bridge_config.json");
+    const std::string legacy =
+        "{"
+        "\"boards\":[{\"name\":\"b1\",\"serial_device\":\"loop:split\",\"baudrate\":115200}],"
+        "\"ui\":{\"split\":2,\"pane_channels\":[\"b1\",\"\"],\"active_pane\":1,\"font_size\":15}"
+        "}\n";
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    bool wrote = f && std::fwrite(legacy.data(), 1, legacy.size(), f) == legacy.size();
+    if (f) std::fclose(f);
+    std::remove(util::join_path(dir, "ssh_bridge_ui.json").c_str());
+
+    auto read_all = [](const std::string& p) {
+        std::string out;
+        std::FILE* in = std::fopen(p.c_str(), "rb");
+        if (!in) return out;
+        char buf[4096];
+        std::size_t n = 0;
+        while ((n = std::fread(buf, 1, sizeof(buf), in)) > 0) out.append(buf, n);
+        std::fclose(in);
+        return out;
+    };
+    auto write_all = [](const std::string& p, const std::string& data) {
+        std::FILE* out = std::fopen(p.c_str(), "wb");
+        bool ok = out && std::fwrite(data.data(), 1, data.size(), out) == data.size();
+        if (out) std::fclose(out);
+        return ok;
+    };
+
+    AppConfig cfg;
+    bool load_ok = wrote && config_load(cfg, path) && cfg.ui.split == 2 &&
+                   cfg.ui.active_pane == 1 && cfg.ui.pane_channels.size() == 2;
+    bool save_ok = load_ok && config_save(cfg);
+    std::string functional = read_all(path);
+    std::string ui_path = config_ui_path(cfg);
+    std::string ui_text = read_all(ui_path);
+    bool split_ok = save_ok && functional.find("\"ui\"") == std::string::npos &&
+                    functional.find("\"window\"") == std::string::npos &&
+                    ui_text.find("\"ui\"") != std::string::npos &&
+                    ui_text.find("\"boards\"") == std::string::npos;
+
+    std::string func_before = functional;
+    std::string ui_before = ui_text;
+    AppConfig ui_cfg = cfg;
+    ui_cfg.ui.split = 4;
+    ui_cfg.ui.pane_channels = {"b1", "", "", ""};
+    ui_cfg.ui.active_pane = 3;
+    bool ui_save = config_save_ui(ui_cfg);
+    std::string func_after_ui = read_all(path);
+    std::string ui_after = read_all(ui_path);
+    bool ui_only = ui_save && func_before == func_after_ui && ui_before != ui_after;
+
+    AppConfig reload_ui;
+    bool reload_ok = config_load(reload_ui, path) && reload_ui.ui.split == 4 &&
+                     reload_ui.ui.active_pane == 3;
+
+    std::string ui_before_func = ui_after;
+    AppConfig func_cfg = reload_ui;
+    func_cfg.boards[0].baudrate = 460800;
+    bool func_save = config_save_functional(func_cfg);
+    std::string ui_after_func = read_all(ui_path);
+    std::string func_after_func = read_all(path);
+    bool func_only = func_save && ui_before_func == ui_after_func &&
+                     func_after_func.find("460800") != std::string::npos;
+
+    // 旧统一文件里的 ui 与独立 UI 文件冲突时，独立文件优先。
+    std::string dir2 = temp_root("config_split_priority");
+    std::string path2 = util::join_path(dir2, "ssh_bridge_config.json");
+    std::string ui_path2 = util::join_path(dir2, "ssh_bridge_ui.json");
+    bool wrote2 = write_all(path2,
+        "{\"boards\":[],\"ui\":{\"split\":1,\"pane_channels\":[\"\"],\"active_pane\":0}}\n") &&
+        write_all(ui_path2,
+        "{\"schema\":\"ssh-bridge-ui/1\",\"ui\":{\"split\":2,"
+        "\"pane_channels\":[\"\",\"\"],\"active_pane\":1}}\n");
+    AppConfig priority;
+    bool priority_ok = wrote2 && config_load(priority, path2) && priority.ui.split == 2 &&
+                       priority.ui.active_pane == 1;
+
+    // 查找顺序：cwd 命中优先；cwd 没有时落到 exe 同目录/用户目录兜底。
+    std::string lookup_dir = temp_root("config_lookup");
+    char lookup_full[MAX_PATH] = "";
+    if (GetFullPathNameA(lookup_dir.c_str(), MAX_PATH, lookup_full, nullptr) > 0)
+        lookup_dir = lookup_full;
+    std::string lookup_path = util::join_path(lookup_dir, "ssh_bridge_config.json");
+    bool lookup_file = write_all(lookup_path, "{\"boards\":[]}\n");
+    char old_cwd[MAX_PATH] = "";
+    GetCurrentDirectoryA(MAX_PATH, old_cwd);
+    bool cwd_changed = SetCurrentDirectoryA(lookup_dir.c_str()) != FALSE;
+    std::string found_local = cwd_changed ? config_find_path("") : std::string();
+    bool local_ok = found_local == lookup_path;
+    std::remove(lookup_path.c_str());
+    std::string found_fallback = cwd_changed ? config_find_path("") : std::string();
+    bool fallback_ok = cwd_changed && found_fallback != lookup_path &&
+                       (found_fallback.empty() ||
+                        GetFileAttributesA(found_fallback.c_str()) != INVALID_FILE_ATTRIBUTES);
+    SetCurrentDirectoryA(old_cwd);
+    report("T1-13", "配置查找本地优先且有系统兜底",
+           lookup_file && cwd_changed && local_ok && fallback_ok,
+           "local=" + std::to_string(local_ok) + " fallback=" + found_fallback);
+
+    report("T1-11", "功能/窗口配置拆分且互不覆盖",
+           load_ok && split_ok && ui_only && reload_ok && func_only,
+           "load=" + std::to_string(load_ok) + " split=" + std::to_string(split_ok) +
+           " ui_only=" + std::to_string(ui_only) + " reload=" + std::to_string(reload_ok) +
+           " func_only=" + std::to_string(func_only) +
+           " in_split=" + std::to_string(cfg.ui.split) +
+           " in_pane=" + std::to_string(cfg.ui.active_pane) +
+           " in_n=" + std::to_string(cfg.ui.pane_channels.size()));
+    report("T1-12", "独立 UI 文件优先于旧统一 ui 段", priority_ok,
+           "load=" + std::to_string(priority_ok) + " split=" + std::to_string(priority.ui.split));
+    return load_ok && split_ok && ui_only && reload_ok && func_only && priority_ok &&
+           local_ok && fallback_ok;
+}
+
 bool run_upsert_preserve() {
     std::string dir = temp_root("upsert_preserve");
     wchar_t old_cwd[MAX_PATH] = L"";
@@ -588,6 +703,7 @@ int selftest_main(const std::vector<std::string>& args) {
     if (mode == "ring" || mode == "all") ok = run_ring() && ok;
     if (mode == "config" || mode == "all") ok = run_config() && ok;
     if (mode == "config" || mode == "all") ok = run_config_migration() && ok;
+    if (mode == "config" || mode == "all") ok = run_config_split() && ok;
     if (mode == "config" || mode == "all") ok = run_upsert_preserve() && ok;
     if (mode == "serial") {
         bool loop = args.size() >= 2 && args[1].rfind("loop:", 0) == 0;

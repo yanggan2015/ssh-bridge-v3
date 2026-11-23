@@ -334,6 +334,27 @@ void load_ssh(const cJSON* o, SSHLinkConfig* s) {
     load_quick_commands(o, &s->quick_commands);
 }
 
+void load_ui_root(const cJSON* root, UiConfig* ui) {
+    const cJSON* u = cJSON_GetObjectItemCaseSensitive(root, "ui");
+    if (!cJSON_IsObject(u)) return;
+    ui->close_to_tray = jbool(u, "close_to_tray", true);
+    ui->start_minimized = jbool(u, "start_minimized", false);
+    ui->scrollback_lines = jint(u, "scrollback_lines", 5000);
+    ui->font_size = jint(u, "font_size", 0);
+    ui->split = jint(u, "split", 1);
+    ui->active_pane = jint(u, "active_pane", 0);
+    ui->pane_channels.clear();
+    const cJSON* panes = cJSON_GetObjectItemCaseSensitive(u, "pane_channels");
+    if (cJSON_IsArray(panes)) {
+        for (const cJSON* it = panes->child; it; it = it->next) {
+            if (cJSON_IsString(it) && it->valuestring)
+                ui->pane_channels.emplace_back(it->valuestring);
+            else
+                ui->pane_channels.emplace_back();
+        }
+    }
+}
+
 void load_root(const cJSON* root, AppConfig* out) {
     load_default(root, &out->def);
     // boards 支持两种写法：3.0 的数组，以及 v2 的 {名字: {...}} 映射（真实测试配置就是后者）
@@ -398,25 +419,7 @@ void load_root(const cJSON* root, AppConfig* out) {
         out->agent.port = jint(agent, "port", 18096);
         out->agent.token = jstr(agent, "token", "");
     }
-    const cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
-    if (cJSON_IsObject(ui)) {
-        out->ui.close_to_tray = jbool(ui, "close_to_tray", true);
-        out->ui.start_minimized = jbool(ui, "start_minimized", false);
-        out->ui.scrollback_lines = jint(ui, "scrollback_lines", 5000);
-        out->ui.font_size = jint(ui, "font_size", 0);
-        out->ui.split = jint(ui, "split", 1);
-        out->ui.active_pane = jint(ui, "active_pane", 0);
-        out->ui.pane_channels.clear();
-        const cJSON* panes = cJSON_GetObjectItemCaseSensitive(ui, "pane_channels");
-        if (cJSON_IsArray(panes)) {
-            for (const cJSON* it = panes->child; it; it = it->next) {
-                if (cJSON_IsString(it) && it->valuestring)
-                    out->ui.pane_channels.emplace_back(it->valuestring);
-                else
-                    out->ui.pane_channels.emplace_back();
-            }
-        }
-    }
+    load_ui_root(root, &out->ui);
 
     const cJSON* tftp = cJSON_GetObjectItemCaseSensitive(root, "tftp");
     if (cJSON_IsObject(tftp)) {
@@ -550,6 +553,22 @@ cJSON* default_to_json(const DefaultConfig& d) {    cJSON* o = cJSON_CreateObjec
     return o;
 }
 
+// 窗口/界面字段单独写；功能配置绝不出现 ui 段
+void save_ui_root(cJSON* root, const AppConfig& cfg) {
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "ui");
+    cJSON* ui = cJSON_AddObjectToObject(root, "ui");
+    if (!ui) return;
+    cJSON_AddBoolToObject(ui, "close_to_tray", cfg.ui.close_to_tray);
+    cJSON_AddBoolToObject(ui, "start_minimized", cfg.ui.start_minimized);
+    cJSON_AddNumberToObject(ui, "scrollback_lines", cfg.ui.scrollback_lines);
+    cJSON_AddNumberToObject(ui, "font_size", cfg.ui.font_size);
+    cJSON_AddNumberToObject(ui, "split", cfg.ui.split);
+    cJSON_AddNumberToObject(ui, "active_pane", cfg.ui.active_pane);
+    cJSON* panes = cJSON_AddArrayToObject(ui, "pane_channels");
+    for (const std::string& name : cfg.ui.pane_channels)
+        cJSON_AddItemToArray(panes, cJSON_CreateString(name.c_str()));
+}
+
 // 把已知字段写进 root（保留 root 里的其它未知键）
 void save_root(cJSON* root, const AppConfig& cfg) {
     cJSON_DeleteItemFromObjectCaseSensitive(root, "default");
@@ -585,28 +604,6 @@ void save_root(cJSON* root, const AppConfig& cfg) {
     cJSON_AddNumberToObject(web, "port", cfg.web.port);
     cJSON_DeleteItemFromObjectCaseSensitive(web, "token");
     cJSON_AddStringToObject(web, "token", cfg.web.token.c_str());
-
-    cJSON* ui = cJSON_GetObjectItemCaseSensitive(root, "ui");
-    if (!cJSON_IsObject(ui)) {
-        cJSON_DeleteItemFromObjectCaseSensitive(root, "ui");
-        ui = cJSON_AddObjectToObject(root, "ui");
-    }
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "close_to_tray");
-    cJSON_AddBoolToObject(ui, "close_to_tray", cfg.ui.close_to_tray);
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "start_minimized");
-    cJSON_AddBoolToObject(ui, "start_minimized", cfg.ui.start_minimized);
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "scrollback_lines");
-    cJSON_AddNumberToObject(ui, "scrollback_lines", cfg.ui.scrollback_lines);
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "font_size");
-    cJSON_AddNumberToObject(ui, "font_size", cfg.ui.font_size);
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "split");
-    cJSON_AddNumberToObject(ui, "split", cfg.ui.split);
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "active_pane");
-    cJSON_AddNumberToObject(ui, "active_pane", cfg.ui.active_pane);
-    cJSON_DeleteItemFromObjectCaseSensitive(ui, "pane_channels");
-    cJSON* panes = cJSON_AddArrayToObject(ui, "pane_channels");
-    for (const std::string& name : cfg.ui.pane_channels)
-        cJSON_AddItemToArray(panes, cJSON_CreateString(name.c_str()));
 
     cJSON* agent = cJSON_GetObjectItemCaseSensitive(root, "agent");
     if (!cJSON_IsObject(agent)) {
@@ -696,7 +693,7 @@ std::string exe_dir() {
 
 std::string find_config_path(const std::string& explicit_path) {
     if (!explicit_path.empty()) return explicit_path;
-    // 顺序：启动目录 → exe 同目录 → 用户目录 → 旧名。
+    // 顺序：显式路径 → 启动目录 → exe 同目录 → 用户目录 → 旧名。
     // 先看启动目录，便于测试/多实例用不同配置；双击绿色版时启动目录里没有配置，自然落到 exe 同目录。
     std::string c = util::join_path(cwd(), "ssh_bridge_config.json");
     if (file_exists(c)) return c;
@@ -713,7 +710,16 @@ std::string find_config_path(const std::string& explicit_path) {
     return std::string();
 }
 
+std::string ui_path_for(const std::string& functional_path) {
+    if (functional_path.empty()) return std::string();
+    return util::join_path(util::dir_of(functional_path), "ssh_bridge_ui.json");
+}
+
 }  // namespace
+
+std::string config_find_path(const std::string& explicit_path) {
+    return find_config_path(explicit_path);
+}
 
 bool config_load(AppConfig& out, const std::string& explicit_path) {
     out = AppConfig();
@@ -729,11 +735,51 @@ bool config_load(AppConfig& out, const std::string& explicit_path) {
     cJSON_Delete(root);
 
     out.abs_path = path;
+    out.ui_abs_path = ui_path_for(path);
     out.project_root = util::dir_of(path);
+
+    // 窗口配置优先：同目录 ssh_bridge_ui.json 覆盖旧功能文件里的 ui 段。
+    // 加载阶段绝不写盘，旧统一配置仅在保存时拆成两份。
+    std::string ui_text;
+    if (read_text(out.ui_abs_path, &ui_text) && !ui_text.empty()) {
+        cJSON* ui_root = cJSON_Parse(ui_text.c_str());
+        if (cJSON_IsObject(ui_root)) load_ui_root(ui_root, &out.ui);
+        cJSON_Delete(ui_root);
+    }
     return true;
 }
 
-bool config_save(const AppConfig& cfg) {
+std::string config_ui_path(const AppConfig& cfg) {
+    if (!cfg.ui_abs_path.empty()) return cfg.ui_abs_path;
+    return ui_path_for(cfg.abs_path);
+}
+
+bool config_save_ui(const AppConfig& cfg) {
+    std::string path = config_ui_path(cfg);
+    if (path.empty()) return false;
+
+    cJSON* root = nullptr;
+    std::string text;
+    if (read_text(path, &text) && !text.empty()) root = cJSON_Parse(text.c_str());
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        root = cJSON_CreateObject();
+    }
+    if (!root) return false;
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "schema");
+    cJSON_AddStringToObject(root, "schema", "ssh-bridge-ui/1");
+    save_ui_root(root, cfg);
+
+    char* dumped = cJSON_Print(root);
+    std::string data = dumped ? dumped : "";
+    if (dumped) cJSON_free(dumped);
+    cJSON_Delete(root);
+    if (data.empty()) return false;
+    data.push_back('\n');
+    return write_text(path, data, nullptr);
+}
+
+bool config_save_functional(const AppConfig& cfg) {
     if (cfg.abs_path.empty()) return false;
 
     cJSON* root = nullptr;
@@ -745,7 +791,11 @@ bool config_save(const AppConfig& cfg) {
         cJSON_Delete(root);
         root = cJSON_CreateObject();
     }
+    if (!root) return false;
     save_root(root, cfg);
+    // 功能配置只保留功能字段；旧统一配置里的 ui/window 迁移到 ui 文件。
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "ui");
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "window");
     char* dumped = cJSON_Print(root);
     std::string data = dumped ? dumped : "";
     if (dumped) cJSON_free(dumped);
@@ -753,6 +803,11 @@ bool config_save(const AppConfig& cfg) {
     if (data.empty()) return false;
     data.push_back('\n');
     return write_text(cfg.abs_path, data, nullptr);
+}
+
+bool config_save(const AppConfig& cfg) {
+    if (!config_save_functional(cfg)) return false;
+    return config_save_ui(cfg);
 }
 
 namespace {
@@ -887,6 +942,7 @@ std::string config_export_json(const AppConfig& cfg) {
     cJSON* root = cJSON_CreateObject();
     if (!root) return "{}";
     save_root(root, cfg);
+    save_ui_root(root, cfg);
     char* text = cJSON_Print(root);
     std::string out = text ? text : "{}";
     cJSON_free(text);

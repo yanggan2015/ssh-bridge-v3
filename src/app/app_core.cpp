@@ -527,7 +527,7 @@ bool AppCore::save_ui_layout(int split, const std::vector<std::string>& pane_cha
     next.ui.pane_channels.resize(static_cast<std::size_t>(next.ui.split));
     int active = std::max(0, std::min(active_pane, next.ui.split - 1));
     next.ui.active_pane = active;
-    if (!config_save(next)) return false;
+    if (!config_save_ui(next)) return false;
     cfg_.ui = next.ui;
     return true;
 }
@@ -567,7 +567,7 @@ bool AppCore::set_active_pane(int index, std::string* err) {
         return false;
     }
     next.ui.active_pane = index;
-    if (!config_save(next)) {
+    if (!config_save_ui(next)) {
         if (err) *err = "save config failed";
         return false;
     }
@@ -797,8 +797,9 @@ bool AppCore::update_config(const std::function<bool(AppConfig&, std::string*)>&
     next.project_root = project_root_;
     if (next.abs_path.empty())
         next.abs_path = util::join_path(project_root_, "ssh_bridge_config.json");
+    if (next.ui_abs_path.empty()) next.ui_abs_path = config_ui_path(next);
     if (!apply(next, err)) return false;
-    if (!config_save(next)) {
+    if (!config_save_functional(next)) {
         if (err) *err = "配置落盘失败：" + next.abs_path;
         return false;
     }
@@ -851,7 +852,8 @@ bool AppCore::patch_config_json(const std::function<bool(cJSON*)>& apply, std::s
     if (!config_parse_json(out, &next, err)) return false;
     next.abs_path = cfg_.abs_path;
     next.project_root = project_root_;
-    if (!config_save(next)) {
+    if (next.ui_abs_path.empty()) next.ui_abs_path = config_ui_path(cfg_);
+    if (!config_save_functional(next)) {
         if (err) *err = "写配置文件失败";
         return false;
     }
@@ -869,9 +871,13 @@ bool AppCore::save_config_json(const std::string& text, std::string* err) {
     }
     AppConfig next;
     if (!config_parse_json(text, &next, err)) return false;
+    bool has_ui = text.find("\"ui\"") != std::string::npos;
+    if (!has_ui) next.ui = cfg_.ui;
     next.abs_path = cfg_.abs_path;
     next.project_root = project_root_;
-    if (!config_save(next)) {
+    next.ui_abs_path = config_ui_path(cfg_);
+    bool saved = has_ui ? config_save(next) : config_save_functional(next);
+    if (!saved) {
         if (err) *err = "写配置文件失败";
         return false;
     }
